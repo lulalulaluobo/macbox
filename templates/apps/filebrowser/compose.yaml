@@ -1,0 +1,12 @@
+services:
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: macnas-filebrowser
+    restart: unless-stopped
+    user: "0:0"
+    ports:
+      - "8082:80"
+    volumes:
+      - /data/appdata/filebrowser/database.db:/database/filebrowser.db
+      - /data/appdata/filebrowser/config.json:/config/settings.json
+      - /data:/srv

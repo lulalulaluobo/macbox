@@ -1,0 +1,15 @@
+{
+  "id": "jellyfin",
+  "name": "Jellyfin",
+  "description": "自由开源的流媒体影音中心，支持电影、电视剧、音乐的集中管理与多端串流播放。",
+  "version": "10.9.11",
+  "icon": "film",
+  "category": "Media",
+  "port": 8096,
+  "webUrl": "http://{{.HostIP}}:8096",
+  "volumes": [
+    {"host": "/data/appdata/jellyfin/config", "container": "/config"},
+    {"host": "/data/appdata/jellyfin/cache", "container": "/cache"},
+    {"host": "/data/media", "container": "/media"}
+  ]
+}

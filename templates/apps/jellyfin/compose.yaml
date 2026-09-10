@@ -1,0 +1,11 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: macnas-jellyfin
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+    volumes:
+      - /data/appdata/jellyfin/config:/config
+      - /data/appdata/jellyfin/cache:/cache
+      - /data/media:/media

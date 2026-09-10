@@ -1,0 +1,112 @@
+# MacNAS Lima VM 配置文件模板
+# 采用 Apple Virtualization.framework (vz) 原生轻量虚拟化
+
+minimumLimaVersion: 2.0.0
+
+vmType: "vz"
+rosetta:
+  enabled: true
+  binfmt: true
+
+base:
+- template:_images/ubuntu-lts
+
+cpus: {{.CPUs}}
+memory: "{{.Memory}}GiB"
+disk: "{{.DiskSize}}GiB"
+
+{{if .DataDiskName}}
+additionalDisks:
+- name: "{{.DataDiskName}}"
+  format: true
+  fsType: "ext4"
+{{end}}
+
+containerd:
+  system: false
+  user: false
+
+provision:
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    export DEBIAN_FRONTEND=noninteractive
+
+    # 1. 安装 Docker Engine 与 Samba
+    if ! command -v docker >/dev/null 2>&1; then
+      curl -fsSL https://get.docker.com | sh
+    fi
+
+    if ! command -v smbd >/dev/null 2>&1; then
+      apt-get update && apt-get install -y samba smbclient
+    fi
+
+    # 2. 准备 /data 挂载与目录结构
+    {{if .DataDiskName}}
+    if [ -d "/mnt/lima-{{.DataDiskName}}" ]; then
+      mkdir -p "/mnt/lima-{{.DataDiskName}}/media" "/mnt/lima-{{.DataDiskName}}/files" "/mnt/lima-{{.DataDiskName}}/appdata"
+      chmod -R 0777 "/mnt/lima-{{.DataDiskName}}" || true
+      ln -sfn "/mnt/lima-{{.DataDiskName}}" /data
+    else
+      mkdir -p /data/media /data/files /data/appdata
+      chmod -R 0777 /data || true
+    fi
+    {{else}}
+    mkdir -p /data/media /data/files /data/appdata
+    chmod -R 0777 /data || true
+    {{end}}
+
+    # 3. 配置 Samba
+    cat <<'EOF' > /etc/samba/smb.conf
+    [global]
+       workgroup = WORKGROUP
+       server string = MacNAS
+       server role = standalone server
+       security = user
+       map to guest = Bad User
+       dns proxy = no
+       log file = /var/log/samba/log.%m
+       max log size = 50
+
+    [MacNAS]
+       comment = MacNAS Data Share
+       path = /data
+       browseable = yes
+       writable = yes
+       read only = no
+       guest ok = yes
+       create mask = 0777
+       directory mask = 0777
+       force user = root
+    EOF
+
+    # 4. 创建默认用户 macnas 并设置密码
+    id -u macnas &>/dev/null || useradd -M -s /usr/sbin/nologin macnas
+    (echo "{{.SambaPassword}}"; echo "{{.SambaPassword}}") | smbpasswd -a macnas -s || true
+    smbpasswd -e macnas || true
+
+    systemctl restart smbd nmbd || true
+    systemctl restart docker || true
+
+probes:
+- script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    command -v docker >/dev/null 2>&1
+    pgrep dockerd >/dev/null 2>&1
+    command -v smbd >/dev/null 2>&1
+  hint: See "/var/log/cloud-init-output.log" in the guest
+
+portForwards:
+- guestSocket: "/var/run/docker.sock"
+  hostSocket: "{{.Dir}}/sock/docker.sock"
+- guestIPMustBeZero: true
+  guestPortRange: [1024, 65535]
+  hostIP: "0.0.0.0"
+  hostPortRange: [1024, 65535]
+{{if ne .SambaPort 0}}
+- guestPort: 445
+  hostIP: "0.0.0.0"
+  hostPort: {{.SambaPort}}
+{{end}}

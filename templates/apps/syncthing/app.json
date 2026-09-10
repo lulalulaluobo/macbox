@@ -1,0 +1,14 @@
+{
+  "id": "syncthing",
+  "name": "Syncthing",
+  "description": "连续、安全且去中心化的文件同步工具，在多台电脑、手机间点对点实时同步文件。",
+  "version": "1.27.12",
+  "icon": "refresh-cw",
+  "category": "Sync",
+  "port": 8384,
+  "webUrl": "http://{{.HostIP}}:8384",
+  "volumes": [
+    {"host": "/data/appdata/syncthing", "container": "/var/syncthing"},
+    {"host": "/data/files", "container": "/var/syncthing/files"}
+  ]
+}

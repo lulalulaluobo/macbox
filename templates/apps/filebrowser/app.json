@@ -1,0 +1,15 @@
+{
+  "id": "filebrowser",
+  "name": "FileBrowser",
+  "description": "现代、轻量、高颜值的 Web 文件管理器，支持在线文件浏览、上传下载、文件分享与预览。",
+  "version": "v2.30.0",
+  "icon": "folder",
+  "category": "Files",
+  "port": 8082,
+  "webUrl": "http://{{.HostIP}}:8082",
+  "volumes": [
+    {"host": "/data/appdata/filebrowser/database.db", "container": "/database/filebrowser.db"},
+    {"host": "/data/appdata/filebrowser/config.json", "container": "/config/settings.json"},
+    {"host": "/data", "container": "/srv"}
+  ]
+}
