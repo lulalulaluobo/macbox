@@ -21,6 +21,7 @@ import { api } from '../api';
 import { AppCard } from './apps/AppCard';
 import { AppConfigInstallModal } from './apps/AppConfigInstallModal';
 import { CustomAppModal } from './apps/CustomAppModal';
+import { ContainerTerminalModal } from './docker/ContainerTerminalModal';
 
 export const Apps: React.FC = () => {
   const [apps, setApps] = useState<AppMetadata[]>([]);
@@ -37,6 +38,7 @@ export const Apps: React.FC = () => {
   // Modals
   const [installingApp, setInstallingApp] = useState<AppMetadata | null>(null);
   const [showCustomModal, setShowCustomModal] = useState(false);
+  const [activeTerminalContainer, setActiveTerminalContainer] = useState<string | null>(null);
 
   // Logs modal
   const [activeLogApp, setActiveLogApp] = useState<string | null>(null);
@@ -131,6 +133,7 @@ export const Apps: React.FC = () => {
     { id: '文件存储', name: '文件存储' },
     { id: '下载工具', name: '下载工具' },
     { id: '网络工具', name: '网络工具' },
+    { id: '系统运维', name: '系统运维' },
     { id: '实用工具', name: '实用工具' },
     { id: '智能家居', name: '智能家居' },
     { id: '我的自定义', name: '我的自定义' },
@@ -404,6 +407,7 @@ export const Apps: React.FC = () => {
               onInstall={(target) => setInstallingApp(target)}
               onAction={handleAppAction}
               onViewLogs={handleViewLogs}
+              onOpenTerminal={(cName) => setActiveTerminalContainer(cName)}
               onDeleteCustom={handleDeleteCustomApp}
             />
           ))}
@@ -481,6 +485,14 @@ export const Apps: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Container Interactive Terminal Modal */}
+      {activeTerminalContainer && (
+        <ContainerTerminalModal
+          containerName={activeTerminalContainer}
+          onClose={() => setActiveTerminalContainer(null)}
+        />
       )}
     </div>
   );

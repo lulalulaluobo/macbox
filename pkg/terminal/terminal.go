@@ -40,7 +40,14 @@ func HandleTerminalWS(w http.ResponseWriter, r *http.Request, instanceName strin
 		instanceName = "macnas"
 	}
 
-	cmd := exec.Command("limactl", "shell", instanceName)
+	container := r.URL.Query().Get("container")
+	var cmd *exec.Cmd
+	if container != "" {
+		// Connect to container's interactive shell, fallback bash -> sh
+		cmd = exec.Command("limactl", "shell", instanceName, "bash", "-c", fmt.Sprintf("docker exec -it %s sh -c 'bash || sh'", container))
+	} else {
+		cmd = exec.Command("limactl", "shell", instanceName)
+	}
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
 	ptmx, err := pty.Start(cmd)

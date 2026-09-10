@@ -85,6 +85,20 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 		appMap[meta.ID] = meta
 	}
 
+	// Batch check which app directories have compose.yaml in one single query
+	existingConfigs := make(map[string]bool)
+	if out, err := m.vmMgr.Exec(ctx, "bash", "-c", "find /data/appdata -maxdepth 2 -name compose.yaml 2>/dev/null"); err == nil {
+		lines := strings.Split(out, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			parts := strings.Split(line, "/")
+			if len(parts) >= 4 && parts[len(parts)-1] == "compose.yaml" {
+				appId := parts[len(parts)-2]
+				existingConfigs[appId] = true
+			}
+		}
+	}
+
 	var results []AppMetadata
 	for id, appMeta := range appMap {
 		// Fill WebURL
@@ -109,10 +123,8 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 				appMeta.WebURL = fmt.Sprintf("http://%s:%d", hostIP, appMeta.Port)
 			}
 		} else {
-			// Check if compose file exists inside VM
-			checkCmd := fmt.Sprintf("[ -f /data/appdata/%s/compose.yaml ] && echo 'exists'", id)
-			out, _ := m.vmMgr.Exec(ctx, "bash", "-c", checkCmd)
-			if strings.Contains(out, "exists") {
+			// Fast O(1) memory lookup from single batch query
+			if existingConfigs[id] {
 				appMeta.Installed = true
 				appMeta.Status = "stopped"
 			} else {

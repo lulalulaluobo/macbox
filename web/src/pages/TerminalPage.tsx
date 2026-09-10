@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import { FileItem } from '../types';
+import { TerminalInputBar } from './terminal/TerminalInputBar';
 
 export const TerminalPage: React.FC = () => {
   // Terminal State
@@ -618,7 +619,17 @@ export const TerminalPage: React.FC = () => {
           {/* Terminal Canvas Container */}
           <div
             ref={terminalRef}
-            className={`flex-1 p-3 bg-[#090d16] ${fullscreen ? 'h-full' : 'h-[520px]'} overflow-hidden font-mono`}
+            className={`flex-1 p-3 bg-[#090d16] ${fullscreen ? 'h-full' : 'h-[440px]'} overflow-hidden font-mono`}
+          />
+
+          {/* Bottom Text Input & Action Keys Helper Bar */}
+          <TerminalInputBar
+            onSendRaw={(data) => {
+              if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                wsRef.current.send(data);
+              }
+            }}
+            disabled={!connected}
           />
         </div>
       </div>

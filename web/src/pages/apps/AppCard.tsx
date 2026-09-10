@@ -28,6 +28,7 @@ interface AppCardProps {
   onInstall: (app: AppMetadata) => void;
   onAction: (id: string, action: 'start' | 'stop' | 'restart' | 'uninstall') => void;
   onViewLogs: (id: string) => void;
+  onOpenTerminal?: (containerName: string) => void;
   onDeleteCustom?: (id: string) => void;
 }
 
@@ -37,6 +38,7 @@ export const AppCard: React.FC<AppCardProps> = ({
   onInstall,
   onAction,
   onViewLogs,
+  onOpenTerminal,
   onDeleteCustom,
 }) => {
   const isInstalled = app.installed;
@@ -308,6 +310,17 @@ export const AppCard: React.FC<AppCardProps> = ({
             >
               <Terminal className="w-3.5 h-3.5 text-sky-400" />
             </button>
+
+            {/* Container Interactive Terminal */}
+            {isRunning && onOpenTerminal && (
+              <button
+                onClick={() => onOpenTerminal(`macnas-${app.id}`)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-teal-950/60 text-slate-300 hover:text-teal-300 border border-slate-700 text-xs font-medium transition"
+                title="进入应用容器内部终端 (docker exec)"
+              >
+                <Terminal className="w-3.5 h-3.5 text-teal-400" />
+              </button>
+            )}
 
             {/* Uninstall */}
             <button

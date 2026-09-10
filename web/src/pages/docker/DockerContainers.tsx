@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { ContainerInfo } from '../../types';
 import { api } from '../../api';
+import { ContainerTerminalModal } from './ContainerTerminalModal';
 
 export const DockerContainers: React.FC = () => {
   const [containers, setContainers] = useState<ContainerInfo[]>([]);
@@ -25,6 +26,9 @@ export const DockerContainers: React.FC = () => {
   const [filter, setFilter] = useState<'all' | 'running' | 'stopped'>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Terminal Modal
+  const [activeTerminalContainer, setActiveTerminalContainer] = useState<string | null>(null);
 
   // Logs Modal
   const [activeLogContainer, setActiveLogContainer] = useState<string | null>(null);
@@ -326,10 +330,22 @@ export const DockerContainers: React.FC = () => {
                   <button
                     onClick={() => handleOpenLogs(container.id)}
                     className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 text-xs font-semibold transition"
+                    title="查看容器日志"
                   >
                     <Terminal className="w-3.5 h-3.5" />
                     <span>日志</span>
                   </button>
+
+                  {isRunning && (
+                    <button
+                      onClick={() => setActiveTerminalContainer(container.name || container.id)}
+                      className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 text-teal-300 border border-teal-500/30 text-xs font-semibold transition shadow-sm"
+                      title="进入容器内部终端 (docker exec)"
+                    >
+                      <Terminal className="w-3.5 h-3.5" />
+                      <span>终端</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => setDeleteModalContainer(container)}
@@ -440,6 +456,14 @@ export const DockerContainers: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Container Interactive Terminal Modal */}
+      {activeTerminalContainer && (
+        <ContainerTerminalModal
+          containerName={activeTerminalContainer}
+          onClose={() => setActiveTerminalContainer(null)}
+        />
       )}
     </div>
   );
