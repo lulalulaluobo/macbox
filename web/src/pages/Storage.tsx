@@ -259,14 +259,56 @@ export const Storage: React.FC = () => {
         </div>
       </div>
 
-      {/* Section 2: Physical & External Disks List */}
+      {/* Section 2: NAS Storage Physical Mapping Architecture */}
+      <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-3.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <Layers className="w-4 h-4 text-sky-400" />
+            <h3 className="text-sm font-bold text-white">NAS 存储物理映射拓扑 (宿主机 ↔ 虚拟机 ↔ 共享)</h3>
+          </div>
+          <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/20">
+            {isExternalActive ? '外接存储镜像模式' : '内置隔离镜像模式'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 text-xs">
+          <div className="p-3.5 rounded-xl bg-slate-800/40 border border-slate-800 space-y-1.5">
+            <span className="text-slate-400 font-bold block">💻 Mac 宿主机实际文件路径</span>
+            <p className="font-mono text-sky-300 break-all select-all font-semibold text-[11px]">
+              {dataPath || '~/.lima/_disks/macnas-data/datadisk'}
+            </p>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              数据保存在独立虚拟磁盘中，绝对不修改或抹除您磁盘上原有的任何照片、文档与 macOS 系统数据。
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-800/40 border border-slate-800 space-y-1.5">
+            <span className="text-slate-400 font-bold block">🐧 Linux 虚拟机内部挂载点</span>
+            <p className="font-mono text-emerald-300 font-bold text-sm">/data</p>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              底层格式化为原生 ext4 高速文件系统，彻底规避网络共享文件锁导致 Docker 数据库崩溃的隐患。
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-800/40 border border-slate-800 space-y-1.5">
+            <span className="text-slate-400 font-bold block">🐳 Docker 容器各应用路径映射</span>
+            <div className="space-y-0.5 font-mono text-[11px] text-slate-300">
+              <div>• 影音媒体: <span className="text-sky-300">/data/media</span> (Jellyfin)</div>
+              <div>• 离线下载: <span className="text-sky-300">/data/downloads</span> (qBittorrent)</div>
+              <div>• 全盘文件: <span className="text-sky-300">/data</span> (FileBrowser / Alist)</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 3: Physical Disks List */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-bold text-white">识别到的磁盘列表</h3>
-            <p className="text-xs text-slate-400 mt-0.5">第一版支持选择一个磁盘作为 NAS 数据盘。推荐使用外接 NVMe/SATA 高速固态硬盘。</p>
+            <h3 className="text-lg font-bold text-white">识别到的物理磁盘列表</h3>
+            <p className="text-xs text-slate-400 mt-0.5">自动识别 APFS 卷与真实挂载点。推荐使用高速外接固态硬盘作为 NAS 数据盘。</p>
           </div>
-          <span className="text-xs text-slate-400 font-mono">已扫描 {disks.length} 个设备</span>
+          <span className="text-xs text-slate-400 font-mono">已识别 {disks.length} 个物理存储设备</span>
         </div>
 
         {disks.length === 0 && !loading ? (
@@ -310,7 +352,9 @@ export const Storage: React.FC = () => {
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-slate-400 font-mono mt-0.5">{disk.deviceNode} · {disk.fileSystem || 'RAW'}</p>
+                          <p className="text-xs text-slate-400 font-mono mt-0.5">
+                            {disk.volumeName ? `${disk.volumeName} · ` : ''}{disk.deviceNode} · {disk.fileSystem || 'RAW'}
+                          </p>
                         </div>
                       </div>
 
@@ -326,7 +370,9 @@ export const Storage: React.FC = () => {
                     <div className="mt-4 space-y-1.5">
                       <div className="flex justify-between text-xs text-slate-400">
                         <span>总容量: <strong className="text-white">{disk.totalSizeString}</strong></span>
-                        <span>{disk.usedPercent > 0 ? `${disk.usedPercent.toFixed(1)}% 已使用` : '就绪'}</span>
+                        <span>
+                          {disk.usedSpaceString ? `已用 ${disk.usedSpaceString} / 剩余 ${disk.freeSpaceString}` : (disk.usedPercent > 0 ? `${disk.usedPercent.toFixed(1)}% 已使用` : '就绪')}
+                        </span>
                       </div>
                       <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
                         <div
@@ -335,6 +381,13 @@ export const Storage: React.FC = () => {
                         />
                       </div>
                     </div>
+
+                    {disk.mountPoint === '/System/Volumes/Data' && (
+                      <div className="mt-2.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300/90 flex items-center space-x-1.5">
+                        <span>💡</span>
+                        <span>当前 Mac 的主引导系统与数据盘（包含您的现有系统与个人文件，100% 安全共存）</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}

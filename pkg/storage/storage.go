@@ -59,8 +59,187 @@ type StorageOverview struct {
 	UsedPercent      float64       `json:"usedPercent"`
 }
 
-// ListDisks scans all physical and external disks on macOS
+// ListDisks scans all physical disks and accurately maps APFS containers and volumes
 func ListDisks(selectedDiskIdentifier string) ([]DiskInfo, error) {
+	disks, err := listDisksAPFS(selectedDiskIdentifier)
+	if err == nil && len(disks) > 0 {
+		return disks, nil
+	}
+	// Fallback to basic scanning if plist command fails
+	return listDisksFallback(selectedDiskIdentifier)
+}
+
+type diskutilListOutput struct {
+	AllDisksAndPartitions []diskPartitionEntry `json:"AllDisksAndPartitions"`
+}
+
+type diskPartitionEntry struct {
+	DeviceIdentifier   string              `json:"DeviceIdentifier"`
+	Content            string              `json:"Content"`
+	Size               uint64              `json:"Size"`
+	Partitions         []diskSubPartition  `json:"Partitions"`
+	APFSPhysicalStores []apfsPhysicalStore `json:"APFSPhysicalStores"`
+	APFSVolumes        []apfsVolumeEntry   `json:"APFSVolumes"`
+}
+
+type diskSubPartition struct {
+	DeviceIdentifier string `json:"DeviceIdentifier"`
+	Content          string `json:"Content"`
+	Size             uint64 `json:"Size"`
+}
+
+type apfsPhysicalStore struct {
+	DeviceIdentifier string `json:"DeviceIdentifier"`
+}
+
+type apfsVolumeEntry struct {
+	DeviceIdentifier string `json:"DeviceIdentifier"`
+	VolumeName       string `json:"VolumeName"`
+	MountPoint       string `json:"MountPoint"`
+	CapacityInUse    uint64 `json:"CapacityInUse"`
+	Size             uint64 `json:"Size"`
+	OSInternal       bool   `json:"OSInternal"`
+}
+
+type diskutilInfoOutput struct {
+	DeviceIdentifier  string `json:"DeviceIdentifier"`
+	MediaName         string `json:"MediaName"`
+	SolidState        bool   `json:"SolidState"`
+	Internal          bool   `json:"Internal"`
+	VirtualOrPhysical string `json:"VirtualOrPhysical"`
+	WholeDisk         bool   `json:"WholeDisk"`
+	TotalSize         uint64 `json:"TotalSize"`
+	MountPoint        string `json:"MountPoint"`
+	VolumeName        string `json:"VolumeName"`
+	FilesystemName    string `json:"FilesystemName"`
+}
+
+func listDisksAPFS(selectedDiskIdentifier string) ([]DiskInfo, error) {
+	cmdStr := "diskutil list -plist | plutil -convert json -r -o - -- -"
+	cmd := exec.Command("sh", "-c", cmdStr)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var listData diskutilListOutput
+	if err := json.Unmarshal(output, &listData); err != nil {
+		return nil, err
+	}
+
+	// Map partition identifier to APFS volumes
+	partToVolumes := make(map[string][]apfsVolumeEntry)
+	for _, p := range listData.AllDisksAndPartitions {
+		if len(p.APFSPhysicalStores) > 0 && len(p.APFSVolumes) > 0 {
+			for _, store := range p.APFSPhysicalStores {
+				partToVolumes[store.DeviceIdentifier] = p.APFSVolumes
+			}
+		}
+	}
+
+	systemRoles := map[string]bool{
+		"iSCPreboot": true,
+		"Preboot":    true,
+		"Recovery":   true,
+		"VM":         true,
+		"Update":     true,
+		"xART":       true,
+		"Hardware":   true,
+	}
+
+	var results []DiskInfo
+	for _, p := range listData.AllDisksAndPartitions {
+		dev := p.DeviceIdentifier
+		if dev == "" {
+			continue
+		}
+
+		infoCmdStr := fmt.Sprintf("diskutil info -plist %s | plutil -convert json -r -o - -- -", dev)
+		infoCmd := exec.Command("sh", "-c", infoCmdStr)
+		infoOut, err := infoCmd.Output()
+		if err != nil {
+			continue
+		}
+
+		var inf diskutilInfoOutput
+		if err := json.Unmarshal(infoOut, &inf); err != nil {
+			continue
+		}
+
+		// Filter out virtual loopbacks, DMGs, or non-whole disks
+		if inf.MediaName == "Disk Image" || inf.VirtualOrPhysical == "Virtual" || !inf.WholeDisk {
+			continue
+		}
+
+		disk := DiskInfo{
+			DeviceIdentifier: dev,
+			DeviceNode:       "/dev/" + dev,
+			Name:             inf.MediaName,
+			TotalSize:        inf.TotalSize,
+			TotalSizeString:  formatBytes(inf.TotalSize),
+			IsExternal:       !inf.Internal,
+			IsSSD:            inf.SolidState,
+			IsWholeDisk:      inf.WholeDisk,
+			FileSystem:       "RAW",
+		}
+
+		// Inspect associated APFS volumes for this physical disk
+		var mainVol *apfsVolumeEntry
+		for _, part := range p.Partitions {
+			if vols, ok := partToVolumes[part.DeviceIdentifier]; ok {
+				for _, v := range vols {
+					if systemRoles[v.VolumeName] {
+						continue
+					}
+					if v.MountPoint != "" {
+						if strings.Contains(v.MountPoint, "/System/Volumes/Data") {
+							copyV := v
+							mainVol = &copyV
+							break
+						} else if mainVol == nil {
+							copyV := v
+							mainVol = &copyV
+						}
+					}
+				}
+			}
+			if mainVol != nil && strings.Contains(mainVol.MountPoint, "/System/Volumes/Data") {
+				break
+			}
+		}
+
+		if mainVol != nil {
+			disk.VolumeName = mainVol.VolumeName
+			disk.MountPoint = mainVol.MountPoint
+			disk.Mounted = true
+			disk.FileSystem = "APFS"
+			disk.UsedSpace = mainVol.CapacityInUse
+			disk.UsedSpaceString = formatBytes(mainVol.CapacityInUse)
+			if disk.TotalSize >= mainVol.CapacityInUse {
+				disk.FreeSpace = disk.TotalSize - mainVol.CapacityInUse
+				disk.FreeSpaceString = formatBytes(disk.FreeSpace)
+				disk.UsedPercent = float64(mainVol.CapacityInUse) / float64(disk.TotalSize) * 100
+			}
+		} else if inf.MountPoint != "" {
+			disk.MountPoint = inf.MountPoint
+			disk.Mounted = true
+			disk.VolumeName = inf.VolumeName
+			if inf.FilesystemName != "" {
+				disk.FileSystem = inf.FilesystemName
+			}
+		}
+
+		if selectedDiskIdentifier != "" && (disk.DeviceIdentifier == selectedDiskIdentifier || disk.DeviceNode == selectedDiskIdentifier) {
+			disk.IsSelected = true
+		}
+
+		results = append(results, disk)
+	}
+
+	return results, nil
+}
+
+func listDisksFallback(selectedDiskIdentifier string) ([]DiskInfo, error) {
 	cmd := exec.Command("diskutil", "list")
 	output, err := cmd.Output()
 	if err != nil {
@@ -81,10 +260,7 @@ func ListDisks(selectedDiskIdentifier string) ([]DiskInfo, error) {
 	var results []DiskInfo
 	for diskID := range diskMap {
 		info, err := inspectDisk(diskID)
-		if err != nil {
-			continue
-		}
-		if info.TotalSize == 0 {
+		if err != nil || info.TotalSize == 0 {
 			continue
 		}
 		if selectedDiskIdentifier != "" && (info.DeviceIdentifier == selectedDiskIdentifier || info.DeviceNode == selectedDiskIdentifier) {
@@ -251,7 +427,20 @@ func BindExternalDisk(cfg *config.Config, diskID, mountPoint string, sizeGB int)
 		sizeGB = 100 // Default to 100 GiB sparse image
 	}
 
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
 	macnasDir := filepath.Join(mountPoint, "MacNAS")
+	// If mount point is root or system data drive, place inside user home on that drive
+	if mountPoint == "/System/Volumes/Data" || mountPoint == "/" || strings.HasPrefix(home, mountPoint) {
+		macnasDir = filepath.Join(home, "MacNAS")
+	} else {
+		if err := os.MkdirAll(macnasDir, 0755); err != nil {
+			macnasDir = filepath.Join(home, "MacNAS")
+		}
+	}
 	if err := os.MkdirAll(macnasDir, 0755); err != nil {
 		return "", fmt.Errorf("无法在外接盘创建 MacNAS 目录: %w", err)
 	}
@@ -266,10 +455,6 @@ func BindExternalDisk(cfg *config.Config, diskID, mountPoint string, sizeGB int)
 	}
 
 	// Link into Lima disk directory: ~/.lima/_disks/macnas-data/datadisk
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
 	limaDiskDir := filepath.Join(home, ".lima", "_disks", "macnas-data")
 	if err := os.MkdirAll(limaDiskDir, 0700); err != nil {
 		return "", fmt.Errorf("无法创建 Lima 磁盘目录: %w", err)

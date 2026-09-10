@@ -15,7 +15,8 @@ func TestListDisks(t *testing.T) {
 	} else {
 		t.Logf("Found %d disks", len(disks))
 		for _, d := range disks {
-			t.Logf("Disk: %s (%s) size: %s external: %v", d.Name, d.DeviceIdentifier, d.TotalSizeString, d.IsExternal)
+			t.Logf("Disk: %s (%s) size: %s external: %v, vol: %s, mount: %s, fs: %s, used: %s, free: %s, percent: %.1f%%",
+				d.Name, d.DeviceIdentifier, d.TotalSizeString, d.IsExternal, d.VolumeName, d.MountPoint, d.FileSystem, d.UsedSpaceString, d.FreeSpaceString, d.UsedPercent)
 		}
 	}
 }
