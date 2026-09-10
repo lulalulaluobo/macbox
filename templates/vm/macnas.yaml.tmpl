@@ -10,8 +10,11 @@ vmOpts:
       enabled: true
       binfmt: true
 
-base:
-- template:_images/ubuntu-lts
+images:
+- location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+  arch: "aarch64"
+- location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+  arch: "x86_64"
 
 cpus: {{.CPUs}}
 memory: "{{.Memory}}GiB"
@@ -22,6 +25,18 @@ additionalDisks:
 - name: "{{.DataDiskName}}"
   format: true
   fsType: "ext4"
+{{end}}
+
+mountType: "virtiofs"
+{{if .LocalMounts}}
+mounts:
+{{range .LocalMounts}}
+{{if .Enabled}}
+- location: "{{.HostPath}}"
+  mountPoint: "/mnt/macnas-mounts/{{.ID}}"
+  writable: {{.Writable}}
+{{end}}
+{{end}}
 {{end}}
 
 containerd:
@@ -47,16 +62,27 @@ provision:
     # 2. 准备 /data 挂载与目录结构
     {{if .DataDiskName}}
     if [ -d "/mnt/lima-{{.DataDiskName}}" ]; then
-      mkdir -p "/mnt/lima-{{.DataDiskName}}/media" "/mnt/lima-{{.DataDiskName}}/files" "/mnt/lima-{{.DataDiskName}}/appdata"
+      mkdir -p "/mnt/lima-{{.DataDiskName}}/media" "/mnt/lima-{{.DataDiskName}}/files" "/mnt/lima-{{.DataDiskName}}/downloads" "/mnt/lima-{{.DataDiskName}}/photos" "/mnt/lima-{{.DataDiskName}}/appdata"
       chmod -R 0777 "/mnt/lima-{{.DataDiskName}}" || true
       ln -sfn "/mnt/lima-{{.DataDiskName}}" /data
     else
-      mkdir -p /data/media /data/files /data/appdata
+      mkdir -p /data/media /data/files /data/downloads /data/photos /data/appdata
       chmod -R 0777 /data || true
     fi
     {{else}}
-    mkdir -p /data/media /data/files /data/appdata
+    mkdir -p /data/media /data/files /data/downloads /data/photos /data/appdata
     chmod -R 0777 /data || true
+    {{end}}
+
+    # 3. 挂载 VirtioFS 本地直通目录至 /data (使用 Linux bind mount 保证 Docker 容器无缝直接访问)
+    mkdir -p /mnt/macnas-mounts
+    {{range .LocalMounts}}
+    {{if .Enabled}}
+    if [ -d "/mnt/macnas-mounts/{{.ID}}" ]; then
+      mkdir -p "/data/{{.GuestTarget}}"
+      mountpoint -q "/data/{{.GuestTarget}}" || mount --bind "/mnt/macnas-mounts/{{.ID}}" "/data/{{.GuestTarget}}"
+    fi
+    {{end}}
     {{end}}
 
     # 3. 配置 Samba

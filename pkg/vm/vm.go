@@ -196,6 +196,7 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		DataDiskName  string
 		SambaPassword string
 		SambaPort     int
+		LocalMounts   []config.LocalMount
 	}{
 		CPUs:          m.cfg.VM.CPUs,
 		Memory:        m.cfg.VM.Memory,
@@ -203,6 +204,7 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		DataDiskName:  m.cfg.VM.DataDiskName,
 		SambaPassword: m.cfg.Samba.Password,
 		SambaPort:     m.cfg.Samba.Port,
+		LocalMounts:   m.cfg.Storage.LocalMounts,
 	}
 
 	var buf bytes.Buffer
@@ -214,7 +216,20 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		return err
 	}
 
-	return os.WriteFile(outputPath, buf.Bytes(), 0644)
+	if err := os.WriteFile(outputPath, buf.Bytes(), 0644); err != nil {
+		return err
+	}
+
+	// Also sync to ~/.lima/<instance>/lima.yaml if instance directory exists
+	home, err := os.UserHomeDir()
+	if err == nil {
+		instanceDir := filepath.Join(home, ".lima", m.instanceName)
+		if _, err := os.Stat(instanceDir); err == nil {
+			_ = os.WriteFile(filepath.Join(instanceDir, "lima.yaml"), buf.Bytes(), 0644)
+		}
+	}
+
+	return nil
 }
 
 // Start launches the Lima VM
@@ -238,7 +253,19 @@ func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 		return nil
 	}
 
-	if status.Status == "Stopped" {
+	cfgDir, _ := config.ConfigDir()
+	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
+	tmplPath := filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	_ = m.GenerateConfigFile(tmplPath, renderedYAML)
+
+	home, _ := os.UserHomeDir()
+	instanceDir := filepath.Join(home, ".lima", m.instanceName)
+	instanceExists := false
+	if _, err := os.Stat(instanceDir); err == nil {
+		instanceExists = true
+	}
+
+	if instanceExists || status.Status != "NotCreated" {
 		cmd := exec.CommandContext(ctx, "limactl", "start", m.instanceName, "--tty=false")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -250,9 +277,9 @@ func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 	// Not created yet -> Create and Start
 	_ = m.EnsureDataDisk("50GiB")
 
-	cfgDir, _ := config.ConfigDir()
-	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
-	tmplPath := filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	cfgDir, _ = config.ConfigDir()
+	renderedYAML = filepath.Join(cfgDir, "macnas.yaml")
+	tmplPath = filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
 
 	if err := m.GenerateConfigFile(tmplPath, renderedYAML); err != nil {
 		return err

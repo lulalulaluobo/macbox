@@ -28,10 +28,22 @@ type VMConfig struct {
 	DataDiskName string `yaml:"dataDiskName"`
 }
 
+type LocalMount struct {
+	ID          string `json:"id" yaml:"id"`
+	Name        string `json:"name" yaml:"name"`
+	HostPath    string `json:"hostPath" yaml:"hostPath"`
+	GuestTarget string `json:"guestTarget" yaml:"guestTarget"` // Target directory under /data
+	Writable    bool   `json:"writable" yaml:"writable"`       // Read-only by default
+	Enabled     bool   `json:"enabled" yaml:"enabled"`
+	Category    string `json:"category" yaml:"category"`       // media, downloads, pictures, custom
+	Description string `json:"description" yaml:"description"`
+}
+
 type StorageConfig struct {
-	SelectedDisk string `yaml:"selectedDisk"` // e.g. /dev/disk4
-	MountPoint   string `yaml:"mountPoint"`   // Host mount point if any
-	DataPath     string `yaml:"dataPath"`     // Host path holding data or managed disk
+	SelectedDisk string       `yaml:"selectedDisk"` // e.g. /dev/disk4
+	MountPoint   string       `yaml:"mountPoint"`   // Host mount point if any
+	DataPath     string       `yaml:"dataPath"`     // Host path holding data or managed disk
+	LocalMounts  []LocalMount `yaml:"localMounts"`  // VirtioFS direct folder mounts from Mac
 }
 
 type SambaConfig struct {
@@ -108,6 +120,36 @@ func LoadConfig() (*Config, error) {
 	cfg := DefaultConfig()
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return DefaultConfig(), err
+	}
+	if cfg.Port <= 0 {
+		cfg.Port = 19808
+	}
+	if cfg.VM.Name == "" {
+		cfg.VM.Name = "macnas"
+	}
+	if cfg.VM.CPUs <= 0 {
+		cfg.VM.CPUs = 2
+	}
+	if cfg.VM.Memory <= 0 {
+		cfg.VM.Memory = 4
+	}
+	if cfg.VM.DiskSize <= 0 {
+		cfg.VM.DiskSize = 20
+	}
+	if cfg.VM.DataDiskName == "" {
+		cfg.VM.DataDiskName = "macnas-data"
+	}
+	if cfg.Samba.Port <= 0 {
+		cfg.Samba.Port = 4455
+	}
+	if cfg.Samba.ShareName == "" {
+		cfg.Samba.ShareName = "MacNAS"
+	}
+	if cfg.Samba.User == "" {
+		cfg.Samba.User = "macnas"
+	}
+	if cfg.Samba.Password == "" {
+		cfg.Samba.Password = "macnas123"
 	}
 	return cfg, nil
 }

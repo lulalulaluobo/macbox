@@ -95,6 +95,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/storage/select", s.handleStorageSelect)
 	s.mux.HandleFunc("POST /api/storage/bind", s.handleStorageBind)
 	s.mux.HandleFunc("POST /api/storage/unbind", s.handleStorageUnbind)
+	s.mux.HandleFunc("GET /api/storage/mounts", s.handleStorageMountsList)
+	s.mux.HandleFunc("POST /api/storage/mounts", s.handleStorageMountsAdd)
+	s.mux.HandleFunc("POST /api/storage/mounts/{id}/toggle", s.handleStorageMountsToggle)
+	s.mux.HandleFunc("DELETE /api/storage/mounts/{id}", s.handleStorageMountsDelete)
 
 	// 4. Docker
 	s.mux.HandleFunc("GET /api/docker/containers", s.handleDockerContainers)
@@ -341,6 +345,76 @@ func (s *Server) handleStorageUnbind(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
 		"message":         "已解除外接盘绑定，切回内置虚拟数据盘",
+		"requiresRestart": true,
+	})
+}
+
+func (s *Server) handleStorageMountsList(w http.ResponseWriter, r *http.Request) {
+	configured, recommended := storage.ListLocalMounts(s.cfg)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"mounts":      configured,
+		"recommended": recommended,
+	})
+}
+
+func (s *Server) handleStorageMountsAdd(w http.ResponseWriter, r *http.Request) {
+	var mount config.LocalMount
+	if err := json.NewDecoder(r.Body).Decode(&mount); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := storage.AddOrUpdateLocalMount(s.cfg, mount); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	configured, recommended := storage.ListLocalMounts(s.cfg)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         fmt.Sprintf("已成功配置直通目录: %s", mount.Name),
+		"mounts":          configured,
+		"recommended":     recommended,
+		"requiresRestart": true,
+	})
+}
+
+func (s *Server) handleStorageMountsToggle(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	enabled, err := storage.ToggleLocalMount(s.cfg, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	configured, recommended := storage.ListLocalMounts(s.cfg)
+	msg := "已开启该直通目录，重启虚拟机后生效"
+	if !enabled {
+		msg = "已关闭该直通目录，重启虚拟机后生效"
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         msg,
+		"enabled":         enabled,
+		"mounts":          configured,
+		"recommended":     recommended,
+		"requiresRestart": true,
+	})
+}
+
+func (s *Server) handleStorageMountsDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := storage.DeleteLocalMount(s.cfg, id); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	configured, recommended := storage.ListLocalMounts(s.cfg)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         "已删除该直通目录配置",
+		"mounts":          configured,
+		"recommended":     recommended,
 		"requiresRestart": true,
 	})
 }

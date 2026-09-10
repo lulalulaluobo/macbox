@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { HardDrive, Check, Copy, KeyRound, CheckCircle2, AlertCircle, RefreshCw, FolderLock, RotateCw, Layers, X } from 'lucide-react';
-import { DiskInfo, ManagedDisk, SambaStatus } from '../types';
+import {
+  HardDrive, Check, Copy, KeyRound, CheckCircle2, AlertCircle, RefreshCw, FolderLock, RotateCw,
+  Layers, X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, ShieldCheck, Plus, ToggleLeft, ToggleRight, Folder
+} from 'lucide-react';
+import { DiskInfo, ManagedDisk, SambaStatus, LocalMount } from '../types';
 import { api } from '../api';
 
 export const Storage: React.FC = () => {
@@ -12,6 +15,16 @@ export const Storage: React.FC = () => {
   const [samba, setSamba] = useState<SambaStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+
+  // Local Mounts (VirtioFS)
+  const [localMounts, setLocalMounts] = useState<LocalMount[]>([]);
+  const [recommendedMounts, setRecommendedMounts] = useState<LocalMount[]>([]);
+  const [showAddMountModal, setShowAddMountModal] = useState(false);
+  const [newMountPath, setNewMountPath] = useState('');
+  const [newMountName, setNewMountName] = useState('');
+  const [newMountCategory, setNewMountCategory] = useState<'media' | 'downloads' | 'pictures' | 'custom'>('media');
+  const [newMountWritable, setNewMountWritable] = useState(false);
+  const [mountsLoading, setMountsLoading] = useState(false);
 
   // Password Modal
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -31,9 +44,10 @@ export const Storage: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [storageRes, sambaRes] = await Promise.all([
+      const [storageRes, sambaRes, mountsRes] = await Promise.all([
         api.getDisks(),
         api.getSambaStatus(),
+        api.getLocalMounts().catch(() => ({ mounts: [], recommended: [] })),
       ]);
       setDisks(storageRes.disks || []);
       setManagedDisks(storageRes.managedDisks || []);
@@ -41,6 +55,8 @@ export const Storage: React.FC = () => {
       setIsExternalActive(storageRes.isExternalActive || false);
       setDataPath(storageRes.dataPath || '');
       setSamba(sambaRes);
+      setLocalMounts(mountsRes.mounts || []);
+      setRecommendedMounts(mountsRes.recommended || []);
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `加载存储数据失败: ${err.message}` });
     } finally {
@@ -102,6 +118,78 @@ export const Storage: React.FC = () => {
       loadData();
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `解除绑定失败: ${err.message}` });
+    }
+  };
+
+  const handleQuickAddMount = async (rec: LocalMount) => {
+    try {
+      const res = await api.addLocalMount({
+        ...rec,
+        enabled: true,
+      });
+      setLocalMounts(res.mounts);
+      setRecommendedMounts(res.recommended);
+      setRestartPrompt(true);
+      setAlertMsg({ type: 'success', text: `已开启直通挂载「${rec.name}」，请点击上方黄色按钮重启 VM 生效！` });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `开启直通失败: ${err.message}` });
+    }
+  };
+
+  const handleToggleMount = async (id: string) => {
+    try {
+      const res = await api.toggleLocalMount(id);
+      setLocalMounts(res.mounts);
+      setRecommendedMounts(res.recommended);
+      setRestartPrompt(true);
+      setAlertMsg({ type: 'success', text: res.message });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `操作失败: ${err.message}` });
+    }
+  };
+
+  const handleDeleteMount = async (id: string, name: string) => {
+    if (!confirm(`确定要移除「${name}」的直通挂载配置吗？（您的 Mac 本地原始文件不会受到任何影响）`)) return;
+    try {
+      const res = await api.deleteLocalMount(id);
+      setLocalMounts(res.mounts);
+      setRecommendedMounts(res.recommended);
+      setRestartPrompt(true);
+      setAlertMsg({ type: 'success', text: res.message });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `删除失败: ${err.message}` });
+    }
+  };
+
+  const handleAddCustomMount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMountPath.trim()) return;
+    setMountsLoading(true);
+    try {
+      let targetSub = 'shared/' + (newMountName.trim() || 'Folder');
+      if (newMountCategory === 'media') targetSub = 'media/' + (newMountName.trim() || 'MacMedia');
+      else if (newMountCategory === 'downloads') targetSub = 'downloads/' + (newMountName.trim() || 'MacDownloads');
+      else if (newMountCategory === 'pictures') targetSub = 'photos/' + (newMountName.trim() || 'MacPhotos');
+
+      const res = await api.addLocalMount({
+        name: newMountName.trim() || newMountPath.split('/').pop() || '本地直通',
+        hostPath: newMountPath.trim(),
+        guestTarget: targetSub,
+        category: newMountCategory,
+        writable: newMountWritable,
+        enabled: true,
+      });
+      setLocalMounts(res.mounts);
+      setRecommendedMounts(res.recommended);
+      setShowAddMountModal(false);
+      setNewMountPath('');
+      setNewMountName('');
+      setRestartPrompt(true);
+      setAlertMsg({ type: 'success', text: `已成功添加本地直通目录，请重启 VM 生效！` });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `添加直通失败: ${err.message}` });
+    } finally {
+      setMountsLoading(false);
     }
   };
 
@@ -301,7 +389,161 @@ export const Storage: React.FC = () => {
         </div>
       </div>
 
-      {/* Section 3: Physical Disks List */}
+      {/* Section: Mac Local Folder Passthrough (VirtioFS Bind Mount) */}
+      <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900/95 to-sky-950/30 border border-slate-800/90 shadow-xl space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800/80 gap-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-sky-400">
+              <FolderSync className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2.5">
+                <h3 className="text-lg font-bold text-white">Mac 本地目录一键直通 (VirtioFS 高速映射)</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  零拷贝 · 3~5 GB/s
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                无需把 2T 盘上原有的几百 GB 电影或照片二次拷贝进虚拟机，直接穿透挂载给 Jellyfin、FileBrowser 与局域网共享。
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowAddMountModal(true)}
+            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-md shadow-sky-500/20 transition"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>添加自定义直通</span>
+          </button>
+        </div>
+
+        {/* Quick Presets Recommendation */}
+        {recommendedMounts.length > 0 && (
+          <div className="space-y-2.5">
+            <span className="text-xs text-slate-400 font-bold block uppercase tracking-wider text-[11px]">
+              检测到 Mac 本地推荐媒体库 (点击即刻开启直通):
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {recommendedMounts.map((rec) => (
+                <div
+                  key={rec.id}
+                  className="p-3.5 rounded-xl bg-slate-800/40 border border-slate-800 hover:border-sky-500/40 transition flex flex-col justify-between space-y-3"
+                >
+                  <div className="flex items-start space-x-2.5">
+                    <div className="p-2 rounded-lg bg-sky-500/10 text-sky-400 mt-0.5">
+                      {rec.category === 'media' && <Film className="w-4 h-4" />}
+                      {rec.category === 'downloads' && <DownloadCloud className="w-4 h-4" />}
+                      {rec.category === 'pictures' && <Image className="w-4 h-4" />}
+                      {rec.category === 'custom' && <Folder className="w-4 h-4" />}
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-slate-200 text-xs">{rec.name}</h5>
+                      <p className="text-[11px] text-slate-400 font-mono truncate max-w-[170px]" title={rec.hostPath}>
+                        {rec.hostPath}
+                      </p>
+                      <p className="text-[10px] text-sky-400/80 font-mono mt-0.5">
+                        映射至: /data/{rec.guestTarget}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleQuickAddMount(rec)}
+                    className="w-full py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500 text-sky-300 hover:text-white text-xs font-semibold border border-sky-500/30 transition flex items-center justify-center space-x-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>开启直通挂载</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Configured Mounts List */}
+        <div className="space-y-2.5">
+          <span className="text-xs text-slate-400 font-bold block uppercase tracking-wider text-[11px]">
+            已配置的本地直通目录 ({localMounts.length})
+          </span>
+
+          {localMounts.length === 0 ? (
+            <div className="p-6 rounded-xl bg-slate-950/40 border border-dashed border-slate-800 text-center text-slate-400 text-xs space-y-1">
+              <p>暂无配置的本地直通目录。</p>
+              <p className="text-[11px] text-slate-500">点击上方推荐库或自定义直通按钮，即可秒级接入 Mac 现有文件。</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {localMounts.map((m) => (
+                <div
+                  key={m.id}
+                  className={`p-3.5 rounded-xl border transition flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+                    m.enabled
+                      ? 'bg-slate-800/60 border-slate-700/80'
+                      : 'bg-slate-900/40 border-slate-800/60 opacity-60'
+                  }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className={`p-2 rounded-lg ${m.enabled ? 'bg-sky-500/20 text-sky-400' : 'bg-slate-800 text-slate-500'}`}>
+                      {m.category === 'media' && <Film className="w-4 h-4" />}
+                      {m.category === 'downloads' && <DownloadCloud className="w-4 h-4" />}
+                      {m.category === 'pictures' && <Image className="w-4 h-4" />}
+                      {(!m.category || m.category === 'custom') && <Folder className="w-4 h-4" />}
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-slate-200 text-xs">{m.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                          m.writable ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-700 text-slate-300'
+                        }`}>
+                          {m.writable ? '允许写入' : '只读保护'}
+                        </span>
+                        <span className={`w-2 h-2 rounded-full ${m.enabled ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                      </div>
+                      <div className="flex items-center space-x-2 text-[11px] text-slate-400 font-mono mt-0.5">
+                        <span className="text-slate-300 truncate max-w-[200px]" title={m.hostPath}>{m.hostPath}</span>
+                        <span>→</span>
+                        <span className="text-sky-300">/data/{m.guestTarget}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 self-end sm:self-center">
+                    <button
+                      onClick={() => handleToggleMount(m.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center space-x-1 ${
+                        m.enabled
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20'
+                          : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white'
+                      }`}
+                    >
+                      {m.enabled ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
+                      <span>{m.enabled ? '已启用' : '已停用'}</span>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteMount(m.id, m.name)}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40 transition"
+                      title="移除直通配置"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Security and Performance Badge */}
+        <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-200 text-xs flex items-center space-x-2.5">
+          <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0" />
+          <span>
+            <strong>安全保障机制</strong>: 直通挂载默认开启只读保护，容器操作绝不破坏 Mac 原文件；基于 Apple Virtualization 引擎，享受 3~5 GB/s 的 NVMe 原生极速。
+          </span>
+        </div>
+      </div>
+
+      {/* Section 4: Physical Disks List */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -592,6 +834,153 @@ export const Storage: React.FC = () => {
                 <span>{bindLoading ? '正在创建镜像并绑定...' : '确认绑定为数据盘'}</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Custom Local Mount Modal */}
+      {showAddMountModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
+                  <FolderPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">添加 Mac 本地直通目录 (VirtioFS)</h3>
+                  <p className="text-xs text-slate-400">穿透挂载已有大文件至 NAS 容器，零拷贝、3~5 GB/s 原生极速</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddMountModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddCustomMount} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  Mac 本地物理路径 <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newMountPath}
+                  onChange={(e) => setNewMountPath(e.target.value)}
+                  placeholder="例如: /Users/luluen/Movies 或 /Volumes/Lexar/4K_Remux"
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">支持 Mac 主盘或外接 SSD 上的任意现有文件夹路径。</p>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1">
+                  直通展示名称 (可选)
+                </label>
+                <input
+                  type="text"
+                  value={newMountName}
+                  onChange={(e) => setNewMountName(e.target.value)}
+                  placeholder="例如: 4K蓝光影院 / 经典收藏"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-300 mb-1.5">
+                  映射分类与 NAS 目标路径
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewMountCategory('media')}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center space-y-1 ${
+                      newMountCategory === 'media'
+                        ? 'bg-sky-500/20 border-sky-500 text-sky-300 font-bold'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Film className="w-4 h-4" />
+                    <span className="text-[11px]">影音 (/media)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewMountCategory('downloads')}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center space-y-1 ${
+                      newMountCategory === 'downloads'
+                        ? 'bg-sky-500/20 border-sky-500 text-sky-300 font-bold'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <DownloadCloud className="w-4 h-4" />
+                    <span className="text-[11px]">下载 (/downloads)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewMountCategory('pictures')}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center space-y-1 ${
+                      newMountCategory === 'pictures'
+                        ? 'bg-sky-500/20 border-sky-500 text-sky-300 font-bold'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Image className="w-4 h-4" />
+                    <span className="text-[11px]">照片 (/photos)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewMountCategory('custom')}
+                    className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center space-y-1 ${
+                      newMountCategory === 'custom'
+                        ? 'bg-sky-500/20 border-sky-500 text-sky-300 font-bold'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Folder className="w-4 h-4" />
+                    <span className="text-[11px]">通用 (/shared)</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700 flex items-center justify-between">
+                <div>
+                  <span className="font-semibold text-slate-200 block">写入权限设置</span>
+                  <span className="text-[11px] text-slate-400">
+                    {newMountWritable ? '允许容器修改与写入本地原文件' : '开启只读保护 (推荐，保护 Mac 本地文件防误删)'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewMountWritable(!newMountWritable)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                    newMountWritable ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                  }`}
+                >
+                  {newMountWritable ? '读写模式' : '只读保护'}
+                </button>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddMountModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={mountsLoading}
+                  className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-md shadow-sky-500/20 transition flex items-center space-x-1.5 disabled:opacity-50"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{mountsLoading ? '正在保存...' : '添加并直通挂载'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

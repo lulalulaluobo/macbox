@@ -61,6 +61,22 @@ export interface ManagedDisk {
   instance?: string;
 }
 
+export interface LocalMount {
+  id: string;
+  name: string;
+  hostPath: string;
+  guestTarget: string;
+  writable: boolean;
+  enabled: boolean;
+  category: 'media' | 'downloads' | 'pictures' | 'custom' | string;
+  description?: string;
+}
+
+export interface LocalMountsResponse {
+  mounts: LocalMount[];
+  recommended: LocalMount[];
+}
+
 export interface ContainerInfo {
   id: string;
   name: string;

@@ -1,4 +1,4 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, AppMetadata, SambaStatus, PowerStatus, ServiceStatus } from './types';
+import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, AppMetadata, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse } from './types';
 
 const BASE_URL = '/api';
 
@@ -50,6 +50,38 @@ export const api = {
   }),
   unbindStorage: () => fetchJSON<{ status: string; message: string; requiresRestart: boolean }>(`${BASE_URL}/storage/unbind`, {
     method: 'POST',
+  }),
+
+  // Local Mounts (VirtioFS Direct Passthrough)
+  getLocalMounts: () => fetchJSON<LocalMountsResponse>(`${BASE_URL}/storage/mounts`),
+  addLocalMount: (mount: Partial<LocalMount>) => fetchJSON<{
+    status: string;
+    message: string;
+    mounts: LocalMount[];
+    recommended: LocalMount[];
+    requiresRestart: boolean;
+  }>(`${BASE_URL}/storage/mounts`, {
+    method: 'POST',
+    body: JSON.stringify(mount),
+  }),
+  toggleLocalMount: (id: string) => fetchJSON<{
+    status: string;
+    message: string;
+    enabled: boolean;
+    mounts: LocalMount[];
+    recommended: LocalMount[];
+    requiresRestart: boolean;
+  }>(`${BASE_URL}/storage/mounts/${id}/toggle`, {
+    method: 'POST',
+  }),
+  deleteLocalMount: (id: string) => fetchJSON<{
+    status: string;
+    message: string;
+    mounts: LocalMount[];
+    recommended: LocalMount[];
+    requiresRestart: boolean;
+  }>(`${BASE_URL}/storage/mounts/${id}`, {
+    method: 'DELETE',
   }),
 
   // Power Management (Caffeinate)
