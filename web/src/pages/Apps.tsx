@@ -200,6 +200,29 @@ export const Apps: React.FC = () => {
                   </div>
                 )}
 
+                {/* Default Credentials Tips */}
+                {app.id === 'filebrowser' && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200/90 font-mono flex flex-col space-y-1">
+                    <span className="text-[10px] text-amber-400 font-sans font-semibold">🔑 登录凭据:</span>
+                    <div className="flex justify-between">
+                      <span>默认账号: <strong className="text-amber-100 font-bold">admin</strong></span>
+                      <span>默认密码: <strong className="text-amber-100 font-bold">adminadmin123</strong></span>
+                    </div>
+                  </div>
+                )}
+
+                {app.id === 'jellyfin' && (
+                  <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-xs text-sky-200/90 flex items-center space-x-2">
+                    <span>💡 首次访问将启动配置向导，自行创建管理员账号密码</span>
+                  </div>
+                )}
+
+                {app.id === 'syncthing' && (
+                  <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200/90 flex items-center space-x-2">
+                    <span>💡 首次进入免密，建议在「操作-设置-图形化界面」设置账号密码</span>
+                  </div>
+                )}
+
                 {/* Storage directory bindings */}
                 <div className="text-[11px] text-slate-400 space-y-1 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 font-mono">
                   <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wider">数据挂载映射:</span>

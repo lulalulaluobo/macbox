@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, Square, RotateCw, Cpu, HardDrive, Server, Globe, ExternalLink, ShieldCheck } from 'lucide-react';
+import { Play, Square, RotateCw, Cpu, HardDrive, Server, Globe, ExternalLink, ShieldCheck, Coffee, Zap, Rocket } from 'lucide-react';
 import { SystemOverview, AppMetadata } from '../types';
 import { api } from '../api';
 
@@ -17,12 +17,50 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onNavigateTab,
 }) => {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [powerLoading, setPowerLoading] = useState<boolean>(false);
+  const [serviceLoading, setServiceLoading] = useState<boolean>(false);
   const [message, setMessage] = useState<string | null>(null);
 
   const sys = overview?.system;
   const vm = overview?.vm;
   const docker = overview?.docker;
+  const power = overview?.power;
+  const service = overview?.service;
   const selectedDisk = overview?.storage.selectedDisk;
+
+  const powerActive = power?.active || false;
+  const serviceInstalled = service?.installed || false;
+
+  const handleTogglePower = async () => {
+    setPowerLoading(true);
+    try {
+      const updated = await api.togglePower(!powerActive);
+      setMessage(updated.active ? '☕ 已激活 24h 防休眠守护（阻止系统与磁盘休眠，允许显示器息屏）' : '已关闭防休眠，系统闲置时将按 macOS 默认策略休眠');
+      onRefresh();
+    } catch (err: any) {
+      setMessage(`切换防休眠失败: ${err.message}`);
+    } finally {
+      setPowerLoading(false);
+    }
+  };
+
+  const handleToggleService = async () => {
+    setServiceLoading(true);
+    try {
+      if (serviceInstalled) {
+        await api.uninstallService();
+        setMessage('已卸载 LaunchAgent 开机自启服务');
+      } else {
+        await api.installService();
+        setMessage('🚀 已成功安装并激活 LaunchAgent 开机免登录自启服务！Mac 重启后自动在后台提供服务');
+      }
+      onRefresh();
+    } catch (err: any) {
+      setMessage(`配置开机自启失败: ${err.message}`);
+    } finally {
+      setServiceLoading(false);
+    }
+  };
 
   const handleVMAction = async (action: 'start' | 'stop' | 'restart') => {
     setActionLoading(action);
@@ -66,6 +104,74 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <button onClick={() => setMessage(null)} className="text-xs text-slate-400 hover:text-white">关闭</button>
         </div>
       )}
+
+      {/* 7x24h Mac Server Daemon & Keep-Alive Panel */}
+      <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-900/90 via-slate-900/70 to-indigo-950/40 border border-slate-800/80 shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center space-x-4">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0 shadow-inner">
+            <Coffee className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center space-x-2.5">
+              <h3 className="text-base font-bold text-white">Mac mini 7x24h 常驻守护引擎</h3>
+              <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold ${
+                powerActive
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center space-x-1'
+                  : 'bg-slate-800 text-slate-400'
+              }`}>
+                {powerActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse mr-1" />}
+                {powerActive ? '防休眠运行中' : '未开启防休眠'}
+              </span>
+              <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold ${
+                serviceInstalled
+                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                  : 'bg-slate-800 text-slate-400'
+              }`}>
+                {serviceInstalled ? '开机自启生效' : '未装开机自启'}
+              </span>
+              {overview?.storage?.isExternalActive && (
+                <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono">
+                  外接 SSD 数据盘
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              通过 macOS 原生 <code>caffeinate</code> 防止 CPU 闲置休眠及外接盘休眠掉盘（支持显示器息屏节能），并通过 LaunchAgent 实现开机免登录后台守护。
+            </p>
+          </div>
+        </div>
+
+        {/* Action Toggles */}
+        <div className="flex items-center space-x-3 shrink-0 self-end md:self-center">
+          <button
+            onClick={handleTogglePower}
+            disabled={powerLoading}
+            className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition ${
+              powerActive
+                ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+            }`}
+            title="点击切换防休眠状态"
+          >
+            <Zap className={`w-3.5 h-3.5 ${powerActive ? 'text-amber-400 fill-amber-400' : ''}`} />
+            <span>{powerActive ? '已开启防休眠' : '开启防休眠'}</span>
+          </button>
+
+          <button
+            onClick={handleToggleService}
+            disabled={serviceLoading}
+            className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition ${
+              serviceInstalled
+                ? 'bg-sky-500/20 hover:bg-rose-500/20 text-sky-300 hover:text-rose-300 border-sky-500/40 hover:border-rose-500/40'
+                : 'bg-sky-600 hover:bg-sky-500 text-white border-sky-500 shadow-lg shadow-sky-500/20'
+            }`}
+            title={serviceInstalled ? '点击卸载开机自启' : '点击安装开机免登录自启'}
+          >
+            <Rocket className="w-3.5 h-3.5" />
+            <span>{serviceInstalled ? '已装自启 (点此卸载)' : '一键配置开机自启'}</span>
+          </button>
+        </div>
+      </div>
 
       {/* VM Errors Alert */}
       {vm?.errors && vm.errors.length > 0 && (

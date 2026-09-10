@@ -1,0 +1,15 @@
+{
+  "id": "qbittorrent",
+  "name": "qBittorrent",
+  "description": "强大、高带宽利用率的离线 BT/PT 种子下载器，支持远程 Web 管理、RSS 自动订阅与磁力链直接离线下载。",
+  "version": "v4.6.5",
+  "icon": "download",
+  "category": "Download",
+  "port": 8085,
+  "webUrl": "http://{{.HostIP}}:8085",
+  "volumes": [
+    {"host": "/data/appdata/qbittorrent/config", "container": "/config"},
+    {"host": "/data/downloads", "container": "/downloads"},
+    {"host": "/data/media", "container": "/media"}
+  ]
+}

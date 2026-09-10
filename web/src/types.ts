@@ -96,8 +96,28 @@ export interface SambaStatus {
   message: string;
 }
 
+export interface PowerStatus {
+  preventSleep: boolean;
+  active: boolean;
+  assertions: string[];
+  displayCanOff: boolean;
+  description: string;
+}
+
+export interface ServiceStatus {
+  installed: boolean;
+  running: boolean;
+  label: string;
+  plistPath: string;
+  logPath: string;
+  binaryPath: string;
+  workingDir: string;
+}
+
 export interface SystemOverview {
   system: SystemStats;
+  power?: PowerStatus;
+  service?: ServiceStatus;
   vm: VMStatus;
   docker: {
     ready: boolean;
@@ -107,6 +127,9 @@ export interface SystemOverview {
   storage: {
     selectedDisk?: DiskInfo;
     diskCount: number;
+    isExternalActive?: boolean;
+    dataPath?: string;
+    mountPoint?: string;
   };
   timestamp: string;
 }

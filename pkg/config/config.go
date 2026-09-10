@@ -12,6 +12,12 @@ type Config struct {
 	VM      VMConfig      `yaml:"vm"`
 	Storage StorageConfig `yaml:"storage"`
 	Samba   SambaConfig   `yaml:"samba"`
+	System  SystemConfig  `yaml:"system"`
+}
+
+type SystemConfig struct {
+	PreventSleep bool `yaml:"preventSleep"` // 24h keep-awake with caffeinate
+	AutoStart    bool `yaml:"autoStart"`    // macOS LaunchAgent autostart on boot
 }
 
 type VMConfig struct {
@@ -55,6 +61,10 @@ func DefaultConfig() *Config {
 			Port:      4455, // default non-conflicting host port on macOS
 			User:      "macnas",
 			Password:  "macnas123",
+		},
+		System: SystemConfig{
+			PreventSleep: true, // Default enabled for Mac mini NAS server
+			AutoStart:    false,
 		},
 	}
 }

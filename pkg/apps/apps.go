@@ -1,12 +1,12 @@
-package apps
-
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/luluen/mac-nas/pkg/docker"
 	"github.com/luluen/mac-nas/pkg/vm"
@@ -45,7 +45,7 @@ func NewManager(vmMgr *vm.Manager, dockerClient *docker.Client, projectRoot stri
 	}
 }
 
-var presetAppIDs = []string{"jellyfin", "syncthing", "filebrowser"}
+var presetAppIDs = []string{"jellyfin", "syncthing", "filebrowser", "qbittorrent", "alist"}
 
 func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, error) {
 	containers, _ := m.dockerClient.ListContainers(ctx)

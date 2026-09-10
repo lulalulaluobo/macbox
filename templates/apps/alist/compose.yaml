@@ -1,0 +1,14 @@
+services:
+  alist:
+    image: xhofe/alist:latest
+    container_name: macnas-alist
+    environment:
+      - PUID=0
+      - PGID=0
+      - UMASK=022
+    volumes:
+      - /data/appdata/alist/data:/opt/alist/data
+      - /data:/data
+    ports:
+      - "5244:5244"
+    restart: unless-stopped

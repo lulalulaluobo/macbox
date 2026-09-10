@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -288,4 +289,13 @@ func (m *Manager) Exec(ctx context.Context, command ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "limactl", args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// ExecStream runs a command inside the Lima VM and streams stdout/stderr to an io.Writer
+func (m *Manager) ExecStream(ctx context.Context, w io.Writer, command ...string) error {
+	args := append([]string{"shell", m.instanceName}, command...)
+	cmd := exec.CommandContext(ctx, "limactl", args...)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	return cmd.Run()
 }

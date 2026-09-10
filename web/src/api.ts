@@ -1,4 +1,4 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, AppMetadata, SambaStatus } from './types';
+import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, AppMetadata, SambaStatus, PowerStatus, ServiceStatus } from './types';
 
 const BASE_URL = '/api';
 
@@ -27,10 +27,45 @@ export const api = {
   restartVM: () => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/vm/restart`, { method: 'POST' }),
 
   // Storage
-  getDisks: () => fetchJSON<{ disks: DiskInfo[]; managedDisks: ManagedDisk[]; selectedDisk: string }>(`${BASE_URL}/storage/disks`),
+  getDisks: () => fetchJSON<{
+    disks: DiskInfo[];
+    managedDisks: ManagedDisk[];
+    selectedDisk: string;
+    isExternalActive?: boolean;
+    dataPath?: string;
+    mountPoint?: string;
+  }>(`${BASE_URL}/storage/disks`),
   selectDisk: (identifier: string) => fetchJSON<{ status: string; selectedDisk: string }>(`${BASE_URL}/storage/select`, {
     method: 'POST',
     body: JSON.stringify({ identifier }),
+  }),
+  bindStorage: (identifier: string, mountPoint: string, sizeGB: number) => fetchJSON<{
+    status: string;
+    message: string;
+    dataPath: string;
+    requiresRestart: boolean;
+  }>(`${BASE_URL}/storage/bind`, {
+    method: 'POST',
+    body: JSON.stringify({ identifier, mountPoint, sizeGB }),
+  }),
+  unbindStorage: () => fetchJSON<{ status: string; message: string; requiresRestart: boolean }>(`${BASE_URL}/storage/unbind`, {
+    method: 'POST',
+  }),
+
+  // Power Management (Caffeinate)
+  getPowerStatus: () => fetchJSON<PowerStatus>(`${BASE_URL}/system/power`),
+  togglePower: (enable: boolean) => fetchJSON<PowerStatus>(`${BASE_URL}/system/power/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({ enable }),
+  }),
+
+  // Service Management (LaunchAgent)
+  getServiceStatus: () => fetchJSON<ServiceStatus>(`${BASE_URL}/system/service`),
+  installService: () => fetchJSON<ServiceStatus>(`${BASE_URL}/system/service/install`, {
+    method: 'POST',
+  }),
+  uninstallService: () => fetchJSON<ServiceStatus>(`${BASE_URL}/system/service/uninstall`, {
+    method: 'POST',
   }),
 
   // Docker

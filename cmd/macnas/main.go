@@ -20,25 +20,7 @@ import (
 )
 
 func main() {
-	portFlag := flag.Int("port", 0, "Server port (default from config or 19808)")
-	webDirFlag := flag.String("web", "", "Directory containing web frontend build (default: web/dist)")
-	flag.Parse()
-
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		log.Printf("[MacNAS] Warning: failed to load config, using defaults: %v", err)
-		cfg = config.DefaultConfig()
-	}
-
-	port := cfg.Port
-	if *portFlag > 0 {
-		port = *portFlag
-	}
-	if port <= 0 {
-		port = 19808
-	}
-
-	// Determine project root directory
+	// Determine project root directory first
 	exePath, err := os.Executable()
 	projectRoot := "."
 	if err == nil {
@@ -54,10 +36,75 @@ func main() {
 		projectRoot = cwd
 	}
 
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Printf("[MacNAS] Warning: failed to load config, using defaults: %v", err)
+		cfg = config.DefaultConfig()
+	}
+
+	// Check CLI subcommand: macnas service [install|uninstall|status]
+	if len(os.Args) > 1 && os.Args[1] == "service" {
+		serviceMgr := system.NewServiceManager(cfg, projectRoot)
+		action := "status"
+		if len(os.Args) > 2 {
+			action = os.Args[2]
+		}
+
+		switch action {
+		case "install":
+			port := cfg.Port
+			if port <= 0 {
+				port = 19808
+			}
+			if err := serviceMgr.Install(port); err != nil {
+				log.Fatalf("[MacNAS Service] 安装自启服务失败: %v", err)
+			}
+			fmt.Println("✅ MacNAS LaunchAgent 开机免登录自启服务已成功安装并启动！")
+			fmt.Printf("   配置文件: ~/Library/LaunchAgents/%s.plist\n", system.ServiceLabel)
+			return
+		case "uninstall":
+			if err := serviceMgr.Uninstall(); err != nil {
+				log.Fatalf("[MacNAS Service] 卸载自启服务失败: %v", err)
+			}
+			fmt.Println("✅ MacNAS LaunchAgent 开机自启服务已成功卸载。")
+			return
+		case "status":
+			status := serviceMgr.GetStatus()
+			fmt.Printf("MacNAS LaunchAgent 服务状态:\n")
+			fmt.Printf("  服务标识: %s\n", status.Label)
+			fmt.Printf("  已安装:   %v\n", status.Installed)
+			fmt.Printf("  运行中:   %v\n", status.Running)
+			fmt.Printf("  Plist:    %s\n", status.PlistPath)
+			fmt.Printf("  日志文件: %s\n", status.LogPath)
+			return
+		default:
+			fmt.Printf("用法: macnas service [install|uninstall|status]\n")
+			os.Exit(1)
+		}
+	}
+
+	portFlag := flag.Int("port", 0, "Server port (default from config or 19808)")
+	webDirFlag := flag.String("web", "", "Directory containing web frontend build (default: web/dist)")
+	flag.Parse()
+
+	port := cfg.Port
+	if *portFlag > 0 {
+		port = *portFlag
+	}
+	if port <= 0 {
+		port = 19808
+	}
+
 	// Resolve web dir
 	webDir := *webDirFlag
 	if webDir == "" {
 		webDir = filepath.Join(projectRoot, "web", "dist")
+	}
+
+	// Initialize power manager for 24h keep-awake
+	powerMgr := system.GetPowerManager(cfg)
+	if cfg.System.PreventSleep {
+		_ = powerMgr.Start()
 	}
 
 	server := api.NewServer(cfg, projectRoot)
@@ -145,6 +192,7 @@ func main() {
 	<-quit
 
 	log.Println("[MacNAS] 正在平稳关闭服务...")
+	_ = powerMgr.Stop()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {

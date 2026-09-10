@@ -30,6 +30,8 @@ type Server struct {
 	dockerClient *docker.Client
 	appMgr       *apps.Manager
 	sambaMgr     *samba.Manager
+	powerMgr     *system.PowerManager
+	serviceMgr   *system.ServiceManager
 	projectRoot  string
 	mux          *http.ServeMux
 }
@@ -39,6 +41,8 @@ func NewServer(cfg *config.Config, projectRoot string) *Server {
 	dockerClient := docker.NewClient(vmMgr)
 	appMgr := apps.NewManager(vmMgr, dockerClient, projectRoot)
 	sambaMgr := samba.NewManager(cfg, vmMgr)
+	powerMgr := system.GetPowerManager(cfg)
+	serviceMgr := system.NewServiceManager(cfg, projectRoot)
 
 	s := &Server{
 		cfg:          cfg,
@@ -46,6 +50,8 @@ func NewServer(cfg *config.Config, projectRoot string) *Server {
 		dockerClient: dockerClient,
 		appMgr:       appMgr,
 		sambaMgr:     sambaMgr,
+		powerMgr:     powerMgr,
+		serviceMgr:   serviceMgr,
 		projectRoot:  projectRoot,
 		mux:          http.NewServeMux(),
 	}
@@ -71,6 +77,11 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) registerRoutes() {
 	// 1. System
 	s.mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
+	s.mux.HandleFunc("GET /api/system/power", s.handleSystemPower)
+	s.mux.HandleFunc("POST /api/system/power/toggle", s.handleSystemPowerToggle)
+	s.mux.HandleFunc("GET /api/system/service", s.handleSystemServiceStatus)
+	s.mux.HandleFunc("POST /api/system/service/install", s.handleSystemServiceInstall)
+	s.mux.HandleFunc("POST /api/system/service/uninstall", s.handleSystemServiceUninstall)
 
 	// 2. VM lifecycle
 	s.mux.HandleFunc("POST /api/vm/start", s.handleVMStart)
@@ -80,6 +91,8 @@ func (s *Server) registerRoutes() {
 	// 3. Storage
 	s.mux.HandleFunc("GET /api/storage/disks", s.handleStorageDisks)
 	s.mux.HandleFunc("POST /api/storage/select", s.handleStorageSelect)
+	s.mux.HandleFunc("POST /api/storage/bind", s.handleStorageBind)
+	s.mux.HandleFunc("POST /api/storage/unbind", s.handleStorageUnbind)
 
 	// 4. Docker
 	s.mux.HandleFunc("GET /api/docker/containers", s.handleDockerContainers)
@@ -145,21 +158,75 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"system": sysStats,
-		"vm":     vmStat,
+		"system":  sysStats,
+		"power":   s.powerMgr.GetStatus(),
+		"service": s.serviceMgr.GetStatus(),
+		"vm":      vmStat,
 		"docker": map[string]interface{}{
 			"ready":        vmStat.DockerReady,
 			"total":        len(containers),
 			"runningCount": dockerRunningCount,
 		},
 		"storage": map[string]interface{}{
-			"selectedDisk": selectedDisk,
-			"diskCount":    len(disks),
+			"selectedDisk":     selectedDisk,
+			"diskCount":        len(disks),
+			"isExternalActive": s.cfg.Storage.DataPath != "",
+			"dataPath":         s.cfg.Storage.DataPath,
+			"mountPoint":       s.cfg.Storage.MountPoint,
 		},
 		"timestamp": time.Now(),
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// Power Management Handlers
+func (s *Server) handleSystemPower(w http.ResponseWriter, r *http.Request) {
+	status := s.powerMgr.GetStatus()
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleSystemPowerToggle(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enable bool `json:"enable"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := s.powerMgr.SetPreventSleep(body.Enable); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, s.powerMgr.GetStatus())
+}
+
+// Service Management Handlers
+func (s *Server) handleSystemServiceStatus(w http.ResponseWriter, r *http.Request) {
+	status := s.serviceMgr.GetStatus()
+	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleSystemServiceInstall(w http.ResponseWriter, r *http.Request) {
+	port := s.cfg.Port
+	if port <= 0 {
+		port = 19808
+	}
+	if err := s.serviceMgr.Install(port); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.serviceMgr.GetStatus())
+}
+
+func (s *Server) handleSystemServiceUninstall(w http.ResponseWriter, r *http.Request) {
+	if err := s.serviceMgr.Uninstall(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.serviceMgr.GetStatus())
 }
 
 // VM Handlers
@@ -205,10 +272,14 @@ func (s *Server) handleStorageDisks(w http.ResponseWriter, r *http.Request) {
 	}
 	managed, _ := storage.ListManagedDisks()
 
+	isExternal := (s.cfg.Storage.DataPath != "")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"disks":        disks,
-		"managedDisks": managed,
-		"selectedDisk": s.cfg.Storage.SelectedDisk,
+		"disks":            disks,
+		"managedDisks":     managed,
+		"selectedDisk":     s.cfg.Storage.SelectedDisk,
+		"isExternalActive": isExternal,
+		"dataPath":         s.cfg.Storage.DataPath,
+		"mountPoint":       s.cfg.Storage.MountPoint,
 	})
 }
 
@@ -230,6 +301,44 @@ func (s *Server) handleStorageSelect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":       "success",
 		"selectedDisk": body.Identifier,
+	})
+}
+
+func (s *Server) handleStorageBind(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Identifier string `json:"identifier"`
+		MountPoint string `json:"mountPoint"`
+		SizeGB     int    `json:"sizeGB"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	imgPath, err := storage.BindExternalDisk(s.cfg, req.Identifier, req.MountPoint, req.SizeGB)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         "外接盘已成功绑定为 NAS 数据镜像，重启虚拟机后生效",
+		"dataPath":        imgPath,
+		"requiresRestart": true,
+	})
+}
+
+func (s *Server) handleStorageUnbind(w http.ResponseWriter, r *http.Request) {
+	if err := storage.UnbindExternalDisk(s.cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         "已解除外接盘绑定，切回内置虚拟数据盘",
+		"requiresRestart": true,
 	})
 }
 

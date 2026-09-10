@@ -5,10 +5,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/luluen/mac-nas/pkg/config"
 )
 
 type DiskInfo struct {
@@ -42,14 +46,17 @@ type ManagedDisk struct {
 }
 
 type StorageOverview struct {
-	SelectedDisk *DiskInfo     `json:"selectedDisk,omitempty"`
-	Disks        []DiskInfo    `json:"disks"`
-	ManagedDisks []ManagedDisk `json:"managedDisks"`
-	NASDataDir   string        `json:"nasDataDir"`
-	TotalBytes   uint64        `json:"totalBytes"`
-	UsedBytes    uint64        `json:"usedBytes"`
-	FreeBytes    uint64        `json:"freeBytes"`
-	UsedPercent  float64       `json:"usedPercent"`
+	SelectedDisk     *DiskInfo     `json:"selectedDisk,omitempty"`
+	Disks            []DiskInfo    `json:"disks"`
+	ManagedDisks     []ManagedDisk `json:"managedDisks"`
+	NASDataDir       string        `json:"nasDataDir"`
+	IsExternalActive bool          `json:"isExternalActive"`
+	DataPath         string        `json:"dataPath"`
+	MountPoint       string        `json:"mountPoint"`
+	TotalBytes       uint64        `json:"totalBytes"`
+	UsedBytes        uint64        `json:"usedBytes"`
+	FreeBytes        uint64        `json:"freeBytes"`
+	UsedPercent      float64       `json:"usedPercent"`
 }
 
 // ListDisks scans all physical and external disks on macOS
@@ -222,4 +229,99 @@ func CreateManagedDisk(name, size string) error {
 		return fmt.Errorf("limactl disk create failed: %s (%w)", string(output), err)
 	}
 	return nil
+}
+
+// BindExternalDisk initializes an ext4 disk image on an external filesystem and bridges it to Lima's macnas-data
+func BindExternalDisk(cfg *config.Config, diskID, mountPoint string, sizeGB int) (string, error) {
+	if mountPoint == "" {
+		// Try to look up mount point from diskID
+		info, err := inspectDisk(diskID)
+		if err == nil && info.MountPoint != "" {
+			mountPoint = info.MountPoint
+		} else {
+			return "", fmt.Errorf("磁盘 %s 未挂载，请先在系统中挂载或指定挂载卷目录", diskID)
+		}
+	}
+
+	if info, err := os.Stat(mountPoint); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("挂载路径不存在或非目录: %s", mountPoint)
+	}
+
+	if sizeGB <= 0 {
+		sizeGB = 100 // Default to 100 GiB sparse image
+	}
+
+	macnasDir := filepath.Join(mountPoint, "MacNAS")
+	if err := os.MkdirAll(macnasDir, 0755); err != nil {
+		return "", fmt.Errorf("无法在外接盘创建 MacNAS 目录: %w", err)
+	}
+
+	imgFile := filepath.Join(macnasDir, "datadisk.img")
+	if _, err := os.Stat(imgFile); os.IsNotExist(err) {
+		// Create sparse image file with mkfile
+		cmd := exec.Command("mkfile", "-n", fmt.Sprintf("%dg", sizeGB), imgFile)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("创建稀疏镜像失败: %s (%w)", string(output), err)
+		}
+	}
+
+	// Link into Lima disk directory: ~/.lima/_disks/macnas-data/datadisk
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	limaDiskDir := filepath.Join(home, ".lima", "_disks", "macnas-data")
+	if err := os.MkdirAll(limaDiskDir, 0700); err != nil {
+		return "", fmt.Errorf("无法创建 Lima 磁盘目录: %w", err)
+	}
+
+	targetDatadisk := filepath.Join(limaDiskDir, "datadisk")
+	// If it exists, check if it's already a symlink or file
+	if fi, err := os.Lstat(targetDatadisk); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			_ = os.Remove(targetDatadisk)
+		} else {
+			// Backup original internal datadisk
+			backupPath := filepath.Join(limaDiskDir, "datadisk.internal.bak")
+			if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+				_ = os.Rename(targetDatadisk, backupPath)
+			} else {
+				_ = os.Remove(targetDatadisk)
+			}
+		}
+	}
+
+	if err := os.Symlink(imgFile, targetDatadisk); err != nil {
+		return "", fmt.Errorf("软链接外接镜像到 Lima 失败: %w", err)
+	}
+
+	cfg.Storage.SelectedDisk = diskID
+	cfg.Storage.MountPoint = mountPoint
+	cfg.Storage.DataPath = imgFile
+	_ = config.SaveConfig(cfg)
+
+	return imgFile, nil
+}
+
+// UnbindExternalDisk restores internal disk and cleans symlink
+func UnbindExternalDisk(cfg *config.Config) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	limaDiskDir := filepath.Join(home, ".lima", "_disks", "macnas-data")
+	targetDatadisk := filepath.Join(limaDiskDir, "datadisk")
+
+	if fi, err := os.Lstat(targetDatadisk); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		_ = os.Remove(targetDatadisk)
+		backupPath := filepath.Join(limaDiskDir, "datadisk.internal.bak")
+		if _, err := os.Stat(backupPath); err == nil {
+			_ = os.Rename(backupPath, targetDatadisk)
+		}
+	}
+
+	cfg.Storage.SelectedDisk = ""
+	cfg.Storage.MountPoint = ""
+	cfg.Storage.DataPath = ""
+	return config.SaveConfig(cfg)
 }

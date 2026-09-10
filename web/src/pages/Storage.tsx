@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HardDrive, Check, Copy, KeyRound, CheckCircle2, AlertCircle, RefreshCw, FolderLock } from 'lucide-react';
+import { HardDrive, Check, Copy, KeyRound, CheckCircle2, AlertCircle, RefreshCw, FolderLock, RotateCw, Layers, X } from 'lucide-react';
 import { DiskInfo, ManagedDisk, SambaStatus } from '../types';
 import { api } from '../api';
 
@@ -7,6 +7,8 @@ export const Storage: React.FC = () => {
   const [disks, setDisks] = useState<DiskInfo[]>([]);
   const [managedDisks, setManagedDisks] = useState<ManagedDisk[]>([]);
   const [selectedDiskId, setSelectedDiskId] = useState<string>('');
+  const [isExternalActive, setIsExternalActive] = useState<boolean>(false);
+  const [dataPath, setDataPath] = useState<string>('');
   const [samba, setSamba] = useState<SambaStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -15,6 +17,15 @@ export const Storage: React.FC = () => {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
+
+  // External Disk Bind Modal
+  const [showBindModal, setShowBindModal] = useState(false);
+  const [bindingDisk, setBindingDisk] = useState<DiskInfo | null>(null);
+  const [bindSizeGB, setBindSizeGB] = useState<number>(100);
+  const [bindLoading, setBindLoading] = useState(false);
+  const [restartPrompt, setRestartPrompt] = useState(false);
+  const [restartingVM, setRestartingVM] = useState(false);
+
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const loadData = async () => {
@@ -27,6 +38,8 @@ export const Storage: React.FC = () => {
       setDisks(storageRes.disks || []);
       setManagedDisks(storageRes.managedDisks || []);
       setSelectedDiskId(storageRes.selectedDisk || '');
+      setIsExternalActive(storageRes.isExternalActive || false);
+      setDataPath(storageRes.dataPath || '');
       setSamba(sambaRes);
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `加载存储数据失败: ${err.message}` });
@@ -47,6 +60,64 @@ export const Storage: React.FC = () => {
       loadData();
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `选择失败: ${err.message}` });
+    }
+  };
+
+  const handleOpenBindModal = (disk: DiskInfo) => {
+    setBindingDisk(disk);
+    // Estimate sensible size: min(200GB, 80% free space if available, max 50GB)
+    let defaultGB = 100;
+    if (disk.freeSpace > 0) {
+      const freeGB = Math.floor(disk.freeSpace / (1024 * 1024 * 1024));
+      if (freeGB > 10) {
+        defaultGB = Math.min(500, Math.floor(freeGB * 0.8));
+      }
+    }
+    setBindSizeGB(defaultGB);
+    setShowBindModal(true);
+  };
+
+  const handleConfirmBind = async () => {
+    if (!bindingDisk) return;
+    setBindLoading(true);
+    try {
+      const res = await api.bindStorage(bindingDisk.identifier, bindingDisk.mountPoint, bindSizeGB);
+      setAlertMsg({ type: 'success', text: res.message });
+      setShowBindModal(false);
+      setRestartPrompt(true);
+      loadData();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `绑定外接盘失败: ${err.message}` });
+    } finally {
+      setBindLoading(false);
+    }
+  };
+
+  const handleUnbind = async () => {
+    if (!confirm('确定要切回内置虚拟数据盘吗？外接盘上的数据将安全保留。')) return;
+    try {
+      const res = await api.unbindStorage();
+      setAlertMsg({ type: 'success', text: res.message });
+      setRestartPrompt(true);
+      loadData();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `解除绑定失败: ${err.message}` });
+    }
+  };
+
+  const handleRestartVM = async () => {
+    setRestartingVM(true);
+    try {
+      await api.restartVM();
+      setAlertMsg({ type: 'success', text: '正在重启虚拟机以挂载新数据盘，请稍候约 30 秒...' });
+      setRestartPrompt(false);
+      setTimeout(() => {
+        loadData();
+        setRestartingVM(false);
+      }, 5000);
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `重启虚拟机失败: ${err.message}` });
+      setRestartingVM(false);
     }
   };
 
@@ -103,6 +174,24 @@ export const Storage: React.FC = () => {
             <span>{alertMsg.text}</span>
           </div>
           <button onClick={() => setAlertMsg(null)} className="text-xs opacity-70 hover:opacity-100">关闭</button>
+        </div>
+      )}
+
+      {/* Restart VM Alert Banner */}
+      {restartPrompt && (
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm flex items-center justify-between shadow-lg">
+          <div className="flex items-center space-x-2.5">
+            <RotateCw className="w-4 h-4 text-amber-400" />
+            <span>数据盘挂载配置已变更！需要重启 Linux 虚拟机以重新加载数据卷挂载生效。</span>
+          </div>
+          <button
+            onClick={handleRestartVM}
+            disabled={restartingVM}
+            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition flex items-center space-x-1"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${restartingVM ? 'animate-spin' : ''}`} />
+            <span>{restartingVM ? '重启中...' : '立即重启 VM'}</span>
+          </button>
         </div>
       )}
 
@@ -249,21 +338,55 @@ export const Storage: React.FC = () => {
                   </div>
 
                   {/* Actions */}
-                  <div className="pt-2 flex items-center justify-between border-t border-slate-800/60 text-xs">
-                    <span className="text-slate-400 truncate max-w-[240px]" title={disk.mountPoint}>
+                  <div className="pt-3 flex flex-col sm:flex-row items-start sm:items-center justify-between border-t border-slate-800/60 text-xs gap-2">
+                    <span className="text-slate-400 truncate max-w-[220px]" title={disk.mountPoint}>
                       {disk.mountPoint ? `挂载点: ${disk.mountPoint}` : (disk.mounted ? '已挂载' : '未挂载系统目录')}
                     </span>
 
-                    {!isSelected ? (
-                      <button
-                        onClick={() => handleSelectDisk(disk.identifier)}
-                        className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-sky-600 text-slate-200 hover:text-white border border-slate-700 hover:border-sky-500 font-semibold transition"
-                      >
-                        选择此盘作为数据盘
-                      </button>
-                    ) : (
-                      <span className="text-emerald-400 font-medium">已激活绑定</span>
-                    )}
+                    <div className="flex items-center space-x-2 shrink-0">
+                      {isSelected ? (
+                        <>
+                          {isExternalActive ? (
+                            <div className="flex items-center space-x-2">
+                              <span className="text-[11px] text-emerald-400 font-mono truncate max-w-[140px]" title={dataPath}>
+                                镜像: {dataPath ? dataPath.split('/').pop() : 'datadisk.img'}
+                              </span>
+                              <button
+                                onClick={handleUnbind}
+                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40 transition text-xs font-semibold"
+                                title={`解除外接盘软链，切回默认虚拟盘 (当前镜像: ${dataPath})`}
+                              >
+                                解除外接绑定
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-emerald-400 font-medium flex items-center space-x-1">
+                              <Check className="w-3.5 h-3.5" />
+                              <span>内置虚拟盘已激活</span>
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {disk.mountPoint ? (
+                            <button
+                              onClick={() => handleOpenBindModal(disk)}
+                              className="px-3.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition shadow-md shadow-sky-500/20 flex items-center space-x-1.5"
+                            >
+                              <Layers className="w-3.5 h-3.5" />
+                              <span>设为 NAS 数据盘</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleSelectDisk(disk.identifier)}
+                              className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-sky-600 text-slate-200 hover:text-white border border-slate-700 hover:border-sky-500 font-semibold transition"
+                            >
+                              选择此盘
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -329,6 +452,93 @@ export const Storage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* External Disk Bind Modal */}
+      {showBindModal && bindingDisk && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
+                  <HardDrive className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">初始化外接 SSD 为 NAS 数据盘</h3>
+                  <p className="text-xs text-slate-400">{bindingDisk.name} ({bindingDisk.deviceNode})</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowBindModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs text-slate-300">
+              <div className="p-3.5 rounded-xl bg-slate-800/50 border border-slate-700/60 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">外接挂载目录:</span>
+                  <span className="font-mono text-sky-300 font-semibold">{bindingDisk.mountPoint || '系统已识别，自动创建'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">可用空闲容量:</span>
+                  <span className="font-mono text-white">{bindingDisk.freeSpaceString || bindingDisk.totalSizeString}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">文件系统模式:</span>
+                  <span className="font-mono text-emerald-300">保持现有 APFS/ExFAT + Linux ext4 镜像容器</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  分配 NAS 数据镜像容量 (GB)
+                </label>
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="number"
+                    min={10}
+                    max={20000}
+                    value={bindSizeGB}
+                    onChange={(e) => setBindSizeGB(parseInt(e.target.value) || 10)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white text-sm font-mono focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition"
+                  />
+                  <span className="text-sm font-semibold text-slate-400">GiB</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  采用 macOS 稀疏文件技术（Sparse Image），按需分配真实块，不会写满磁盘。
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-200 text-xs leading-relaxed space-y-1.5">
+                <p className="font-bold text-sky-300">💡 为什么采用虚拟镜像容器方式？</p>
+                <p>1. <strong>不格式化外接盘</strong>：盘上已有照片、备份或电影文件完好保留。</p>
+                <p>2. <strong>原生 ext4 性能与稳定性</strong>：Docker 容器与 SQLite 数据库直接运行在 Linux 原生文件系统上，彻底消除网络共享文件锁死隐患。</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowBindModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBind}
+                disabled={bindLoading}
+                className="px-5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-md shadow-sky-500/20 transition flex items-center space-x-1.5 disabled:opacity-50"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{bindLoading ? '正在创建镜像并绑定...' : '确认绑定为数据盘'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
