@@ -4,6 +4,7 @@ services:
     container_name: macnas-filebrowser
     restart: unless-stopped
     user: "0:0"
+    command: ["-a", "0.0.0.0", "-p", "80", "-r", "/srv"]
     ports:
       - "8082:80"
     volumes:

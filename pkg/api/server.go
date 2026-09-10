@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -166,7 +167,9 @@ func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		_ = s.vmMgr.Start(ctx, s.projectRoot)
+		if err := s.vmMgr.Start(ctx, s.projectRoot); err != nil {
+			log.Printf("[MacNAS] VM Start error: %v", err)
+		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting", "message": "虚拟机启动中..."})
 }
@@ -175,7 +178,9 @@ func (s *Server) handleVMStop(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		_ = s.vmMgr.Stop(ctx)
+		if err := s.vmMgr.Stop(ctx); err != nil {
+			log.Printf("[MacNAS] VM Stop error: %v", err)
+		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping", "message": "虚拟机停止中..."})
 }
@@ -184,7 +189,9 @@ func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		_ = s.vmMgr.Restart(ctx, s.projectRoot)
+		if err := s.vmMgr.Restart(ctx, s.projectRoot); err != nil {
+			log.Printf("[MacNAS] VM Restart error: %v", err)
+		}
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting", "message": "虚拟机重启中..."})
 }

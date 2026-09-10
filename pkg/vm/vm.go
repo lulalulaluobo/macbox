@@ -6,11 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"text/template"
 	"time"
 
 	"github.com/luluen/mac-nas/pkg/config"
@@ -47,6 +48,20 @@ type LimaInstanceJSON struct {
 type Manager struct {
 	cfg          *config.Config
 	instanceName string
+	mu           sync.RWMutex
+	lastError    string
+}
+
+func (m *Manager) SetLastError(err string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastError = err
+}
+
+func (m *Manager) GetLastError() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.lastError
 }
 
 func NewManager(cfg *config.Config) *Manager {
@@ -83,6 +98,11 @@ func (m *Manager) GetStatus() (*VMStatus, error) {
 				sock := m.GetDockerSocketPath(inst.Dir)
 				ready := m.IsSocketReady(sock)
 
+				errs := inst.Errors
+				if lastErr := m.GetLastError(); lastErr != "" {
+					errs = append(errs, lastErr)
+				}
+
 				return &VMStatus{
 					Name:         inst.Name,
 					Status:       inst.Status,
@@ -94,16 +114,22 @@ func (m *Manager) GetStatus() (*VMStatus, error) {
 					SSHLocalPort: inst.SSHLocalPort,
 					DockerSocket: sock,
 					DockerReady:  ready,
-					Errors:       inst.Errors,
+					Errors:       errs,
 					UpdatedAt:    time.Now(),
 				}, nil
 			}
 		}
 	}
 
+	var notCreatedErrs []string
+	if lastErr := m.GetLastError(); lastErr != "" {
+		notCreatedErrs = append(notCreatedErrs, lastErr)
+	}
+
 	return &VMStatus{
 		Name:        m.instanceName,
 		Status:      "NotCreated",
+		Errors:      notCreatedErrs,
 		UpdatedAt:   time.Now(),
 		DockerReady: false,
 	}, nil
@@ -192,6 +218,16 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 
 // Start launches the Lima VM
 func (m *Manager) Start(ctx context.Context, projectRoot string) error {
+	err := m.startInternal(ctx, projectRoot)
+	if err != nil {
+		m.SetLastError(err.Error())
+	} else {
+		m.SetLastError("")
+	}
+	return err
+}
+
+func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 	status, err := m.GetStatus()
 	if err != nil {
 		return err

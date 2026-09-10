@@ -4,9 +4,11 @@
 minimumLimaVersion: 2.0.0
 
 vmType: "vz"
-rosetta:
-  enabled: true
-  binfmt: true
+vmOpts:
+  vz:
+    rosetta:
+      enabled: true
+      binfmt: true
 
 base:
 - template:_images/ubuntu-lts
@@ -100,7 +102,7 @@ probes:
 
 portForwards:
 - guestSocket: "/var/run/docker.sock"
-  hostSocket: "{{.Dir}}/sock/docker.sock"
+  hostSocket: "{{ "{{.Dir}}" }}/sock/docker.sock"
 - guestIPMustBeZero: true
   guestPortRange: [1024, 65535]
   hostIP: "0.0.0.0"

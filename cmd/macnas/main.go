@@ -45,6 +45,8 @@ func main() {
 		dir := filepath.Dir(exePath)
 		if _, err := os.Stat(filepath.Join(dir, "templates")); err == nil {
 			projectRoot = dir
+		} else if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "templates")); err == nil {
+			projectRoot = filepath.Dir(dir)
 		} else if cwd, err := os.Getwd(); err == nil {
 			projectRoot = cwd
 		}

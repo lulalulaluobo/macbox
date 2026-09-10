@@ -6,7 +6,7 @@
   "icon": "folder",
   "category": "Files",
   "port": 8082,
-  "webUrl": "http://{{.HostIP}}:8082",
+  "webUrl": "http://{{.HostIP}}:8082/login",
   "volumes": [
     {"host": "/data/appdata/filebrowser/database.db", "container": "/database/filebrowser.db"},
     {"host": "/data/appdata/filebrowser/config.json", "container": "/config/settings.json"},

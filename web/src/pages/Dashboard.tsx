@@ -31,11 +31,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
       if (action === 'start') await api.startVM();
       if (action === 'stop') await api.stopVM();
       if (action === 'restart') await api.restartVM();
-      setMessage(`虚拟机正在${action === 'start' ? '启动' : action === 'stop' ? '停止' : '重启'}，请稍候...`);
-      setTimeout(() => {
+      setMessage(
+        action === 'start'
+          ? '虚拟机启动中（首次创建与初始化约需 1~2 分钟，请稍候）...'
+          : action === 'stop'
+          ? '虚拟机正在停止...'
+          : '虚拟机正在重启...'
+      );
+
+      let attempts = 0;
+      const pollInterval = setInterval(() => {
+        attempts++;
         onRefresh();
-        setActionLoading(null);
-      }, 4000);
+        if (attempts >= 20) {
+          clearInterval(pollInterval);
+          setActionLoading(null);
+        }
+      }, 3000);
     } catch (err: any) {
       setMessage(`操作失败: ${err.message}`);
       setActionLoading(null);
@@ -52,6 +64,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="p-4 rounded-xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-between text-sky-300 text-sm">
           <span>{message}</span>
           <button onClick={() => setMessage(null)} className="text-xs text-slate-400 hover:text-white">关闭</button>
+        </div>
+      )}
+
+      {/* VM Errors Alert */}
+      {vm?.errors && vm.errors.length > 0 && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-center justify-between">
+          <span>虚拟机状态提示: {vm.errors.join('; ')}</span>
         </div>
       )}
 
