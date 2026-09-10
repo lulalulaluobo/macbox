@@ -60,8 +60,8 @@ func TestAPIRoutes(t *testing.T) {
 	}
 	var apps []map[string]interface{}
 	if err := json.Unmarshal(w.Body.Bytes(), &apps); err == nil {
-		if len(apps) != 3 {
-			t.Errorf("expected 3 preset apps, got %d", len(apps))
+		if len(apps) < 3 {
+			t.Errorf("expected at least 3 preset apps, got %d", len(apps))
 		}
 	}
 

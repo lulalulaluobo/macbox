@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Film, RefreshCw, Folder, ExternalLink, Play, Square, RotateCw, Trash2, Terminal, CheckCircle2, AlertCircle, Download } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Film, RefreshCw, Folder, ExternalLink, Play, Square, RotateCw, Trash2, Terminal, CheckCircle2, AlertCircle, Download, Cloud, X } from 'lucide-react';
 import { AppMetadata } from '../types';
 import { api } from '../api';
 
@@ -13,6 +13,15 @@ export const Apps: React.FC = () => {
   const [activeLogApp, setActiveLogApp] = useState<string | null>(null);
   const [logs, setLogs] = useState<string>('');
   const [logsLoading, setLogsLoading] = useState(false);
+
+  // Install Drawer Modal State
+  const [drawerApp, setDrawerApp] = useState<AppMetadata | null>(null);
+  const [drawerPort, setDrawerPort] = useState<number>(0);
+  const [installLogs, setInstallLogs] = useState<string[]>([]);
+  const [installStatus, setInstallStatus] = useState<'idle' | 'installing' | 'done' | 'error'>('idle');
+  const [installError, setInstallError] = useState<string | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const logsEndRef = useRef<HTMLDivElement | null>(null);
 
   const loadApps = async () => {
     setLoading(true);
@@ -28,20 +37,65 @@ export const Apps: React.FC = () => {
 
   useEffect(() => {
     loadApps();
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
   }, []);
 
-  const handleInstall = async (id: string) => {
-    setActionLoading(`install-${id}`);
-    setAlertMsg(null);
-    try {
-      await api.installApp(id);
-      setAlertMsg({ type: 'success', text: `应用已成功部署启动！` });
-      await loadApps();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `安装失败: ${err.message}` });
-    } finally {
-      setActionLoading(null);
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
+  }, [installLogs]);
+
+  const handleOpenInstallDrawer = (app: AppMetadata) => {
+    setDrawerApp(app);
+    setDrawerPort(app.port);
+    setInstallLogs([]);
+    setInstallStatus('idle');
+    setInstallError(null);
+  };
+
+  const handleCloseInstallDrawer = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    setDrawerApp(null);
+    setInstallStatus('idle');
+    loadApps();
+  };
+
+  const handleStartInstallStream = () => {
+    if (!drawerApp) return;
+    setInstallStatus('installing');
+    setInstallLogs([`🚀 正在连接 MacNAS 应用引擎并准备安装 ${drawerApp.name}...`]);
+
+    const targetPort = drawerPort || drawerApp.port;
+    const es = new EventSource(`/api/apps/${drawerApp.id}/install/stream?port=${targetPort}`);
+    eventSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      setInstallLogs((prev) => [...prev, event.data]);
+    };
+
+    es.addEventListener('done', () => {
+      es.close();
+      eventSourceRef.current = null;
+      setInstallStatus('done');
+      loadApps();
+    });
+
+    es.addEventListener('error', (event: any) => {
+      es.close();
+      eventSourceRef.current = null;
+      const errMsg = event.data || '安装过程出现异常，请检查网络或 Docker 环境';
+      setInstallError(errMsg);
+      setInstallStatus('error');
+      loadApps();
+    });
   };
 
   const handleAppAction = async (id: string, action: 'start' | 'stop' | 'restart' | 'uninstall') => {
@@ -84,6 +138,10 @@ export const Apps: React.FC = () => {
         return <RefreshCw className="w-6 h-6 text-indigo-400" />;
       case 'folder':
         return <Folder className="w-6 h-6 text-amber-400" />;
+      case 'download':
+        return <Download className="w-6 h-6 text-emerald-400" />;
+      case 'cloud':
+        return <Cloud className="w-6 h-6 text-cyan-400" />;
       default:
         return <Folder className="w-6 h-6 text-sky-400" />;
     }
@@ -94,9 +152,9 @@ export const Apps: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-extrabold text-white">预设 NAS 应用</h2>
+          <h2 className="text-2xl font-extrabold text-white">预设 NAS 核心应用</h2>
           <p className="text-sm text-slate-400 mt-1">
-            第一版聚焦精选 3 款家庭核心应用，一键自动化生成 Compose、挂载数据盘并启动。
+            精选 5 款家庭核心 NAS 应用，支持 Docker 镜像实时拉取流、端口自定义与一键快速部署。
           </p>
         </div>
 
@@ -223,6 +281,26 @@ export const Apps: React.FC = () => {
                   </div>
                 )}
 
+                {app.id === 'qbittorrent' && (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-200/90 font-mono flex flex-col space-y-1">
+                    <span className="text-[10px] text-emerald-400 font-sans font-semibold">🔑 登录凭据:</span>
+                    <div className="flex justify-between">
+                      <span>默认账号: <strong className="text-emerald-100 font-bold">admin</strong></span>
+                      <span>默认密码: <strong className="text-emerald-100 font-bold">adminadmin</strong></span>
+                    </div>
+                  </div>
+                )}
+
+                {app.id === 'alist' && (
+                  <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-200/90 font-mono flex flex-col space-y-1">
+                    <span className="text-[10px] text-cyan-400 font-sans font-semibold">🔑 登录凭据:</span>
+                    <div className="flex justify-between">
+                      <span>默认账号: <strong className="text-cyan-100 font-bold">admin</strong></span>
+                      <span>已置密码: <strong className="text-cyan-100 font-bold">adminadmin123</strong></span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Storage directory bindings */}
                 <div className="text-[11px] text-slate-400 space-y-1 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 font-mono">
                   <span className="text-slate-400 font-semibold block text-[10px] uppercase tracking-wider">数据挂载映射:</span>
@@ -239,12 +317,11 @@ export const Apps: React.FC = () => {
               <div className="pt-3 border-t border-slate-800/80">
                 {!isInstalled ? (
                   <button
-                    onClick={() => handleInstall(app.id)}
-                    disabled={actionLoading !== null}
-                    className="w-full py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold shadow-lg shadow-sky-500/25 transition flex items-center justify-center space-x-2 disabled:opacity-50"
+                    onClick={() => handleOpenInstallDrawer(app)}
+                    className="w-full py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold shadow-lg shadow-sky-500/25 transition flex items-center justify-center space-x-2"
                   >
-                    <Download className={`w-4 h-4 ${actionLoading === `install-${app.id}` ? 'animate-bounce' : ''}`} />
-                    <span>{actionLoading === `install-${app.id}` ? '正在生成并部署...' : '一键安装'}</span>
+                    <Download className="w-4 h-4" />
+                    <span>配置并安装应用</span>
                   </button>
                 ) : (
                   <div className="flex items-center justify-between gap-1.5">
@@ -344,6 +421,200 @@ export const Apps: React.FC = () => {
               ) : (
                 logs || '暂无日志输出'
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Install & Realtime Pull Stream Modal */}
+      {drawerApp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="w-full max-w-2xl rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
+              <div className="flex items-center space-x-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center shadow-inner">
+                  {getAppIcon(drawerApp.icon)}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center space-x-2">
+                    <span>{drawerApp.name}</span>
+                    <span className="text-xs font-normal text-slate-400 font-mono bg-slate-800 px-2 py-0.5 rounded">
+                      {drawerApp.version}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">{drawerApp.description}</p>
+                </div>
+              </div>
+              <button
+                onClick={handleCloseInstallDrawer}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              {installStatus === 'idle' && (
+                <div className="space-y-4 text-xs text-slate-300">
+                  <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-slate-200">WebUI 访问端口设置:</span>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="number"
+                          min={1024}
+                          max={65535}
+                          value={drawerPort}
+                          onChange={(e) => setDrawerPort(parseInt(e.target.value) || drawerApp.port)}
+                          className="w-24 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-center text-xs focus:outline-none focus:border-sky-500"
+                        />
+                        <span className="text-slate-400 font-mono">（默认: {drawerApp.port}）</span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      若默认端口与 Mac 上其他服务冲突，可在此自定义修改（映射至宿主机端口）。
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 font-mono text-xs">
+                    <span className="text-slate-400 font-bold block text-[11px] uppercase tracking-wider mb-2">自动挂载的 NAS 数据目录:</span>
+                    {drawerApp.volumes.map((v, i) => (
+                      <div key={i} className="flex justify-between py-0.5 text-slate-300">
+                        <span className="text-sky-300">{v.host}</span>
+                        <span className="text-slate-500">→ {v.container}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-200 text-xs leading-relaxed space-y-1">
+                    <p className="font-bold text-sky-300">💡 准备就绪</p>
+                    <p>点击下方按钮将开始在 Lima 虚拟机中下载官方 Docker 镜像并启动容器。实时拉取进度将在控制台即时展示。</p>
+                  </div>
+                </div>
+              )}
+
+              {(installStatus === 'installing' || installStatus === 'done' || installStatus === 'error') && (
+                <div className="space-y-4">
+                  {/* Status Banner */}
+                  {installStatus === 'installing' && (
+                    <div className="p-3.5 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-300 text-xs flex items-center justify-between">
+                      <div className="flex items-center space-x-2.5">
+                        <RefreshCw className="w-4 h-4 animate-spin text-sky-400" />
+                        <span className="font-semibold">正在拉取 Docker 镜像并部署启动，请观察实时控制台...</span>
+                      </div>
+                      <span className="font-mono text-[11px] opacity-75">实时流</span>
+                    </div>
+                  )}
+
+                  {installStatus === 'done' && (
+                    <div className="p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs space-y-2">
+                      <div className="flex items-center space-x-2 font-bold text-sm">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                        <span>应用已成功部署并上线！</span>
+                      </div>
+                      <p className="text-xs text-emerald-200/90">
+                        WebUI 访问地址: <strong className="font-mono text-white underline select-all">{drawerApp.webUrl}</strong>
+                      </p>
+                    </div>
+                  )}
+
+                  {installStatus === 'error' && (
+                    <div className="p-4 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs space-y-1">
+                      <div className="flex items-center space-x-2 font-bold text-sm">
+                        <AlertCircle className="w-5 h-5 text-rose-400" />
+                        <span>部署遇到异常:</span>
+                      </div>
+                      <p className="font-mono">{installError}</p>
+                    </div>
+                  )}
+
+                  {/* Terminal Console */}
+                  <div className="bg-slate-950 rounded-xl p-4 border border-slate-800 font-mono text-xs text-emerald-400/90 h-72 overflow-y-auto space-y-1 shadow-inner select-text">
+                    {installLogs.map((line, idx) => (
+                      <div key={idx} className="leading-relaxed whitespace-pre-wrap break-all">
+                        {line}
+                      </div>
+                    ))}
+                    <div ref={logsEndRef} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Actions */}
+            <div className="p-4 border-t border-slate-800 bg-slate-950/40 flex items-center justify-between">
+              <span className="text-xs text-slate-500 font-mono">
+                {installStatus === 'installing' ? '实时日志传输中...' : `当前目标端口: ${drawerPort || drawerApp.port}`}
+              </span>
+
+              <div className="flex items-center space-x-2.5">
+                {installStatus === 'idle' && (
+                  <>
+                    <button
+                      onClick={handleCloseInstallDrawer}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={handleStartInstallStream}
+                      className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold shadow-lg shadow-sky-500/25 transition flex items-center space-x-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>开始安装并拉取镜像</span>
+                    </button>
+                  </>
+                )}
+
+                {installStatus === 'installing' && (
+                  <button
+                    disabled
+                    className="px-5 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs font-semibold cursor-not-allowed flex items-center space-x-2"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>正在安装中...</span>
+                  </button>
+                )}
+
+                {installStatus === 'done' && (
+                  <>
+                    <button
+                      onClick={handleCloseInstallDrawer}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                    >
+                      关闭窗口
+                    </button>
+                    <a
+                      href={drawerApp.webUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/25 transition flex items-center space-x-1.5"
+                    >
+                      <span>立即打开应用</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </>
+                )}
+
+                {installStatus === 'error' && (
+                  <>
+                    <button
+                      onClick={handleCloseInstallDrawer}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                    >
+                      关闭
+                    </button>
+                    <button
+                      onClick={handleStartInstallStream}
+                      className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold transition"
+                    >
+                      重试安装
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

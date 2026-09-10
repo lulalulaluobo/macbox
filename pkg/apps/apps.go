@@ -1,3 +1,5 @@
+package apps
+
 import (
 	"context"
 	"encoding/json"
@@ -137,6 +139,73 @@ func (m *Manager) Install(ctx context.Context, id string) error {
 		return fmt.Errorf("docker compose up failed: %s (%w)", out, err)
 	}
 
+	return nil
+}
+
+func (m *Manager) InstallStream(ctx context.Context, id string, portOverride int, out io.Writer) error {
+	fmt.Fprintf(out, "🚀 [MacNAS AppStore] 开始部署应用: %s\n", id)
+
+	meta, err := m.loadAppMetadata(id)
+	if err != nil {
+		fmt.Fprintf(out, "❌ 无法加载应用元数据: %v\n", err)
+		return err
+	}
+
+	composePath := filepath.Join(m.projectRoot, "templates", "apps", id, "compose.yaml")
+	composeData, err := os.ReadFile(composePath)
+	if err != nil {
+		fmt.Fprintf(out, "❌ 读取 compose 模板失败: %v\n", err)
+		return fmt.Errorf("read template compose error: %w", err)
+	}
+
+	content := string(composeData)
+	if portOverride > 0 && meta.Port > 0 {
+		oldPortStr := fmt.Sprintf("\"%d:", meta.Port)
+		newPortStr := fmt.Sprintf("\"%d:", portOverride)
+		content = strings.Replace(content, oldPortStr, newPortStr, 1)
+		fmt.Fprintf(out, "⚙️ 自定义 Web 端口: %d -> %d\n", meta.Port, portOverride)
+	}
+
+	// 1. Create directories
+	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
+	fmt.Fprintf(out, "📁 [1/3] 正在创建持久化存储目录 %s ...\n", appDataDir)
+	mkdirCmd := fmt.Sprintf("mkdir -p %s /data/media /data/files /data/downloads", appDataDir)
+	if _, err := m.vmMgr.Exec(ctx, "bash", "-c", mkdirCmd); err != nil {
+		fmt.Fprintf(out, "❌ 创建目录失败: %v\n", err)
+		return fmt.Errorf("failed to create app directories: %w", err)
+	}
+
+	// 2. Write compose.yaml
+	encodedYAML := strings.ReplaceAll(content, "'", "'\\''")
+	writeCmd := fmt.Sprintf("cat <<'EOF' > %s/compose.yaml\n%s\nEOF", appDataDir, encodedYAML)
+	if _, err := m.vmMgr.Exec(ctx, "bash", "-c", writeCmd); err != nil {
+		fmt.Fprintf(out, "❌ 写入 compose 配置失败: %v\n", err)
+		return fmt.Errorf("failed to write compose.yaml inside VM: %w", err)
+	}
+
+	// 3. Pull image with stream
+	fmt.Fprintf(out, "📦 [2/3] 正在拉取 Docker 镜像 (实时进度流):\n")
+	pullCmd := fmt.Sprintf("docker compose -f %s/compose.yaml pull", appDataDir)
+	if err := m.vmMgr.ExecStream(ctx, out, "bash", "-c", pullCmd); err != nil {
+		fmt.Fprintf(out, "\n⚠️ 提示: compose pull 返回提示，正在直接尝试启动...\n")
+	}
+
+	// 4. Start container
+	fmt.Fprintf(out, "\n⚡ [3/3] 启动 Docker 容器...\n")
+	upCmd := fmt.Sprintf("docker compose -f %s/compose.yaml up -d", appDataDir)
+	if err := m.vmMgr.ExecStream(ctx, out, "bash", "-c", upCmd); err != nil {
+		fmt.Fprintf(out, "❌ 启动容器失败: %v\n", err)
+		return fmt.Errorf("docker compose up failed: %w", err)
+	}
+
+	// Special post-install setups
+	if id == "alist" {
+		fmt.Fprintf(out, "🔑 初始化 Alist 管理员密码为 adminadmin123 ...\n")
+		time.Sleep(2 * time.Second)
+		_, _ = m.vmMgr.Exec(ctx, "bash", "-c", "docker exec macnas-alist ./alist admin set adminadmin123")
+	}
+
+	fmt.Fprintf(out, "\n🎉 应用 [%s] 部署完成并已成功上线运行！\n", id)
 	return nil
 }
 

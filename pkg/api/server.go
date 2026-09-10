@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -104,6 +106,7 @@ func (s *Server) registerRoutes() {
 	// 5. Apps
 	s.mux.HandleFunc("GET /api/apps", s.handleAppsList)
 	s.mux.HandleFunc("POST /api/apps/{id}/install", s.handleAppInstall)
+	s.mux.HandleFunc("GET /api/apps/{id}/install/stream", s.handleAppInstallStream)
 	s.mux.HandleFunc("POST /api/apps/{id}/start", s.handleAppStart)
 	s.mux.HandleFunc("POST /api/apps/{id}/stop", s.handleAppStop)
 	s.mux.HandleFunc("POST /api/apps/{id}/restart", s.handleAppRestart)
@@ -417,6 +420,55 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "应用安装成功"})
+}
+
+type appSSEWriter struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+}
+
+func (sw *appSSEWriter) Write(p []byte) (n int, err error) {
+	lines := strings.Split(string(p), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, "\r")
+		if trimmed != "" {
+			fmt.Fprintf(sw.w, "data: %s\n\n", trimmed)
+		}
+	}
+	sw.flusher.Flush()
+	return len(p), nil
+}
+
+func (s *Server) handleAppInstallStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+
+	id := r.PathValue("id")
+	portStr := r.URL.Query().Get("port")
+	port := 0
+	if portStr != "" {
+		fmt.Sscanf(portStr, "%d", &port)
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	flusher.Flush()
+
+	sw := &appSSEWriter{w: w, flusher: flusher}
+
+	ctx := r.Context()
+	err := s.appMgr.InstallStream(ctx, id, port, sw)
+	if err != nil {
+		fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+	} else {
+		fmt.Fprintf(w, "event: done\ndata: {\"status\":\"success\",\"id\":\"%s\"}\n\n", id)
+	}
+	flusher.Flush()
 }
 
 func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {
