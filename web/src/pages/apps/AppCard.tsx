@@ -291,6 +291,15 @@ export const AppCard: React.FC<AppCardProps> = ({
               <RotateCw className={`w-3.5 h-3.5 ${actionLoading === `restart-${app.id}` ? 'animate-spin' : ''}`} />
             </button>
 
+            {/* Reconfigure / Modify ports and volumes */}
+            <button
+              onClick={() => onInstall(app)}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium transition"
+              title="修改端口/存储挂载并重新部署"
+            >
+              <Settings className="w-3.5 h-3.5 text-slate-400 hover:text-white" />
+            </button>
+
             {/* View Logs */}
             <button
               onClick={() => onViewLogs(app.id)}

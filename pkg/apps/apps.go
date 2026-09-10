@@ -328,7 +328,7 @@ func (m *Manager) Restart(ctx context.Context, id string) error {
 
 func (m *Manager) Uninstall(ctx context.Context, id string) error {
 	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	downCmd := fmt.Sprintf("cd %s && docker compose down -v", appDataDir)
+	downCmd := fmt.Sprintf("cd %s && docker compose down -v && rm -f %s/compose.yaml", appDataDir, appDataDir)
 	out, err := m.vmMgr.Exec(ctx, "bash", "-c", downCmd)
 	if err != nil {
 		return fmt.Errorf("docker compose down failed: %s (%w)", out, err)
