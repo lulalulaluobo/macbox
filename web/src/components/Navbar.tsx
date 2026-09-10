@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, HardDrive, Box, Grid, Check, Copy, Activity, Terminal } from 'lucide-react';
+import { LayoutDashboard, HardDrive, Box, Grid, Check, Copy, Activity, Terminal, Settings } from 'lucide-react';
 import { VMStatus } from '../types';
 
 interface NavbarProps {
-  activeTab: 'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal';
-  setActiveTab: (tab: 'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal') => void;
+  activeTab: 'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings';
+  setActiveTab: (tab: 'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings') => void;
   vmStatus?: VMStatus;
   dockerReady?: boolean;
   primaryIP?: string;
@@ -33,6 +33,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'docker' as const, label: 'Docker', icon: Box },
     { id: 'apps' as const, label: '应用', icon: Grid },
     { id: 'terminal' as const, label: '终端', icon: Terminal },
+    { id: 'settings' as const, label: '设置', icon: Settings },
   ];
 
   const getVMStatusColor = () => {

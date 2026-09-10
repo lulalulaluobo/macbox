@@ -1,4 +1,4 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem } from './types';
+import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult } from './types';
 
 const BASE_URL = '/api';
 
@@ -309,4 +309,63 @@ export const api = {
       body: JSON.stringify({ ids }),
     }
   ),
+
+  // System Users & Security
+  getUsers: () => fetchJSON<SystemUser[]>(`${BASE_URL}/system/users`),
+  createUser: (req: { username: string; password?: string; isSudo?: boolean }) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/users`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  updateUserPassword: (username: string, password: string) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/users/${encodeURIComponent(username)}/password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+  deleteUser: (username: string) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/users/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+    }),
+  updateRootPassword: (password: string) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/root/password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+
+  // SSH Management
+  getSSHConfig: () => fetchJSON<SSHConfig>(`${BASE_URL}/system/ssh`),
+  updateSSHConfig: (cfg: SSHConfig) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/ssh`, {
+      method: 'POST',
+      body: JSON.stringify(cfg),
+    }),
+  toggleSSH: (enable: boolean) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/ssh/toggle`, {
+      method: 'POST',
+      body: JSON.stringify({ enable }),
+    }),
+  generateSSHRootKey: (comment?: string) =>
+    fetchJSON<{ status: string; message: string; result: SSHKeyGenerationResult }>(`${BASE_URL}/system/ssh/keys/generate`, {
+      method: 'POST',
+      body: JSON.stringify({ comment: comment || '' }),
+    }),
+  getSSHAuthorizedKeys: () =>
+    fetchJSON<{ status: string; keys: string[] }>(`${BASE_URL}/system/ssh/keys`),
+  addSSHAuthorizedKey: (publicKey: string) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/ssh/keys/add`, {
+      method: 'POST',
+      body: JSON.stringify({ publicKey }),
+    }),
+  clearSSHAuthorizedKeys: () =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/ssh/keys`, {
+      method: 'DELETE',
+    }),
+
+  // Terminal Settings
+  getTerminalSettings: () => fetchJSON<TerminalSettings>(`${BASE_URL}/system/terminal/settings`),
+  updateTerminalSettings: (settings: TerminalSettings) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/terminal/settings`, {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    }),
 };

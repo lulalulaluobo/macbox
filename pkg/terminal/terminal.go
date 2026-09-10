@@ -41,12 +41,21 @@ func HandleTerminalWS(w http.ResponseWriter, r *http.Request, instanceName strin
 	}
 
 	container := r.URL.Query().Get("container")
+	loginUser := r.URL.Query().Get("user") // "root" or "default"
+
 	var cmd *exec.Cmd
 	if container != "" {
-		// Connect to container's interactive shell, fallback bash -> sh
-		cmd = exec.Command("limactl", "shell", instanceName, "bash", "-c", fmt.Sprintf("docker exec -it %s sh -c 'bash || sh'", container))
+		if loginUser == "root" {
+			cmd = exec.Command("limactl", "shell", instanceName, "bash", "-c", fmt.Sprintf("docker exec -u 0 -it %s sh -c 'bash || sh'", container))
+		} else {
+			cmd = exec.Command("limactl", "shell", instanceName, "bash", "-c", fmt.Sprintf("docker exec -it %s sh -c 'bash || sh'", container))
+		}
 	} else {
-		cmd = exec.Command("limactl", "shell", instanceName)
+		if loginUser == "root" {
+			cmd = exec.Command("limactl", "shell", instanceName, "sudo", "-i")
+		} else {
+			cmd = exec.Command("limactl", "shell", instanceName)
+		}
 	}
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 

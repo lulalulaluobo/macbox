@@ -6,7 +6,7 @@ import {
   Terminal as TerminalIcon, Folder, FolderPlus, Upload, RefreshCw, ArrowLeft,
   Download, Trash2, Edit3, Copy, Check, FileText, Film, Image, Music, Archive,
   Code, Maximize2, Minimize2, CornerDownRight, Play,
-  PanelLeftClose, PanelLeft, X, Save
+  PanelLeftClose, PanelLeft, X, Save, Crown, User
 } from 'lucide-react';
 import { api } from '../api';
 import { FileItem } from '../types';
@@ -21,6 +21,7 @@ export const TerminalPage: React.FC = () => {
   const [connected, setConnected] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [loginUser, setLoginUser] = useState<'root' | 'default'>('default');
 
   // File System State
   const [currentPath, setCurrentPath] = useState<string>('/data');
@@ -61,7 +62,7 @@ export const TerminalPage: React.FC = () => {
   ];
 
   // Initialize Terminal WebSocket
-  const initTerminal = () => {
+  const initTerminal = (userToUse?: 'root' | 'default') => {
     if (!terminalRef.current) return;
 
     if (xtermInstance.current) {
@@ -107,16 +108,19 @@ export const TerminalPage: React.FC = () => {
     xtermInstance.current = term;
     fitAddonRef.current = fitAddon;
 
-    // WebSocket connection
+    const targetUser = userToUse || loginUser;
+
+    // WebSocket connection with user param
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws`;
+    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?user=${targetUser}`;
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
     ws.onopen = () => {
       setConnected(true);
-      term.write('\r\n\x1b[36m[MacNAS] 已成功连接到 Linux 虚拟机交互终端！\x1b[0m\r\n\r\n');
+      const userBadge = targetUser === 'root' ? '\x1b[1;33m[👑 root 超级管理员]\x1b[0;36m' : '\x1b[1;32m[👤 普通用户 (macnas)]\x1b[0;36m';
+      term.write(`\r\n\x1b[36m[MacNAS] 已以 ${userBadge} 身份成功连接到 Linux 虚拟机交互终端！\x1b[0m\r\n\r\n`);
       // Send initial size
       const dims = fitAddon.proposeDimensions();
       if (dims) {
@@ -168,8 +172,22 @@ export const TerminalPage: React.FC = () => {
     };
   };
 
+  const handleSwitchUser = (newUser: 'root' | 'default') => {
+    setLoginUser(newUser);
+    initTerminal(newUser);
+  };
+
   useEffect(() => {
-    initTerminal();
+    api.getTerminalSettings()
+      .then((settings) => {
+        const u: 'root' | 'default' = settings.defaultLoginUser === 'root' ? 'root' : 'default';
+        setLoginUser(u);
+        initTerminal(u);
+      })
+      .catch(() => {
+        initTerminal('default');
+      });
+
     loadFiles(currentPath);
 
     return () => {
@@ -581,6 +599,32 @@ export const TerminalPage: React.FC = () => {
                 <span className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
                 <span className="text-xs font-bold text-white">Lima Linux VM Shell</span>
                 <span className="text-[11px] font-mono text-slate-400">({connected ? '已连接' : '未连接'})</span>
+              </div>
+
+              {/* Login Identity Badge & Fast Switcher */}
+              <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-lg bg-slate-800/80 border border-slate-700/80 text-xs">
+                <span className="text-slate-400 text-[11px]">身份:</span>
+                <button
+                  onClick={() => handleSwitchUser(loginUser === 'root' ? 'default' : 'root')}
+                  className={`flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition ${
+                    loginUser === 'root'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
+                      : 'bg-sky-500/20 text-sky-300 border border-sky-500/40 hover:bg-sky-500/30'
+                  }`}
+                  title="点击即切换当前终端身份并重新连入"
+                >
+                  {loginUser === 'root' ? (
+                    <>
+                      <Crown className="w-3 h-3 text-amber-400" />
+                      <span>root (超级用户)</span>
+                    </>
+                  ) : (
+                    <>
+                      <User className="w-3 h-3 text-sky-400" />
+                      <span>普通用户</span>
+                    </>
+                  )}
+                </button>
               </div>
             </div>
 

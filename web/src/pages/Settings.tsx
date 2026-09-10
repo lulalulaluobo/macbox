@@ -1,0 +1,1309 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Users,
+  Shield,
+  Key,
+  Terminal,
+  RefreshCw,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  AlertCircle,
+  Copy,
+  Check,
+  Crown,
+  UserCheck,
+  Sliders,
+  Eye,
+  EyeOff,
+  Download,
+  FileKey,
+  Sparkles,
+  X,
+} from 'lucide-react';
+import { SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult } from '../types';
+import { api } from '../api';
+
+interface SettingsProps {
+  primaryIP?: string;
+}
+
+export const Settings: React.FC<SettingsProps> = ({ primaryIP = '192.168.2.123' }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'rootpwd' | 'ssh' | 'terminal'>('users');
+  const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // 1. Users state
+  const [users, setUsers] = useState<SystemUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newIsSudo, setNewIsSudo] = useState(false);
+  const [userActionLoading, setUserActionLoading] = useState(false);
+
+  // Change password modal
+  const [changePwdUser, setChangePwdUser] = useState<string | null>(null);
+  const [targetNewPwd, setTargetNewPwd] = useState('');
+
+  // 2. Root password state
+  const [rootNewPwd, setRootNewPwd] = useState('');
+  const [rootConfirmPwd, setRootConfirmPwd] = useState('');
+  const [rootPwdSaving, setRootPwdSaving] = useState(false);
+  const [showRootPwd, setShowRootPwd] = useState(false);
+
+  // 3. SSH state
+  const [sshConfig, setSSHConfig] = useState<SSHConfig>({
+    enabled: true,
+    status: 'running',
+    port: 22,
+    permitRootLogin: false,
+    passwordAuthentication: true,
+  });
+  const [sshLoading, setSSHLoading] = useState(false);
+  const [sshSaving, setSSHSaving] = useState(false);
+  const [copiedSSH, setCopiedSSH] = useState(false);
+
+  // SSH Key Generation & Management state
+  const [generatingKey, setGeneratingKey] = useState(false);
+  const [generatedKeyResult, setGeneratedKeyResult] = useState<SSHKeyGenerationResult | null>(null);
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [copiedKeyText, setCopiedKeyText] = useState(false);
+  const [copiedKeyCmd, setCopiedKeyCmd] = useState(false);
+  const [authorizedKeys, setAuthorizedKeys] = useState<string[]>([]);
+  const [showAuthorizedKeys, setShowAuthorizedKeys] = useState(false);
+  const [loadingAuthKeys, setLoadingAuthKeys] = useState(false);
+  const [showImportKeyModal, setShowImportKeyModal] = useState(false);
+  const [importKeyText, setImportKeyText] = useState('');
+  const [importingKey, setImportingKey] = useState(false);
+
+  // 4. Terminal Settings state
+  const [terminalSettings, setTerminalSettings] = useState<TerminalSettings>({
+    defaultLoginUser: 'default',
+    fontSize: 13,
+    cursorStyle: 'block',
+  });
+  const [termSaving, setTermSaving] = useState(false);
+
+  const loadData = async () => {
+    setUsersLoading(true);
+    setSSHLoading(true);
+    try {
+      const [uList, sCfg, tCfg] = await Promise.all([
+        api.getUsers().catch(() => []),
+        api.getSSHConfig().catch(() => null),
+        api.getTerminalSettings().catch(() => null),
+      ]);
+      setUsers(uList || []);
+      if (sCfg) setSSHConfig(sCfg);
+      if (tCfg) setTerminalSettings(tCfg);
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `加载系统设置失败: ${err.message}` });
+    } finally {
+      setUsersLoading(false);
+      setSSHLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // --- Users Handlers ---
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUsername.trim()) return;
+    setUserActionLoading(true);
+    try {
+      await api.createUser({
+        username: newUsername.trim(),
+        password: newPassword.trim(),
+        isSudo: newIsSudo,
+      });
+      setAlertMsg({ type: 'success', text: `用户 [${newUsername}] 创建成功！` });
+      setShowAddUserModal(false);
+      setNewUsername('');
+      setNewPassword('');
+      setNewIsSudo(false);
+      await loadData();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `创建用户失败: ${err.message}` });
+    } finally {
+      setUserActionLoading(false);
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!changePwdUser || !targetNewPwd) return;
+    setUserActionLoading(true);
+    try {
+      await api.updateUserPassword(changePwdUser, targetNewPwd);
+      setAlertMsg({ type: 'success', text: `用户 [${changePwdUser}] 密码修改成功！` });
+      setChangePwdUser(null);
+      setTargetNewPwd('');
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `修改密码失败: ${err.message}` });
+    } finally {
+      setUserActionLoading(false);
+    }
+  };
+
+  const handleDeleteUser = async (username: string) => {
+    if (!confirm(`确定要彻底删除系统用户 [${username}] 及其个人家目录吗？此操作不可逆！`)) return;
+    try {
+      await api.deleteUser(username);
+      setAlertMsg({ type: 'success', text: `用户 [${username}] 已被删除` });
+      await loadData();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `删除用户失败: ${err.message}` });
+    }
+  };
+
+  // --- Root Password Handlers ---
+  const handleSaveRootPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rootNewPwd) {
+      setAlertMsg({ type: 'error', text: 'Root 密码不能为空' });
+      return;
+    }
+    if (rootNewPwd !== rootConfirmPwd) {
+      setAlertMsg({ type: 'error', text: '两次输入的 Root 密码不一致，请核对后重试' });
+      return;
+    }
+
+    setRootPwdSaving(true);
+    try {
+      await api.updateRootPassword(rootNewPwd);
+      setAlertMsg({ type: 'success', text: '超级管理员 (root) 密码已成功更新！' });
+      setRootNewPwd('');
+      setRootConfirmPwd('');
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `更新 Root 密码失败: ${err.message}` });
+    } finally {
+      setRootPwdSaving(false);
+    }
+  };
+
+  // --- SSH Handlers ---
+  const handleSaveSSHConfig = async () => {
+    setSSHSaving(true);
+    try {
+      await api.updateSSHConfig(sshConfig);
+      setAlertMsg({ type: 'success', text: 'SSH 配置已成功保存并即时生效！' });
+      await loadData();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `更新 SSH 配置失败: ${err.message}` });
+    } finally {
+      setSSHSaving(false);
+    }
+  };
+
+  const handleToggleSSH = async () => {
+    setSSHSaving(true);
+    try {
+      const nextState = !(sshConfig.status === 'running');
+      await api.toggleSSH(nextState);
+      setAlertMsg({ type: 'success', text: nextState ? 'SSH 服务已成功启动' : 'SSH 服务已停止' });
+      await loadData();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `操作 SSH 服务失败: ${err.message}` });
+    } finally {
+      setSSHSaving(false);
+    }
+  };
+
+  const handleCopySSHCommand = (cmd: string) => {
+    navigator.clipboard.writeText(cmd);
+    setCopiedSSH(true);
+    setTimeout(() => setCopiedSSH(false), 2000);
+  };
+
+  const downloadPrivateKeyFile = (privKey: string, filename: string) => {
+    const blob = new Blob([privKey], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleGenerateRootKey = async () => {
+    setGeneratingKey(true);
+    try {
+      const res = await api.generateSSHRootKey();
+      if (res.result) {
+        setGeneratedKeyResult(res.result);
+        setShowKeyModal(true);
+        // Automatically trigger browser download of private key file
+        downloadPrivateKeyFile(res.result.privateKey, res.result.filename);
+        setAlertMsg({ type: 'success', text: 'Root SSH 私钥已成功生成并下载到您的本地电脑！' });
+        // Refresh SSH config
+        const fresh = await api.getSSHConfig();
+        setSSHConfig(fresh);
+      }
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `生成 SSH 密钥失败: ${err.message}` });
+    } finally {
+      setGeneratingKey(false);
+    }
+  };
+
+  const handleLoadAuthorizedKeys = async () => {
+    setLoadingAuthKeys(true);
+    try {
+      const res = await api.getSSHAuthorizedKeys();
+      setAuthorizedKeys(res.keys || []);
+      setShowAuthorizedKeys(true);
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `获取已授权公钥列表失败: ${err.message}` });
+    } finally {
+      setLoadingAuthKeys(false);
+    }
+  };
+
+  const handleAddAuthorizedKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!importKeyText.trim()) return;
+    setImportingKey(true);
+    try {
+      await api.addSSHAuthorizedKey(importKeyText.trim());
+      setAlertMsg({ type: 'success', text: '公钥已成功添加到 Root 授权列表！' });
+      setShowImportKeyModal(false);
+      setImportKeyText('');
+      await handleLoadAuthorizedKeys();
+      const fresh = await api.getSSHConfig();
+      setSSHConfig(fresh);
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `添加公钥失败: ${err.message}` });
+    } finally {
+      setImportingKey(false);
+    }
+  };
+
+  const handleClearAuthorizedKeys = async () => {
+    if (!window.confirm('确认清空 Root 的所有已授权 SSH 公钥吗？清空后将无法使用已有密钥免密登录！')) {
+      return;
+    }
+    try {
+      await api.clearSSHAuthorizedKeys();
+      setAlertMsg({ type: 'success', text: '已清空 Root 的所有已授权公钥' });
+      setAuthorizedKeys([]);
+      const fresh = await api.getSSHConfig();
+      setSSHConfig(fresh);
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `清空失败: ${err.message}` });
+    }
+  };
+
+  // --- Terminal Settings Handlers ---
+  const handleSaveTerminalSettings = async (userChoice: 'root' | 'default') => {
+    setTermSaving(true);
+    const updated: TerminalSettings = {
+      ...terminalSettings,
+      defaultLoginUser: userChoice,
+    };
+    try {
+      await api.updateTerminalSettings(updated);
+      setTerminalSettings(updated);
+      setAlertMsg({ type: 'success', text: `终端设置已更新: 进入终端后默认以 ${userChoice === 'root' ? 'Root 超级管理员' : '普通用户'} 登录` });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `保存终端设置失败: ${err.message}` });
+    } finally {
+      setTermSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center space-x-3">
+            <h2 className="text-2xl font-extrabold text-white tracking-tight">系统与安全设置</h2>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium">
+              Linux VM 安全中枢
+            </span>
+          </div>
+          <p className="text-sm text-slate-400 mt-1">
+            管理 Linux 终端用户账户、Root 超级管理员密码、SSH 远程连接策略（开放 Root 登录与端口）及终端默认登录身份。
+          </p>
+        </div>
+
+        <button
+          onClick={loadData}
+          className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition shadow-sm self-start sm:self-auto"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${usersLoading || sshLoading ? 'animate-spin' : ''}`} />
+          <span>刷新状态</span>
+        </button>
+      </div>
+
+      {/* Alert Banner */}
+      {alertMsg && (
+        <div
+          className={`p-4 rounded-2xl text-xs flex items-center justify-between transition-all ${
+            alertMsg.type === 'success'
+              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+              : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+          }`}
+        >
+          <div className="flex items-center space-x-2.5">
+            {alertMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
+            <span>{alertMsg.text}</span>
+          </div>
+          <button onClick={() => setAlertMsg(null)} className="text-xs opacity-70 hover:opacity-100 ml-4 font-bold">
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Navigation Sub-Tabs */}
+      <div className="flex items-center space-x-2 bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800/80 overflow-x-auto text-xs font-semibold">
+        <button
+          onClick={() => setActiveSubTab('users')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
+            activeSubTab === 'users'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>终端用户管理</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('rootpwd')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
+            activeSubTab === 'rootpwd'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+          }`}
+        >
+          <Crown className="w-4 h-4 text-amber-300" />
+          <span>Root 密码管理</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('ssh')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
+            activeSubTab === 'ssh'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+          }`}
+        >
+          <Shield className="w-4 h-4 text-teal-300" />
+          <span>SSH 远程连接设置</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('terminal')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
+            activeSubTab === 'terminal'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+          }`}
+        >
+          <Terminal className="w-4 h-4 text-sky-300" />
+          <span>终端登录身份设置</span>
+        </button>
+      </div>
+
+      {/* ===================== 1. Users Management Panel ===================== */}
+      {activeSubTab === 'users' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80">
+            <div>
+              <h3 className="text-base font-bold text-white">系统用户与权限</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                展示当前 Linux 虚拟机已创建的交互式系统用户。普通用户可随时分配 sudo 管理员权限及加入 docker 组。
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAddUserModal(true)}
+              className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold shadow-lg shadow-sky-500/20 transition self-start sm:self-auto"
+            >
+              <Plus className="w-4 h-4" />
+              <span>添加新用户</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {users.map((u) => {
+              const isRoot = u.isRoot || u.username === 'root';
+              const isCurrent = u.username === 'luluen';
+
+              return (
+                <div
+                  key={u.username}
+                  className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700/80 flex flex-col justify-between space-y-4 transition shadow-lg"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div
+                          className={`w-11 h-11 rounded-2xl flex items-center justify-center border shadow-inner ${
+                            isRoot
+                              ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                              : u.isSudo
+                              ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
+                              : 'bg-slate-800 border-slate-700 text-slate-300'
+                          }`}
+                        >
+                          {isRoot ? <Crown className="w-5 h-5" /> : <Users className="w-5 h-5" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-bold text-base text-white font-mono">{u.username}</span>
+                            {isCurrent && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                                当前映射
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400 font-mono mt-0.5">UID: {u.uid}</p>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`text-[11px] px-2.5 py-1 rounded-full font-semibold border ${
+                          isRoot
+                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                            : u.isSudo
+                            ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                            : 'bg-slate-800 text-slate-400 border-slate-700/60'
+                        }`}
+                      >
+                        {isRoot ? '超级管理员' : u.isSudo ? 'Sudo 管理员' : '普通用户'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 font-mono text-xs">
+                      <div className="flex justify-between text-slate-400">
+                        <span>家目录:</span>
+                        <span className="text-slate-200 truncate max-w-[180px]">{u.homeDir}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-400">
+                        <span>登录 Shell:</span>
+                        <span className="text-slate-200">{u.shell}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800/50">
+                        <span>附加用户组: </span>
+                        <span className="text-sky-300/90">{u.groups.join(', ') || '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => {
+                        setChangePwdUser(u.username);
+                        setTargetNewPwd('');
+                      }}
+                      className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition flex items-center justify-center space-x-1.5"
+                    >
+                      <Key className="w-3.5 h-3.5 text-amber-400" />
+                      <span>修改密码</span>
+                    </button>
+
+                    {!isRoot && !isCurrent && (
+                      <button
+                        onClick={() => handleDeleteUser(u.username)}
+                        className="p-2 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700 transition"
+                        title="删除该用户"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== 2. Root Password Panel ===================== */}
+      {activeSubTab === 'rootpwd' && (
+        <div className="max-w-2xl bg-slate-900/70 p-6 rounded-3xl border border-slate-800/80 shadow-xl space-y-6">
+          <div className="flex items-start space-x-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-300 shrink-0">
+              <Crown className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">Root 超级管理员密码重置</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                设置 Linux 虚拟机的 root 账号独立登录密码。设置后，您可以在终端中直接通过 <code>su -</code> 切换，或在开启 SSH Root 登录后直接使用 root 账号远程登录 NAS。
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSaveRootPassword} className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300">输入新的 Root 密码:</label>
+              <div className="relative">
+                <input
+                  type={showRootPwd ? 'text' : 'password'}
+                  value={rootNewPwd}
+                  onChange={(e) => setRootNewPwd(e.target.value)}
+                  placeholder="请输入超级管理员新密码..."
+                  className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRootPwd(!showRootPwd)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                >
+                  {showRootPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300">再次确认新密码:</label>
+              <input
+                type={showRootPwd ? 'text' : 'password'}
+                value={rootConfirmPwd}
+                onChange={(e) => setRootConfirmPwd(e.target.value)}
+                placeholder="请再次输入新密码..."
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
+              />
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200/90 leading-relaxed space-y-1">
+              <p className="font-semibold text-amber-300">💡 安全温馨提示:</p>
+              <p>Root 账户拥有整个虚拟机的最高系统控制权限，请务必妥善保存所设置的密码，建议包含大小写字母、数字及特殊符号。</p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="submit"
+                disabled={rootPwdSaving || !rootNewPwd || rootNewPwd !== rootConfirmPwd}
+                className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition flex items-center space-x-2 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {rootPwdSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>确认修改 Root 密码</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ===================== 3. SSH Settings Panel ===================== */}
+      {activeSubTab === 'ssh' && (
+        <div className="space-y-5">
+          {/* SSH Service Status & Switch Card */}
+          <div className="p-6 rounded-3xl bg-slate-900/70 border border-slate-800/80 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-5">
+            <div className="flex items-center space-x-4">
+              <div
+                className={`w-12 h-12 rounded-2xl flex items-center justify-center border shadow-inner ${
+                  sshConfig.status === 'running'
+                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                }`}
+              >
+                <Shield className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2.5">
+                  <h3 className="text-lg font-bold text-white">SSH 远程终端守护服务</h3>
+                  <span
+                    className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${
+                      sshConfig.status === 'running'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                        : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                    }`}
+                  >
+                    {sshConfig.status === 'running' ? '● 正在运行' : '○ 已停止'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">
+                  允许使用 macOS Terminal、Termius、VSCode Remote 或 PuTTY 通过 SSH 协议远程连接管理 NAS。
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleToggleSSH}
+              disabled={sshSaving}
+              className={`px-5 py-2.5 rounded-xl font-bold text-xs shadow-md transition flex items-center space-x-2 self-start md:self-auto ${
+                sshConfig.status === 'running'
+                  ? 'bg-rose-600/90 hover:bg-rose-500 text-white shadow-rose-600/20'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20'
+              }`}
+            >
+              {sshSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+              <span>{sshConfig.status === 'running' ? '停止 SSH 服务' : '启动 SSH 服务'}</span>
+            </button>
+          </div>
+
+          {/* SSH Configuration Form */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Left: Settings */}
+            <div className="lg:col-span-7 bg-slate-900/70 p-6 rounded-3xl border border-slate-800/80 shadow-xl space-y-6">
+              <h4 className="text-sm font-bold text-white flex items-center space-x-2">
+                <Sliders className="w-4 h-4 text-sky-400" />
+                <span>SSH 安全访问策略</span>
+              </h4>
+
+              {/* 1. PermitRootLogin toggle (用户核心需求) */}
+              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm font-bold text-white">开放 SSH Root 账号登录</span>
+                    <span className="text-[10px] font-mono text-slate-400">(PermitRootLogin)</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                    开启后，支持直接以 <code>root</code> 账号通过 SSH 远程登录。若关闭，仅允许普通用户登录后 <code>sudo</code> 提权。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSSHConfig({ ...sshConfig, permitRootLogin: !sshConfig.permitRootLogin })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    sshConfig.permitRootLogin ? 'bg-amber-500' : 'bg-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      sshConfig.permitRootLogin ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* 2. Password Authentication toggle */}
+              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm font-bold text-white">允许密码认证登录</span>
+                    <span className="text-[10px] font-mono text-slate-400">(PasswordAuthentication)</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                    允许通过用户名和密码验证登录 SSH；如关闭则仅允许 SSH 公钥密钥对免密认证。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSSHConfig({ ...sshConfig, passwordAuthentication: !sshConfig.passwordAuthentication })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    sshConfig.passwordAuthentication ? 'bg-sky-500' : 'bg-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      sshConfig.passwordAuthentication ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* 3. Port */}
+              <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-4">
+                <div>
+                  <span className="text-sm font-bold text-white">SSH 监听端口:</span>
+                  <p className="text-xs text-slate-400 mt-0.5">默认端口为 22。修改端口可有效降低外网或局域网扫描风险。</p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={sshConfig.port}
+                    onChange={(e) => setSSHConfig({ ...sshConfig, port: parseInt(e.target.value) || 22 })}
+                    className="w-24 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-center text-xs focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  onClick={handleSaveSSHConfig}
+                  disabled={sshSaving}
+                  className="px-6 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold text-xs shadow-lg shadow-sky-500/25 transition flex items-center space-x-2"
+                >
+                  {sshSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  <span>保存并应用 SSH 设置</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Right: Quick SSH Commands */}
+            <div className="lg:col-span-5 bg-slate-900/70 p-6 rounded-3xl border border-slate-800/80 shadow-xl space-y-4">
+              <h4 className="text-sm font-bold text-white flex items-center space-x-2">
+                <Terminal className="w-4 h-4 text-emerald-400" />
+                <span>一键直连 SSH 终端命令</span>
+              </h4>
+
+              <div className="space-y-3 font-mono text-xs">
+                {/* Root Key Connect Command */}
+                {sshConfig.permitRootLogin && (
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 space-y-2">
+                    <div className="flex justify-between items-center text-amber-400 font-sans text-xs font-semibold">
+                      <span className="flex items-center space-x-1.5">
+                        <FileKey className="w-3.5 h-3.5" />
+                        <span>👑 Root 密钥免密连接:</span>
+                      </span>
+                      <button
+                        onClick={() => handleCopySSHCommand(`ssh -i ~/Downloads/macnas_root_id_ed25519 -p ${sshConfig.sshLocalPort || sshConfig.port} root@${sshConfig.sshLocalPort ? '127.0.0.1' : primaryIP}`)}
+                        className="p-1 rounded hover:bg-amber-500/20 text-amber-300"
+                        title="复制密钥连接命令"
+                      >
+                        {copiedSSH ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    <code className="text-amber-200 block bg-black/60 p-2.5 rounded-xl break-all">
+                      ssh -i ~/Downloads/macnas_root_id_ed25519 -p {sshConfig.sshLocalPort || sshConfig.port} root@{sshConfig.sshLocalPort ? '127.0.0.1' : primaryIP}
+                    </code>
+                  </div>
+                )}
+
+                {/* Root Password Connect Command */}
+                {sshConfig.permitRootLogin && (
+                  <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-2">
+                    <div className="flex justify-between items-center text-amber-400 font-sans text-xs font-semibold">
+                      <span>👑 Root 密码远程连接:</span>
+                      <button
+                        onClick={() => handleCopySSHCommand(`ssh -p ${sshConfig.port} root@${primaryIP}`)}
+                        className="p-1 rounded hover:bg-amber-500/20 text-amber-300"
+                        title="复制命令"
+                      >
+                        {copiedSSH ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    <code className="text-white block bg-black/60 p-2.5 rounded-xl break-all">
+                      ssh -p {sshConfig.port} root@{primaryIP}
+                    </code>
+                  </div>
+                )}
+
+                {/* Normal User Connect Command */}
+                <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/20 space-y-2">
+                  <div className="flex justify-between items-center text-sky-400 font-sans text-xs font-semibold">
+                    <span>👤 普通用户远程连接 (推荐):</span>
+                    <button
+                      onClick={() => handleCopySSHCommand(`ssh -p ${sshConfig.port} luluen@${primaryIP}`)}
+                      className="p-1 rounded hover:bg-sky-500/20 text-sky-300"
+                      title="复制命令"
+                    >
+                      {copiedSSH ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  <code className="text-white block bg-black/60 p-2.5 rounded-xl break-all">
+                    ssh -p {sshConfig.port} luluen@{primaryIP}
+                  </code>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
+                提示: 在 Mac 终端、Windows PowerShell 或第三方 SSH 工具中运行上述命令即可直接接入 MacNAS Linux 虚拟机。
+              </p>
+            </div>
+          </div>
+
+          {/* SSH Key Authentication & Root Key Generation Card */}
+          <div className="bg-slate-900/70 p-6 rounded-3xl border border-slate-800/80 shadow-xl space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center space-x-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <FileKey className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-base font-bold text-white">SSH 密钥认证与 Root 秘钥管理</h4>
+                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
+                      PubkeyAuthentication (已开启)
+                    </span>
+                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-medium font-mono">
+                      Root 授权公钥: {sshConfig.authorizedKeyCount || 0} 个
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    非对称加密密钥对 (ED25519) 具备极高安全性且免除输密烦恼。点击一键生成后，系统将自动将公钥部署进虚拟机，并将私钥直接下载至您的本地电脑。
+                  </p>
+                </div>
+              </div>
+
+              {/* One Click Generate & Download Button */}
+              <button
+                onClick={handleGenerateRootKey}
+                disabled={generatingKey}
+                className="px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:brightness-110 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition flex items-center space-x-2 shrink-0 self-start md:self-auto disabled:opacity-50"
+              >
+                {generatingKey ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                    <span>正在生成密钥并部署...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4 text-slate-950" />
+                    <span>一键生成 Root 密钥并下载</span>
+                    <Sparkles className="w-4 h-4 text-slate-950" />
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Sub actions: list keys, import key, clear keys */}
+            <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => {
+                    if (showAuthorizedKeys) {
+                      setShowAuthorizedKeys(false);
+                    } else {
+                      handleLoadAuthorizedKeys();
+                    }
+                  }}
+                  disabled={loadingAuthKeys}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition flex items-center space-x-1.5"
+                >
+                  <Key className="w-3.5 h-3.5 text-sky-400" />
+                  <span>{showAuthorizedKeys ? '收起已授权公钥列表' : `查看 Root 已授权公钥 (${sshConfig.authorizedKeyCount || 0})`}</span>
+                  {loadingAuthKeys && <RefreshCw className="w-3 h-3 animate-spin text-slate-400" />}
+                </button>
+
+                <button
+                  onClick={() => setShowImportKeyModal(true)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition flex items-center space-x-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>导入已有公钥</span>
+                </button>
+              </div>
+
+              {sshConfig.authorizedKeyCount && sshConfig.authorizedKeyCount > 0 ? (
+                <button
+                  onClick={handleClearAuthorizedKeys}
+                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition flex items-center space-x-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>清空所有已授权公钥</span>
+                </button>
+              ) : null}
+            </div>
+
+            {/* Expandable Authorized Keys List */}
+            {showAuthorizedKeys && (
+              <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2 animate-in fade-in duration-150">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-xs font-semibold text-slate-300">
+                  <span>/root/.ssh/authorized_keys 中生效的公钥:</span>
+                  <span className="text-slate-500 font-normal font-mono">共 {authorizedKeys.length} 条记录</span>
+                </div>
+                {authorizedKeys.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-2">暂无已授权公钥，点击上方「一键生成 Root 密钥」即可生成并自动注入！</p>
+                ) : (
+                  <div className="space-y-2">
+                    {authorizedKeys.map((keyLine, idx) => (
+                      <div key={idx} className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between gap-3 text-xs font-mono">
+                        <span className="text-slate-300 truncate select-all">{keyLine}</span>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(keyLine);
+                            setAlertMsg({ type: 'success', text: '公钥内容已复制到剪贴板！' });
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white shrink-0 transition flex items-center space-x-1 text-[11px]"
+                          title="复制公钥"
+                        >
+                          <Copy className="w-3 h-3" />
+                          <span>复制</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== 4. Terminal Settings Panel ===================== */}
+      {activeSubTab === 'terminal' && (
+        <div className="max-w-2xl bg-slate-900/70 p-6 rounded-3xl border border-slate-800/80 shadow-xl space-y-6">
+          <div className="flex items-start space-x-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-300 shrink-0">
+              <Terminal className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">终端默认登录身份设置</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                设置每次打开 Web 终端页面、或一键进入容器终端时，系统默认直接以 <strong>Root 身份</strong> 还是 <strong>普通用户身份</strong> 进入交互式 Shell。
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            {/* Option 1: Root */}
+            <div
+              onClick={() => handleSaveTerminalSettings('root')}
+              className={`p-4 rounded-2xl border cursor-pointer transition flex items-start space-x-3.5 ${
+                terminalSettings.defaultLoginUser === 'root'
+                  ? 'bg-amber-500/10 border-amber-500/40 shadow-lg shadow-amber-500/10'
+                  : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="pt-0.5">
+                <input
+                  type="radio"
+                  name="loginUser"
+                  checked={terminalSettings.defaultLoginUser === 'root'}
+                  onChange={() => handleSaveTerminalSettings('root')}
+                  className="text-amber-500 focus:ring-0 cursor-pointer"
+                />
+              </div>
+              <div className="flex-1 space-y-1">
+                <div className="flex items-center space-x-2">
+                  <span className="font-bold text-sm text-white">以 Root 身份直接登录 (高权限推荐)</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono font-semibold">
+                    sudo -i / #
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  进入终端时自动提升为 root 超级管理员，具有整个系统的全部读写权限，免去频繁输入 sudo 的麻烦，适合系统深度维护与安装软件包。
+                </p>
+              </div>
+            </div>
+
+            {/* Option 2: Default Normal User */}
+            <div
+              onClick={() => handleSaveTerminalSettings('default')}
+              className={`p-4 rounded-2xl border cursor-pointer transition flex items-start space-x-3.5 ${
+                terminalSettings.defaultLoginUser === 'default'
+                  ? 'bg-sky-500/10 border-sky-500/40 shadow-lg shadow-sky-500/10'
+                  : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="pt-0.5">
+                <input
+                  type="radio"
+                  name="loginUser"
+                  checked={terminalSettings.defaultLoginUser === 'default'}
+                  onChange={() => handleSaveTerminalSettings('default')}
+                  className="text-sky-500 focus:ring-0 cursor-pointer"
+                />
+              </div>
+              <div className="flex-1 space-y-1">
+                <div className="flex items-center space-x-2">
+                  <span className="font-bold text-sm text-white">以普通用户身份登录 (安全防误删)</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-mono font-semibold">
+                    luluen / $
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  默认以当前普通用户登录，防止命令敲错误删系统核心目录，需要执行特权命令时可自行手动输入 sudo。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
+            <span>当前默认配置: <strong className="font-mono text-white font-bold">{terminalSettings.defaultLoginUser === 'root' ? '👑 root 超级管理员' : '👤 普通用户'}</strong></span>
+            {termSaving && <span className="text-sky-400 flex items-center space-x-1"><RefreshCw className="w-3 h-3 animate-spin" /><span>保存中...</span></span>}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== Modal: Add User ===================== */}
+      {showAddUserModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                <UserCheck className="w-5 h-5 text-sky-400" />
+                <span>添加新系统终端用户</span>
+              </h3>
+              <button
+                onClick={() => setShowAddUserModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateUser} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">用户名:</label>
+                <input
+                  type="text"
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value.toLowerCase())}
+                  placeholder="例如: dev, backup, admin2"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">初始登录密码:</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="输入初始密码..."
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center space-x-3">
+                <input
+                  type="checkbox"
+                  id="sudoCheck"
+                  checked={newIsSudo}
+                  onChange={(e) => setNewIsSudo(e.target.checked)}
+                  className="rounded border-slate-700 text-sky-500 focus:ring-0 cursor-pointer"
+                />
+                <label htmlFor="sudoCheck" className="text-xs text-slate-300 cursor-pointer select-none">
+                  授予 Sudo 超级管理员权限 (加入 sudo 组)
+                </label>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddUserModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={userActionLoading || !newUsername.trim()}
+                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold shadow-lg shadow-sky-500/20 transition disabled:opacity-50"
+                >
+                  {userActionLoading ? '创建中...' : '确认创建用户'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== Modal: Change User Password ===================== */}
+      {changePwdUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
+            <h3 className="text-base font-bold text-white flex items-center space-x-2">
+              <Key className="w-4 h-4 text-amber-400" />
+              <span>修改密码 - {changePwdUser}</span>
+            </h3>
+
+            <form onSubmit={handleUpdatePassword} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">新密码:</label>
+                <input
+                  type="password"
+                  value={targetNewPwd}
+                  onChange={(e) => setTargetNewPwd(e.target.value)}
+                  placeholder="输入新密码..."
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setChangePwdUser(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={userActionLoading || !targetNewPwd}
+                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold transition disabled:opacity-50"
+                >
+                  确认修改
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== Modal: Generated Root SSH Key ===================== */}
+      {showKeyModal && generatedKeyResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-xl rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <FileKey className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Root SSH 私钥已生成并自动下载</h3>
+                  <p className="text-xs text-emerald-400 font-medium">公钥已自动部署至虚拟机 /root/.ssh/authorized_keys</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowKeyModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Key metadata */}
+              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-1.5 font-mono">
+                <div className="flex justify-between text-slate-400">
+                  <span>私钥文件名:</span>
+                  <span className="text-amber-300 font-bold">{generatedKeyResult.filename}</span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>密钥算法:</span>
+                  <span className="text-slate-200">{generatedKeyResult.keyType.toUpperCase()} (高安全性椭圆曲线)</span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>密钥指纹:</span>
+                  <span className="text-slate-200">{generatedKeyResult.fingerprint}</span>
+                </div>
+              </div>
+
+              {/* Usage Guide */}
+              <div className="space-y-2 font-sans">
+                <h4 className="font-bold text-slate-200">使用指南 (在 Mac 终端中运行):</h4>
+
+                <div className="p-3 rounded-xl bg-black/60 border border-slate-800 font-mono text-[11px] space-y-2 text-slate-300">
+                  <div>
+                    <span className="text-slate-500"># 步骤 1: 设置严格权限 (macOS / Linux 必需)</span>
+                    <div className="text-amber-300 select-all">chmod 600 ~/Downloads/{generatedKeyResult.filename}</div>
+                  </div>
+
+                  <div>
+                    <span className="text-slate-500"># 步骤 2: 宿主机本机直连命令 (端口 {sshConfig.sshLocalPort || 58107})</span>
+                    <div className="text-sky-300 select-all">
+                      ssh -i ~/Downloads/{generatedKeyResult.filename} -p {sshConfig.sshLocalPort || 58107} root@127.0.0.1
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-slate-500"># 步骤 3: 局域网其他设备连接命令 (端口 {sshConfig.port})</span>
+                    <div className="text-emerald-300 select-all">
+                      ssh -i ~/Downloads/{generatedKeyResult.filename} -p {sshConfig.port} root@{primaryIP}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Important security warning */}
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300/90 text-[11px] leading-relaxed">
+                ⚠️ <strong>安全提示</strong>: 私钥文件已自动下载至您的 Downloads 文件夹中。为确保绝对安全，MacNAS 服务器端已彻底擦除私钥明文，请妥善保存该私钥文件。
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => downloadPrivateKeyFile(generatedKeyResult.privateKey, generatedKeyResult.filename)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>再次下载私钥</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(generatedKeyResult.privateKey);
+                    setCopiedKeyText(true);
+                    setTimeout(() => setCopiedKeyText(false), 2000);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition"
+                >
+                  {copiedKeyText ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKeyText ? '已复制私钥' : '复制私钥文本'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cmd = `chmod 600 ~/Downloads/${generatedKeyResult.filename} && ssh -i ~/Downloads/${generatedKeyResult.filename} -p ${sshConfig.sshLocalPort || sshConfig.port} root@${sshConfig.sshLocalPort ? '127.0.0.1' : primaryIP}`;
+                    navigator.clipboard.writeText(cmd);
+                    setCopiedKeyCmd(true);
+                    setTimeout(() => setCopiedKeyCmd(false), 2000);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition flex items-center space-x-1.5 shadow-md shadow-amber-500/20"
+                >
+                  {copiedKeyCmd ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKeyCmd ? '已复制命令' : '一键复制完整连接命令'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowKeyModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold"
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== Modal: Import Existing Public Key ===================== */}
+      {showImportKeyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                <Plus className="w-4 h-4 text-emerald-400" />
+                <span>导入已有 SSH 公钥到 Root 授权列表</span>
+              </h3>
+              <button
+                onClick={() => setShowImportKeyModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              请粘贴您本地生成的公钥（通常位于 <code>~/.ssh/id_ed25519.pub</code> 或 <code>~/.ssh/id_rsa.pub</code>）：
+            </p>
+
+            <form onSubmit={handleAddAuthorizedKey} className="space-y-4">
+              <textarea
+                value={importKeyText}
+                onChange={(e) => setImportKeyText(e.target.value)}
+                placeholder="ssh-ed25519 AAAA... 用户名@设备名"
+                className="w-full h-32 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-xs focus:outline-none focus:border-sky-500 resize-none leading-relaxed"
+                required
+                autoFocus
+              />
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowImportKeyModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={importingKey || !importKeyText.trim()}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition disabled:opacity-50 flex items-center space-x-1.5"
+                >
+                  {importingKey && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{importingKey ? '导入中...' : '确认导入公钥'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

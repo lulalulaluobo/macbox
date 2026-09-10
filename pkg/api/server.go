@@ -34,15 +34,18 @@ var upgrader = websocket.Upgrader{
 }
 
 type Server struct {
-	cfg          *config.Config
-	vmMgr        *vm.Manager
-	dockerClient *docker.Client
-	appMgr       *apps.Manager
-	sambaMgr     *samba.Manager
-	powerMgr     *system.PowerManager
-	serviceMgr   *system.ServiceManager
-	projectRoot  string
-	mux          *http.ServeMux
+	cfg             *config.Config
+	vmMgr           *vm.Manager
+	dockerClient    *docker.Client
+	appMgr          *apps.Manager
+	sambaMgr        *samba.Manager
+	powerMgr        *system.PowerManager
+	serviceMgr      *system.ServiceManager
+	userMgr         *system.UserManager
+	sshMgr          *system.SSHManager
+	termSettingsMgr *system.TerminalSettingsManager
+	projectRoot     string
+	mux             *http.ServeMux
 }
 
 func NewServer(cfg *config.Config, projectRoot string) *Server {
@@ -53,17 +56,24 @@ func NewServer(cfg *config.Config, projectRoot string) *Server {
 	sambaMgr := samba.NewManager(cfg, vmMgr)
 	powerMgr := system.GetPowerManager(cfg)
 	serviceMgr := system.NewServiceManager(cfg, projectRoot)
+	userMgr := system.NewUserManager(vmMgr)
+	sshMgr := system.NewSSHManager(vmMgr)
+	cfgDir, _ := config.ConfigDir()
+	termSettingsMgr := system.NewTerminalSettingsManager(cfgDir)
 
 	s := &Server{
-		cfg:          cfg,
-		vmMgr:        vmMgr,
-		dockerClient: dockerClient,
-		appMgr:       appMgr,
-		sambaMgr:     sambaMgr,
-		powerMgr:     powerMgr,
-		serviceMgr:   serviceMgr,
-		projectRoot:  projectRoot,
-		mux:          http.NewServeMux(),
+		cfg:             cfg,
+		vmMgr:           vmMgr,
+		dockerClient:    dockerClient,
+		appMgr:          appMgr,
+		sambaMgr:        sambaMgr,
+		powerMgr:        powerMgr,
+		serviceMgr:      serviceMgr,
+		userMgr:         userMgr,
+		sshMgr:          sshMgr,
+		termSettingsMgr: termSettingsMgr,
+		projectRoot:     projectRoot,
+		mux:             http.NewServeMux(),
 	}
 
 	s.registerRoutes()
@@ -183,6 +193,22 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/terminal/files/restore", s.handleTerminalFilesRestore)
 	s.mux.HandleFunc("POST /api/terminal/files/trash/delete", s.handleTerminalFilesTrashDelete)
 	s.mux.HandleFunc("POST /api/terminal/files/empty-trash", s.handleTerminalFilesEmptyTrash)
+
+	// 9. System Security, Users & SSH
+	s.mux.HandleFunc("GET /api/system/users", s.handleListUsers)
+	s.mux.HandleFunc("POST /api/system/users", s.handleCreateUser)
+	s.mux.HandleFunc("POST /api/system/users/{username}/password", s.handleUpdateUserPassword)
+	s.mux.HandleFunc("DELETE /api/system/users/{username}", s.handleDeleteUser)
+	s.mux.HandleFunc("POST /api/system/root/password", s.handleUpdateRootPassword)
+	s.mux.HandleFunc("GET /api/system/ssh", s.handleGetSSHConfig)
+	s.mux.HandleFunc("POST /api/system/ssh", s.handleUpdateSSHConfig)
+	s.mux.HandleFunc("POST /api/system/ssh/toggle", s.handleToggleSSH)
+	s.mux.HandleFunc("POST /api/system/ssh/keys/generate", s.handleGenerateSSHRootKey)
+	s.mux.HandleFunc("GET /api/system/ssh/keys", s.handleGetSSHAuthorizedKeys)
+	s.mux.HandleFunc("POST /api/system/ssh/keys/add", s.handleAddSSHAuthorizedKey)
+	s.mux.HandleFunc("DELETE /api/system/ssh/keys", s.handleClearSSHAuthorizedKeys)
+	s.mux.HandleFunc("GET /api/system/terminal/settings", s.handleGetTerminalSettings)
+	s.mux.HandleFunc("POST /api/system/terminal/settings", s.handleUpdateTerminalSettings)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -1327,6 +1353,14 @@ func (s *Server) handleVMConfigUpdate(w http.ResponseWriter, r *http.Request) {
 
 // Web Terminal Handlers
 func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("user") == "" {
+		defUser := s.termSettingsMgr.Get().DefaultLoginUser
+		if defUser == "root" {
+			q := r.URL.Query()
+			q.Set("user", "root")
+			r.URL.RawQuery = q.Encode()
+		}
+	}
 	terminal.HandleTerminalWS(w, r, s.cfg.VM.Name)
 }
 
@@ -1633,3 +1667,230 @@ func (s *Server) handleTerminalFilesEmptyTrash(w http.ResponseWriter, r *http.Re
 		"count":   count,
 	})
 }
+
+// -------------------------------------------------------------
+// System Security & Settings Handlers
+// -------------------------------------------------------------
+
+func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := s.userMgr.ListUsers(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, users)
+}
+
+func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		IsSudo   bool   `json:"isSudo"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析失败")
+		return
+	}
+
+	if err := s.userMgr.CreateUser(r.Context(), req.Username, req.Password, req.IsSudo); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": fmt.Sprintf("用户 %s 创建成功", req.Username),
+	})
+}
+
+func (s *Server) handleUpdateUserPassword(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析失败")
+		return
+	}
+
+	if err := s.userMgr.UpdateUserPassword(r.Context(), username, req.Password); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": fmt.Sprintf("用户 %s 密码修改成功", username),
+	})
+}
+
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	if err := s.userMgr.DeleteUser(r.Context(), username); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": fmt.Sprintf("用户 %s 已被成功删除", username),
+	})
+}
+
+func (s *Server) handleUpdateRootPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析失败")
+		return
+	}
+
+	if err := s.userMgr.UpdateRootPassword(r.Context(), req.Password); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": "超级管理员 (root) 密码已成功更新",
+	})
+}
+
+func (s *Server) handleGetSSHConfig(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.sshMgr.GetConfig(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg)
+}
+
+func (s *Server) handleUpdateSSHConfig(w http.ResponseWriter, r *http.Request) {
+	var req system.SSHConfig
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析失败")
+		return
+	}
+
+	if err := s.sshMgr.UpdateConfig(r.Context(), req); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": "SSH 配置已更新并成功应用生效",
+	})
+}
+
+func (s *Server) handleToggleSSH(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enable bool `json:"enable"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析失败")
+		return
+	}
+
+	if err := s.sshMgr.ToggleService(r.Context(), req.Enable); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	msg := "SSH 服务已启动"
+	if !req.Enable {
+		msg = "SSH 服务已停止"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": msg,
+	})
+}
+
+func (s *Server) handleGetTerminalSettings(w http.ResponseWriter, r *http.Request) {
+	settings := s.termSettingsMgr.Get()
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) handleUpdateTerminalSettings(w http.ResponseWriter, r *http.Request) {
+	var req system.TerminalSettings
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析失败")
+		return
+	}
+
+	if err := s.termSettingsMgr.Update(req); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": "终端设置已保存",
+	})
+}
+
+func (s *Server) handleGenerateSSHRootKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Comment string `json:"comment"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	res, err := s.sshMgr.GenerateRootKey(r.Context(), req.Comment)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": "Root ED25519 密钥已生成并成功注入 authorized_keys",
+		"result":  res,
+	})
+}
+
+func (s *Server) handleGetSSHAuthorizedKeys(w http.ResponseWriter, r *http.Request) {
+	keys, err := s.sshMgr.GetRootAuthorizedKeys(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"keys":   keys,
+	})
+}
+
+func (s *Server) handleAddSSHAuthorizedKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PublicKey string `json:"publicKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.PublicKey) == "" {
+		writeError(w, http.StatusBadRequest, "公钥内容不能为空")
+		return
+	}
+
+	if err := s.sshMgr.AddRootAuthorizedKey(r.Context(), req.PublicKey); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": "公钥已成功添加到 Root 授权列表",
+	})
+}
+
+func (s *Server) handleClearSSHAuthorizedKeys(w http.ResponseWriter, r *http.Request) {
+	if err := s.sshMgr.ClearRootAuthorizedKeys(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": "Root 已授权公钥已全部清空",
+	})
+}
+
