@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -170,6 +172,25 @@ func CreateDir(instanceName, dirPath string) error {
 	return nil
 }
 
+type TrashItem struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	OriginalPath    string `json:"originalPath"`
+	TrashPath       string `json:"trashPath"`
+	IsDir           bool   `json:"isDir"`
+	Size            int64  `json:"size"`
+	SizeFormatted   string `json:"sizeFormatted"`
+	DeletedAt       int64  `json:"deletedAt"`
+	DeletedAtString string `json:"deletedAtString"`
+}
+
+func isSystemProtectedDir(p string) bool {
+	p = path.Clean(p)
+	return p == "/" || p == "/data" || p == "/bin" || p == "/boot" ||
+		p == "/dev" || p == "/etc" || p == "/lib" || p == "/proc" ||
+		p == "/root" || p == "/sys" || p == "/usr" || p == "/var" || p == "/home"
+}
+
 // DeletePath deletes file or folder inside VM safely
 func DeletePath(instanceName, targetPath string) error {
 	if instanceName == "" {
@@ -177,18 +198,18 @@ func DeletePath(instanceName, targetPath string) error {
 	}
 	targetPath = path.Clean(targetPath)
 
-	// Critical system protection
-	if targetPath == "/" || targetPath == "/bin" || targetPath == "/boot" ||
-		targetPath == "/dev" || targetPath == "/etc" || targetPath == "/lib" ||
-		targetPath == "/proc" || targetPath == "/root" || targetPath == "/sys" ||
-		targetPath == "/usr" || targetPath == "/var" {
+	if isSystemProtectedDir(targetPath) {
 		return fmt.Errorf("禁止删除系统保护目录: %s", targetPath)
 	}
 
-	cmd := exec.Command("limactl", "shell", instanceName, "rm", "-rf", targetPath)
+	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "rm", "-rf", targetPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("删除失败: %s (%w)", string(out), err)
+		errMsg := string(out)
+		if strings.Contains(errMsg, "Read-only file system") {
+			return fmt.Errorf("当前目录处于只读保护模式 (Read-only)，禁止删除。请前往【存储设置】将该直通目录切换为【允许读写】")
+		}
+		return fmt.Errorf("删除失败: %s (%w)", errMsg, err)
 	}
 	return nil
 }
@@ -239,14 +260,18 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 	defer file.Close()
 
 	destPath := path.Join(targetDir, header.Filename)
-	cmd := exec.Command("limactl", "shell", instanceName, "bash", "-c", fmt.Sprintf("cat > '%s'", destPath))
+	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "bash", "-c", fmt.Sprintf("cat > '%s'", destPath))
 	cmd.Stdin = file
 
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("上传文件写入失败: %s (%w)", errBuf.String(), err)
+		errMsg := errBuf.String()
+		if strings.Contains(errMsg, "Read-only file system") {
+			return fmt.Errorf("当前目录处于只读保护模式 (Read-only)，禁止上传文件")
+		}
+		return fmt.Errorf("上传文件写入失败: %s (%w)", errMsg, err)
 	}
 	return nil
 }
@@ -259,23 +284,302 @@ func RenamePath(instanceName, oldPath, newPath string) error {
 	oldPath = path.Clean(oldPath)
 	newPath = path.Clean(newPath)
 
-	if oldPath == "/" || oldPath == "/data" || oldPath == "/bin" || oldPath == "/etc" ||
-		oldPath == "/usr" || oldPath == "/var" || oldPath == "/home" {
+	if isSystemProtectedDir(oldPath) {
 		return fmt.Errorf("禁止重命名系统核心目录: %s", oldPath)
 	}
 	if newPath == "" || newPath == "/" {
 		return fmt.Errorf("无效的目标路径")
 	}
 
-	cmd := exec.Command("limactl", "shell", instanceName, "mv", oldPath, newPath)
+	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "mv", oldPath, newPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("重命名失败: %s (%w)", string(out), err)
+		errMsg := string(out)
+		if strings.Contains(errMsg, "Read-only file system") {
+			return fmt.Errorf("当前目录处于只读保护模式 (Read-only)，禁止修改名称。请前往【存储设置】将该直通目录切换为【允许读写】")
+		}
+		return fmt.Errorf("重命名失败: %s (%w)", errMsg, err)
 	}
 	return nil
 }
 
-// StreamMediaFile streams media files directly for inline preview (video/image/audio)
+// CopyPaths copies multiple files or directories to destination directory
+func CopyPaths(instanceName string, srcPaths []string, destDir string) error {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	destDir = path.Clean(destDir)
+	for _, src := range srcPaths {
+		src = path.Clean(src)
+		cmd := exec.Command("limactl", "shell", instanceName, "sudo", "cp", "-r", src, destDir+"/")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			errMsg := string(out)
+			if strings.Contains(errMsg, "Read-only file system") {
+				return fmt.Errorf("目标目录处于只读保护模式，无法复制写入")
+			}
+			return fmt.Errorf("复制 %s 失败: %s", path.Base(src), errMsg)
+		}
+	}
+	return nil
+}
+
+// MovePaths moves multiple files or directories to destination directory
+func MovePaths(instanceName string, srcPaths []string, destDir string) error {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	destDir = path.Clean(destDir)
+	for _, src := range srcPaths {
+		src = path.Clean(src)
+		if isSystemProtectedDir(src) {
+			return fmt.Errorf("禁止移动系统核心目录: %s", src)
+		}
+		cmd := exec.Command("limactl", "shell", instanceName, "sudo", "mv", src, destDir+"/")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			errMsg := string(out)
+			if strings.Contains(errMsg, "Read-only file system") {
+				return fmt.Errorf("当前或目标目录处于只读保护模式，无法移动")
+			}
+			return fmt.Errorf("移动 %s 失败: %s", path.Base(src), errMsg)
+		}
+	}
+	return nil
+}
+
+// MoveToTrash moves files into /data/.trash and logs metadata
+func MoveToTrash(instanceName string, targetPaths []string) error {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+
+	var validPaths []string
+	for _, p := range targetPaths {
+		p = path.Clean(p)
+		if isSystemProtectedDir(p) {
+			return fmt.Errorf("禁止移入回收站: 系统保护目录 %s", p)
+		}
+		validPaths = append(validPaths, p)
+	}
+	if len(validPaths) == 0 {
+		return nil
+	}
+
+	pathsJSON, err := json.Marshal(validPaths)
+	if err != nil {
+		return err
+	}
+	b64Payload := base64.StdEncoding.EncodeToString(pathsJSON)
+
+	pyScript := fmt.Sprintf(`python3 -c "
+import os, sys, json, shutil, time, base64
+
+paths = json.loads(base64.b64decode('%s').decode('utf-8'))
+trash_dir = '/data/.trash'
+os.makedirs(trash_dir, exist_ok=True)
+manifest_path = os.path.join(trash_dir, '.manifest.json')
+
+manifest = []
+if os.path.exists(manifest_path):
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            manifest = json.load(f)
+    except Exception:
+        manifest = []
+
+now = int(time.time())
+for idx, p in enumerate(paths):
+    if not os.path.exists(p):
+        continue
+    is_dir = os.path.isdir(p)
+    size = 0
+    if not is_dir:
+        try:
+            size = os.path.getsize(p)
+        except Exception:
+            pass
+    base_name = os.path.basename(p)
+    item_id = f'{now}_{idx}_{base_name}'
+    target_trash_path = os.path.join(trash_dir, item_id)
+    shutil.move(p, target_trash_path)
+    manifest.append({
+        'id': item_id,
+        'name': base_name,
+        'originalPath': p,
+        'trashPath': target_trash_path,
+        'isDir': is_dir,
+        'size': size,
+        'deletedAt': now,
+    })
+
+with open(manifest_path, 'w', encoding='utf-8') as f:
+    json.dump(manifest, f, ensure_ascii=False, indent=2)
+"`, b64Payload)
+
+	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "bash", "-c", pyScript)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		errMsg := string(out)
+		if strings.Contains(errMsg, "Read-only file system") {
+			return fmt.Errorf("当前目录处于只读保护模式 (Read-only)，禁止移入回收站。请前往【存储设置】将该直通目录切换为【允许读写】")
+		}
+		return fmt.Errorf("移入回收站失败: %s", errMsg)
+	}
+	return nil
+}
+
+// ListTrash reads items from /data/.trash/.manifest.json
+func ListTrash(instanceName string) ([]TrashItem, error) {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+
+	pyScript := `python3 -c "
+import os, sys, json, time
+
+manifest_path = '/data/.trash/.manifest.json'
+if not os.path.exists(manifest_path):
+    print('[]')
+    sys.exit(0)
+
+try:
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        items = json.load(f)
+    valid = []
+    for it in items:
+        if os.path.exists(it.get('trashPath', '')):
+            valid.append(it)
+    print(json.dumps(valid, ensure_ascii=False))
+except Exception as e:
+    print('[]')
+"`
+	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "bash", "-c", pyScript)
+	out, err := cmd.Output()
+	if err != nil {
+		return []TrashItem{}, nil
+	}
+
+	var raw []struct {
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		OriginalPath string `json:"originalPath"`
+		TrashPath    string `json:"trashPath"`
+		IsDir        bool   `json:"isDir"`
+		Size         int64  `json:"size"`
+		DeletedAt    int64  `json:"deletedAt"`
+	}
+
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return []TrashItem{}, nil
+	}
+
+	var items []TrashItem
+	for _, r := range raw {
+		items = append(items, TrashItem{
+			ID:              r.ID,
+			Name:            r.Name,
+			OriginalPath:    r.OriginalPath,
+			TrashPath:       r.TrashPath,
+			IsDir:           r.IsDir,
+			Size:            r.Size,
+			SizeFormatted:   formatBytes(r.Size),
+			DeletedAt:       r.DeletedAt,
+			DeletedAtString: time.Unix(r.DeletedAt, 0).Format("2006-01-02 15:04"),
+		})
+	}
+	return items, nil
+}
+
+// RestoreTrash restores items from trash back to their original paths
+func RestoreTrash(instanceName string, itemIDs []string) error {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+
+	idsJSON, err := json.Marshal(itemIDs)
+	if err != nil {
+		return err
+	}
+	b64Payload := base64.StdEncoding.EncodeToString(idsJSON)
+
+	pyScript := fmt.Sprintf(`python3 -c "
+import os, sys, json, shutil, base64
+
+ids = set(json.loads(base64.b64decode('%s').decode('utf-8')))
+manifest_path = '/data/.trash/.manifest.json'
+if not os.path.exists(manifest_path):
+    sys.exit(0)
+
+try:
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        items = json.load(f)
+except Exception:
+    items = []
+
+remaining = []
+for it in items:
+    if it.get('id') in ids or it.get('name') in ids:
+        orig = it.get('originalPath')
+        trash = it.get('trashPath')
+        if os.path.exists(trash):
+            os.makedirs(os.path.dirname(orig), exist_ok=True)
+            shutil.move(trash, orig)
+    else:
+        remaining.append(it)
+
+with open(manifest_path, 'w', encoding='utf-8') as f:
+    json.dump(remaining, f, ensure_ascii=False, indent=2)
+"`, b64Payload)
+
+	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "bash", "-c", pyScript)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("还原失败: %s (%w)", string(out), err)
+	}
+	return nil
+}
+
+// EmptyTrash permanently deletes all items in trash
+func EmptyTrash(instanceName string) error {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "rm", "-rf", "/data/.trash")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("清空回收站失败: %s (%w)", string(out), err)
+	}
+	return nil
+}
+
+var rangeRegex = regexp.MustCompile(`bytes=(\d+)-(\d*)`)
+
+func parseRange(rangeHeader string, fileSize int64) (int64, int64) {
+	matches := rangeRegex.FindStringSubmatch(rangeHeader)
+	if len(matches) < 2 {
+		return 0, fileSize - 1
+	}
+	start, _ := strconv.ParseInt(matches[1], 10, 64)
+	if start >= fileSize {
+		start = fileSize - 1
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := fileSize - 1
+	if len(matches) >= 3 && matches[2] != "" {
+		if parsedEnd, err := strconv.ParseInt(matches[2], 10, 64); err == nil && parsedEnd < fileSize {
+			end = parsedEnd
+		}
+	}
+	if end < start {
+		end = start
+	}
+	return start, end
+}
+
+// StreamMediaFile streams media files with HTTP 206 Range support for smooth video/audio playback
 func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, filePath string) {
 	if instanceName == "" {
 		instanceName = "macnas"
@@ -284,26 +588,59 @@ func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, fileP
 	fileName := path.Base(filePath)
 	ext := strings.TrimPrefix(filepath.Ext(fileName), ".")
 
-	cmd := exec.Command("limactl", "shell", instanceName, "cat", filePath)
-	stdout, err := cmd.StdoutPipe()
+	// Get file size
+	sizeCmd := exec.Command("limactl", "shell", instanceName, "stat", "-c", "%s", filePath)
+	sizeOut, err := sizeCmd.Output()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	if err := cmd.Start(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer func() {
-		_ = cmd.Wait()
-	}()
+	fileSize, _ := strconv.ParseInt(strings.TrimSpace(string(sizeOut)), 10, 64)
 
 	mime := getMimeType(ext)
-	w.Header().Set("Content-Type", mime)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename*=UTF-8''%s", url.PathEscape(fileName)))
 	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename*=UTF-8''%s", url.PathEscape(fileName)))
 
+	rangeHeader := r.Header.Get("Range")
+	if rangeHeader == "" || fileSize == 0 {
+		// Full stream
+		w.Header().Set("Content-Type", mime)
+		w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
+
+		cmd := exec.Command("limactl", "shell", instanceName, "cat", filePath)
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := cmd.Start(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer cmd.Wait()
+		_, _ = io.Copy(w, stdout)
+		return
+	}
+
+	// Partial content stream (HTTP 206)
+	start, end := parseRange(rangeHeader, fileSize)
+	length := end - start + 1
+
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, fileSize))
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	w.WriteHeader(http.StatusPartialContent)
+
+	pyScript := fmt.Sprintf("python3 -c \"import sys; f=open('%s','rb'); f.seek(%d); sys.stdout.buffer.write(f.read(%d))\"", filePath, start, length)
+	cmd := exec.Command("limactl", "shell", instanceName, "bash", "-c", pyScript)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	defer cmd.Wait()
 	_, _ = io.Copy(w, stdout)
 }
 

@@ -1,4 +1,4 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, AppMetadata, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem } from './types';
+import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, AppMetadata, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem } from './types';
 
 const BASE_URL = '/api';
 
@@ -73,6 +73,16 @@ export const api = {
     requiresRestart: boolean;
   }>(`${BASE_URL}/storage/mounts/${id}/toggle`, {
     method: 'POST',
+  }),
+  toggleLocalMountWritable: (id: string, writable: boolean) => fetchJSON<{
+    status: string;
+    message: string;
+    writable: boolean;
+    mounts: LocalMount[];
+    recommended: LocalMount[];
+  }>(`${BASE_URL}/storage/mounts/${id}/writable`, {
+    method: 'POST',
+    body: JSON.stringify({ writable }),
   }),
   deleteLocalMount: (id: string) => fetchJSON<{
     status: string;
@@ -185,6 +195,43 @@ export const api = {
     {
       method: 'POST',
       body: JSON.stringify({ oldPath, newPath }),
+    }
+  ),
+  copyFiles: (srcPaths: string[], destDir: string) => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files/copy`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ srcPaths, destDir }),
+    }
+  ),
+  moveFiles: (srcPaths: string[], destDir: string) => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files/move`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ srcPaths, destDir }),
+    }
+  ),
+  moveToTrash: (paths: string[]) => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files/trash`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ paths }),
+    }
+  ),
+  listTrash: () => fetchJSON<{ status: string; items: TrashItem[] }>(
+    `${BASE_URL}/terminal/files/trash`
+  ),
+  restoreTrash: (ids: string[]) => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files/restore`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }
+  ),
+  emptyTrash: () => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files/empty-trash`,
+    {
+      method: 'POST',
     }
   ),
 };

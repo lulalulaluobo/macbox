@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -105,6 +106,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/storage/mounts", s.handleStorageMountsList)
 	s.mux.HandleFunc("POST /api/storage/mounts", s.handleStorageMountsAdd)
 	s.mux.HandleFunc("POST /api/storage/mounts/{id}/toggle", s.handleStorageMountsToggle)
+	s.mux.HandleFunc("POST /api/storage/mounts/{id}/writable", s.handleStorageMountsWritable)
 	s.mux.HandleFunc("DELETE /api/storage/mounts/{id}", s.handleStorageMountsDelete)
 
 	// 4. Docker
@@ -142,6 +144,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/terminal/files", s.handleTerminalFileDelete)
 	s.mux.HandleFunc("GET /api/terminal/files/download", s.handleTerminalFileDownload)
 	s.mux.HandleFunc("GET /api/terminal/files/raw", s.handleTerminalFileRaw)
+	s.mux.HandleFunc("POST /api/terminal/files/copy", s.handleTerminalFilesCopy)
+	s.mux.HandleFunc("POST /api/terminal/files/move", s.handleTerminalFilesMove)
+	s.mux.HandleFunc("POST /api/terminal/files/trash", s.handleTerminalFilesTrash)
+	s.mux.HandleFunc("GET /api/terminal/files/trash", s.handleTerminalFilesTrashList)
+	s.mux.HandleFunc("POST /api/terminal/files/restore", s.handleTerminalFilesRestore)
+	s.mux.HandleFunc("POST /api/terminal/files/empty-trash", s.handleTerminalFilesEmptyTrash)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -432,6 +440,11 @@ func (s *Server) handleStorageMountsAdd(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	cfgDir, _ := config.ConfigDir()
+	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
+	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	_ = s.vmMgr.GenerateConfigFile(tmplPath, renderedYAML)
+
 	s.vmMgr.SetConfigDirty(true)
 	go s.vmMgr.SyncMounts(context.Background())
 	configured, recommended := storage.ListLocalMounts(s.cfg)
@@ -451,6 +464,11 @@ func (s *Server) handleStorageMountsToggle(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+
+	cfgDir, _ := config.ConfigDir()
+	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
+	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	_ = s.vmMgr.GenerateConfigFile(tmplPath, renderedYAML)
 
 	s.vmMgr.SetConfigDirty(true)
 	go s.vmMgr.SyncMounts(context.Background())
@@ -476,12 +494,71 @@ func (s *Server) handleStorageMountsDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	cfgDir, _ := config.ConfigDir()
+	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
+	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	_ = s.vmMgr.GenerateConfigFile(tmplPath, renderedYAML)
+
 	s.vmMgr.SetConfigDirty(true)
 	go s.vmMgr.SyncMounts(context.Background())
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
 		"message":         "已删除该直通目录配置",
+		"mounts":          configured,
+		"recommended":     recommended,
+		"requiresRestart": true,
+	})
+}
+
+func (s *Server) handleStorageMountsWritable(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Writable bool `json:"writable"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数错误")
+		return
+	}
+
+	writable, err := storage.ToggleLocalMountWritable(s.cfg, id, req.Writable)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	// Try dynamic remount in running VM
+	mode := "ro"
+	if writable {
+		mode = "rw"
+	}
+	var target string
+	for _, m := range s.cfg.Storage.LocalMounts {
+		if m.ID == id {
+			target = m.GuestTarget
+			break
+		}
+	}
+	remountCmd := fmt.Sprintf("sudo mount -o remount,%s /mnt/macnas-mounts/%s 2>/dev/null || true; sudo mount -o remount,%s /data/%s 2>/dev/null || true", mode, id, mode, target)
+	_, _ = s.vmMgr.Exec(r.Context(), "bash", "-c", remountCmd)
+
+	cfgDir, _ := config.ConfigDir()
+	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
+	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	_ = s.vmMgr.GenerateConfigFile(tmplPath, renderedYAML)
+
+	s.vmMgr.SetConfigDirty(true)
+	go s.vmMgr.SyncMounts(context.Background())
+
+	configured, recommended := storage.ListLocalMounts(s.cfg)
+	msg := "已切换为只读保护模式，请重启虚拟机以完全同步权限"
+	if writable {
+		msg = "已切换为允许读写模式，请点击上方提示重启虚拟机以完全同步读写权限"
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         msg,
+		"writable":        writable,
 		"mounts":          configured,
 		"recommended":     recommended,
 		"requiresRestart": true,
@@ -966,4 +1043,121 @@ func (s *Server) handleTerminalFileRaw(w http.ResponseWriter, r *http.Request) {
 	}
 
 	terminal.StreamMediaFile(w, r, s.cfg.VM.Name, targetPath)
+}
+
+func (s *Server) handleTerminalFilesCopy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SrcPaths []string `json:"srcPaths"`
+		DestDir  string   `json:"destDir"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析错误")
+		return
+	}
+	if len(req.SrcPaths) == 0 || req.DestDir == "" {
+		writeError(w, http.StatusBadRequest, "源文件与目标目录均不能为空")
+		return
+	}
+
+	if err := terminal.CopyPaths(s.cfg.VM.Name, req.SrcPaths, req.DestDir); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": fmt.Sprintf("已成功复制 %d 个项目到目标目录", len(req.SrcPaths)),
+	})
+}
+
+func (s *Server) handleTerminalFilesMove(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SrcPaths []string `json:"srcPaths"`
+		DestDir  string   `json:"destDir"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析错误")
+		return
+	}
+	if len(req.SrcPaths) == 0 || req.DestDir == "" {
+		writeError(w, http.StatusBadRequest, "源文件与目标目录均不能为空")
+		return
+	}
+
+	if err := terminal.MovePaths(s.cfg.VM.Name, req.SrcPaths, req.DestDir); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": fmt.Sprintf("已成功移动 %d 个项目到目标目录", len(req.SrcPaths)),
+	})
+}
+
+func (s *Server) handleTerminalFilesTrash(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Paths []string `json:"paths"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析错误")
+		return
+	}
+	if len(req.Paths) == 0 {
+		writeError(w, http.StatusBadRequest, "未选择要移入回收站的项目")
+		return
+	}
+
+	if err := terminal.MoveToTrash(s.cfg.VM.Name, req.Paths); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": fmt.Sprintf("已将 %d 个项目移入回收站", len(req.Paths)),
+	})
+}
+
+func (s *Server) handleTerminalFilesTrashList(w http.ResponseWriter, r *http.Request) {
+	items, err := terminal.ListTrash(s.cfg.VM.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"items":  items,
+	})
+}
+
+func (s *Server) handleTerminalFilesRestore(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析错误")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "未选择要还原的项目")
+		return
+	}
+
+	if err := terminal.RestoreTrash(s.cfg.VM.Name, req.IDs); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": fmt.Sprintf("已成功还原 %d 个项目", len(req.IDs)),
+	})
+}
+
+func (s *Server) handleTerminalFilesEmptyTrash(w http.ResponseWriter, r *http.Request) {
+	if err := terminal.EmptyTrash(s.cfg.VM.Name); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "success",
+		"message": "回收站已彻底清空",
+	})
 }

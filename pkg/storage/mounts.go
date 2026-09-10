@@ -170,3 +170,15 @@ func DeleteLocalMount(cfg *config.Config, id string) error {
 	cfg.Storage.LocalMounts = updated
 	return config.SaveConfig(cfg)
 }
+
+// ToggleLocalMountWritable updates the writable (read-only vs read-write) status of a mount
+func ToggleLocalMountWritable(cfg *config.Config, id string, writable bool) (bool, error) {
+	for i, m := range cfg.Storage.LocalMounts {
+		if m.ID == id {
+			cfg.Storage.LocalMounts[i].Writable = writable
+			err := config.SaveConfig(cfg)
+			return cfg.Storage.LocalMounts[i].Writable, err
+		}
+	}
+	return false, fmt.Errorf("未找到指定的直通挂载: %s", id)
+}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   HardDrive, Check, Copy, KeyRound, CheckCircle2, AlertCircle, RefreshCw, FolderLock, RotateCw,
-  Layers, X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, ShieldCheck, Plus, ToggleLeft, ToggleRight, Folder
+  Layers, X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, ShieldCheck, Plus, ToggleLeft, ToggleRight, Folder, Lock, Edit3
 } from 'lucide-react';
 import { DiskInfo, ManagedDisk, SambaStatus, LocalMount } from '../../types';
 import { api } from '../../api';
@@ -150,6 +150,18 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       setAlertMsg({ type: 'success', text: res.message });
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `操作失败: ${err.message}` });
+    }
+  };
+
+  const handleToggleMountWritable = async (id: string, writable: boolean) => {
+    try {
+      const res = await api.toggleLocalMountWritable(id, writable);
+      setLocalMounts(res.mounts);
+      setRecommendedMounts(res.recommended);
+      setAlertMsg({ type: 'success', text: res.message });
+      onRefreshOverview?.();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `切换权限失败: ${err.message}` });
     }
   };
 
@@ -515,6 +527,18 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   </div>
 
                   <div className="flex items-center space-x-2 self-end sm:self-center">
+                    <button
+                      onClick={() => handleToggleMountWritable(m.id, !m.writable)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 border ${
+                        m.writable
+                          ? 'bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25'
+                          : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'
+                      }`}
+                      title={m.writable ? '当前为允许读写，点击切换为只读保护模式' : '当前为只读保护，点击切换为允许读写（可删除/修改文件）'}
+                    >
+                      {m.writable ? <Edit3 className="w-3.5 h-3.5 text-amber-400" /> : <Lock className="w-3.5 h-3.5 text-slate-400" />}
+                      <span>{m.writable ? '允许读写' : '只读保护'}</span>
+                    </button>
                     <button
                       onClick={() => handleToggleMount(m.id)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center space-x-1 ${

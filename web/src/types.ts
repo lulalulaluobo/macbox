@@ -177,3 +177,15 @@ export interface FileItem {
   ext: string;
 }
 
+export interface TrashItem {
+  id: string;
+  name: string;
+  originalPath: string;
+  trashPath: string;
+  isDir: boolean;
+  size: number;
+  sizeFormatted: string;
+  deletedAt: number;
+  deletedAtString: string;
+}
+

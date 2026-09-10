@@ -429,8 +429,13 @@ func (m *Manager) SyncMounts(ctx context.Context) {
 		if !mount.Enabled {
 			continue
 		}
+		mode := "ro"
+		if mount.Writable {
+			mode = "rw"
+		}
 		script += fmt.Sprintf(
 			"if [ -d \"/mnt/macnas-mounts/%s\" ]; then\n"+
+				"  mount -o remount,%s \"/mnt/macnas-mounts/%s\" 2>/dev/null || true\n"+
 				"  REAL_DATA=\"$(readlink -f /data || echo /data)\"\n"+
 				"  TARGET_DIR=\"${REAL_DATA}/%s\"\n"+
 				"  mkdir -p \"$TARGET_DIR\"\n"+
@@ -438,8 +443,9 @@ func (m *Manager) SyncMounts(ctx context.Context) {
 				"    mount --bind \"/mnt/macnas-mounts/%s\" \"$TARGET_DIR\"\n"+
 				"    echo \"[macnas-mounts] mounted %s -> $TARGET_DIR\"\n"+
 				"  fi\n"+
+				"  mount -o remount,%s \"$TARGET_DIR\" 2>/dev/null || true\n"+
 				"fi\n",
-			mount.ID, mount.GuestTarget, mount.ID, mount.ID,
+			mount.ID, mode, mount.ID, mount.GuestTarget, mount.ID, mount.ID, mode,
 		)
 	}
 

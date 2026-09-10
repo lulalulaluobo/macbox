@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Folder, FileText, Film, Image, Music, Download, Trash2, Edit3,
   Eye, EyeOff, X, Save, AlertTriangle, ShieldCheck, Play,
-  ZoomIn, ZoomOut, RotateCw, ChevronRight, FolderPlus, Upload, Grid, List, Search, ArrowLeft, RefreshCw
+  ZoomIn, ZoomOut, RotateCw, ChevronRight, FolderPlus, Upload, Grid, List, Search, ArrowLeft, RefreshCw,
+  Copy, Scissors, Clipboard, Star, CheckSquare, Square, RotateCcw, Volume2, VolumeX
 } from 'lucide-react';
-import { FileItem, LocalMount } from '../../types';
+import { FileItem, LocalMount, TrashItem } from '../../types';
 import { api } from '../../api';
 
 interface FileManagerProps {
@@ -20,6 +21,27 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'mtime'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  // Multi-Selection State
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+
+  // Clipboard State (Copy / Cut)
+  const [clipboard, setClipboard] = useState<{ action: 'copy' | 'cut'; items: string[] } | null>(null);
+
+  // Favorites State (Stored in localStorage)
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('macnas_file_favorites');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Trash View State
+  const [viewingTrash, setViewingTrash] = useState<boolean>(false);
+  const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
+  const [trashLoading, setTrashLoading] = useState<boolean>(false);
 
   // Security: Hide system / container metadata folders by default (Benchmark fnOS)
   const [hideSystemFiles, setHideSystemFiles] = useState<boolean>(true);
@@ -47,6 +69,9 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   // Preview Modals
   const [videoPreview, setVideoPreview] = useState<FileItem | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoMuted, setVideoMuted] = useState(false);
+  const [videoVolume, setVideoVolume] = useState(1.0);
   const [imagePreview, setImagePreview] = useState<FileItem | null>(null);
   const [imageZoom, setImageZoom] = useState(1);
   const [imageRotate, setImageRotate] = useState(0);
@@ -94,13 +119,25 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   useEffect(() => {
     loadFiles(currentPath);
+    setSelectedPaths(new Set());
   }, [currentPath]);
 
   useEffect(() => {
     api.getLocalMounts()
       .then((res) => setLocalMounts(res.mounts || []))
       .catch(() => setLocalMounts([]));
+    loadTrash();
   }, []);
+
+  useEffect(() => {
+    if (videoPreview && videoRef.current) {
+      videoRef.current.volume = 1.0;
+      videoRef.current.muted = false;
+      setVideoVolume(1.0);
+      setVideoMuted(false);
+      videoRef.current.play().catch(() => {});
+    }
+  }, [videoPreview]);
 
   // Breadcrumb path parts
   const pathParts = currentPath.split('/').filter(Boolean);
@@ -239,26 +276,151 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
   };
 
-  // Delete
+  // Multi-Selection
+  const toggleSelectItem = (path: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedPaths.size === filteredFiles.length && filteredFiles.length > 0) {
+      setSelectedPaths(new Set());
+    } else {
+      setSelectedPaths(new Set(filteredFiles.map((f) => f.path)));
+    }
+  };
+
+  // Clipboard (Copy / Cut / Paste)
+  const handleCopy = (paths: string[], e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (paths.length === 0) return;
+    setClipboard({ action: 'copy', items: paths });
+    setSelectedPaths(new Set());
+    setAlertMsg({ type: 'success', text: `已复制 ${paths.length} 个项目到剪贴板，请前往目标文件夹点击粘贴` });
+  };
+
+  const handleCut = (paths: string[], e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (paths.length === 0) return;
+    setClipboard({ action: 'cut', items: paths });
+    setSelectedPaths(new Set());
+    setAlertMsg({ type: 'success', text: `已剪切 ${paths.length} 个项目到剪贴板，请前往目标文件夹点击粘贴` });
+  };
+
+  const handlePaste = async () => {
+    if (!clipboard || clipboard.items.length === 0) return;
+    try {
+      if (clipboard.action === 'copy') {
+        const res = await api.copyFiles(clipboard.items, currentPath);
+        setAlertMsg({ type: 'success', text: res.message });
+      } else {
+        const res = await api.moveFiles(clipboard.items, currentPath);
+        setAlertMsg({ type: 'success', text: res.message });
+      }
+      setClipboard(null);
+      loadFiles(currentPath);
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `粘贴失败: ${err.message}` });
+    }
+  };
+
+  // Favorites
+  const toggleFavorite = (path: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setFavorites((prev) => {
+      const next = prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path];
+      try {
+        localStorage.setItem('macnas_file_favorites', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  // Trash Handlers
+  const loadTrash = async () => {
+    setTrashLoading(true);
+    try {
+      const res = await api.listTrash();
+      setTrashItems(res.items || []);
+    } catch (err: any) {
+      // ignore
+    } finally {
+      setTrashLoading(false);
+    }
+  };
+
+  // Delete / Trash Modals
   const handleOpenDelete = (item: FileItem, e: React.MouseEvent) => {
     e.stopPropagation();
     setDeleteTarget(item);
     setShowDeleteModal(true);
   };
 
-  const handleDeleteConfirm = async () => {
-    if (!deleteTarget) return;
+  const handleMoveToTrashConfirm = async () => {
+    const targets = deleteTarget ? [deleteTarget.path] : Array.from(selectedPaths);
+    if (targets.length === 0) return;
     setDeleting(true);
     try {
-      await api.deleteFile(deleteTarget.path);
+      const res = await api.moveToTrash(targets);
       setShowDeleteModal(false);
       setDeleteTarget(null);
-      setAlertMsg({ type: 'success', text: `成功删除: ${deleteTarget.name}` });
+      setSelectedPaths(new Set());
+      setAlertMsg({ type: 'success', text: res.message });
+      loadFiles(currentPath);
+      loadTrash();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `移入回收站失败: ${err.message}` });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handlePermanentDeleteConfirm = async () => {
+    const targets = deleteTarget ? [deleteTarget.path] : Array.from(selectedPaths);
+    if (targets.length === 0) return;
+    setDeleting(true);
+    try {
+      for (const p of targets) {
+        await api.deleteFile(p);
+      }
+      setShowDeleteModal(false);
+      setDeleteTarget(null);
+      setSelectedPaths(new Set());
+      setAlertMsg({ type: 'success', text: `已彻底删除 ${targets.length} 个项目` });
       loadFiles(currentPath);
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `删除失败: ${err.message}` });
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleRestoreTrash = async (ids: string[]) => {
+    try {
+      const res = await api.restoreTrash(ids);
+      setAlertMsg({ type: 'success', text: res.message });
+      loadTrash();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `还原失败: ${err.message}` });
+    }
+  };
+
+  const handleEmptyTrash = async () => {
+    if (!confirm('确定要清空回收站吗？回收站内的所有文件将彻底永久丢失！')) return;
+    try {
+      const res = await api.emptyTrash();
+      setAlertMsg({ type: 'success', text: res.message });
+      loadTrash();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `清空回收站失败: ${err.message}` });
     }
   };
 
@@ -349,15 +511,18 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
           <nav className="space-y-1">
             {categories.map((cat) => {
-              const active = currentPath === cat.path;
+              const active = !viewingTrash && currentPath === cat.path;
               const Icon = cat.icon;
               return (
                 <button
                   key={cat.path}
-                  onClick={() => setCurrentPath(cat.path)}
+                  onClick={() => {
+                    setViewingTrash(false);
+                    setCurrentPath(cat.path);
+                  }}
                   className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition ${
                     active
-                      ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
+                      ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30 font-semibold'
                       : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
                   }`}
                 >
@@ -369,7 +534,69 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                 </button>
               );
             })}
+
+            {/* Trash Bin Nav Item */}
+            <button
+              onClick={() => {
+                setViewingTrash(true);
+                loadTrash();
+              }}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition ${
+                viewingTrash
+                  ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 font-semibold'
+                  : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+              }`}
+            >
+              <div className="flex items-center space-x-2.5 truncate">
+                <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
+                <span className="truncate">回收站</span>
+              </div>
+              {trashItems.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 font-mono font-bold">
+                  {trashItems.length}
+                </span>
+              )}
+            </button>
           </nav>
+
+          {/* Favorites (Starred) Section */}
+          <div className="pt-2 border-t border-slate-800/60">
+            <div className="flex items-center justify-between pb-1.5 px-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">我的收藏</span>
+              <span className="text-[10px] text-amber-400 font-mono">{favorites.length} 项</span>
+            </div>
+            {favorites.length === 0 ? (
+              <p className="text-[11px] text-slate-500 italic px-2 py-1">点击文件或目录的 ⭐ 即可添加收藏</p>
+            ) : (
+              <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                {favorites.map((favPath) => {
+                  const favBase = favPath.split('/').pop() || favPath;
+                  return (
+                    <div
+                      key={favPath}
+                      className="group flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs hover:bg-slate-800/60 text-slate-300 hover:text-white transition cursor-pointer"
+                      onClick={() => {
+                        setViewingTrash(false);
+                        setCurrentPath(favPath);
+                      }}
+                    >
+                      <div className="flex items-center space-x-2 truncate" title={favPath}>
+                        <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400 shrink-0" />
+                        <span className="truncate">{favBase}</span>
+                      </div>
+                      <button
+                        onClick={(e) => toggleFavorite(favPath, e)}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-rose-400"
+                        title="取消收藏"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {localMounts.filter((m) => m.enabled).length > 0 && (
             <div className="pt-2 border-t border-slate-800/60">
@@ -380,14 +607,17 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
               <div className="space-y-1">
                 {localMounts.filter((m) => m.enabled).map((m) => {
                   const targetPath = `/data/${m.guestTarget}`;
-                  const active = currentPath === targetPath || currentPath.startsWith(targetPath + '/');
+                  const active = !viewingTrash && (currentPath === targetPath || currentPath.startsWith(targetPath + '/'));
                   return (
                     <button
                       key={m.id}
-                      onClick={() => setCurrentPath(targetPath)}
+                      onClick={() => {
+                        setViewingTrash(false);
+                        setCurrentPath(targetPath);
+                      }}
                       className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition ${
                         active
-                          ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                          ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold'
                           : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
                       }`}
                     >
@@ -395,7 +625,14 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                         <HardDriveIcon className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                         <span className="truncate">{m.name}</span>
                       </div>
-                      {active && <ChevronRight className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+                      <div className="flex items-center space-x-1 shrink-0">
+                        <span className={`text-[9px] px-1 py-0.2 rounded font-mono ${
+                          m.writable ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-400'
+                        }`}>
+                          {m.writable ? '读写' : '只读'}
+                        </span>
+                        {active && <ChevronRight className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+                      </div>
                     </button>
                   );
                 })}
@@ -589,9 +826,135 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           </div>
         )}
 
+        {/* Clipboard Paste Banner */}
+        {clipboard && (
+          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg animate-in fade-in">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300 shrink-0">
+                {clipboard.action === 'copy' ? <Copy className="w-4 h-4" /> : <Scissors className="w-4 h-4" />}
+              </div>
+              <div>
+                <span className="font-bold text-white text-xs">
+                  剪贴板：已{clipboard.action === 'copy' ? '复制' : '剪切'} {clipboard.items.length} 个项目
+                </span>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  当前目标目录：<code className="text-amber-300 font-mono">{currentPath}</code>，点击右侧按钮即可粘贴放入。
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2 self-end sm:self-center shrink-0">
+              <button
+                onClick={handlePaste}
+                className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center space-x-1.5 shadow-md shadow-amber-500/20 transition"
+              >
+                <Clipboard className="w-3.5 h-3.5" />
+                <span>粘贴到当前目录</span>
+              </button>
+              <button
+                onClick={() => setClipboard(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                title="清除剪贴板"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* File View Container */}
         <div className="flex-1 p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 min-h-[480px]">
-          {loading ? (
+          {viewingTrash ? (
+            /* TRASH VIEW */
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                    <Trash2 className="w-5 h-5 text-rose-400" />
+                    <span>回收站 (暂存删除项目)</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    被删除的文件与目录先移入回收站保护。您可以随时一键安全还原到原目录；清空后将无法恢复。
+                  </p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={loadTrash}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${trashLoading ? 'animate-spin' : ''}`} />
+                    <span>刷新</span>
+                  </button>
+                  <button
+                    onClick={handleEmptyTrash}
+                    disabled={trashItems.length === 0}
+                    className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center space-x-1.5 shadow-lg shadow-rose-600/20 transition disabled:opacity-40"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>清空回收站</span>
+                  </button>
+                </div>
+              </div>
+
+              {trashLoading ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-2">
+                  <RefreshCw className="w-6 h-6 text-rose-400 animate-spin" />
+                  <p className="text-xs">正在读取回收站清单...</p>
+                </div>
+              ) : trashItems.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-3">
+                  <div className="p-4 rounded-2xl bg-slate-800/40 text-slate-600">
+                    <Trash2 className="w-12 h-12" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-300">回收站是空的</p>
+                  <p className="text-xs text-slate-500">所有删除的文件都会先保存在这里，防止误删破坏</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
+                        <th className="pb-3 font-semibold pl-2">项目名称</th>
+                        <th className="pb-3 font-semibold">原存储路径</th>
+                        <th className="pb-3 font-semibold">大小</th>
+                        <th className="pb-3 font-semibold">删除时间</th>
+                        <th className="pb-3 font-semibold text-right pr-2">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50">
+                      {trashItems.map((it) => (
+                        <tr key={it.id} className="hover:bg-slate-800/40 transition">
+                          <td className="py-3 pl-2 font-medium text-slate-200">
+                            <div className="flex items-center space-x-2">
+                              {it.isDir ? <Folder className="w-4 h-4 text-amber-400 shrink-0" /> : <FileText className="w-4 h-4 text-slate-400 shrink-0" />}
+                              <span className="truncate max-w-xs">{it.name}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 text-slate-400 font-mono text-[11px] max-w-xs truncate" title={it.originalPath}>
+                            {it.originalPath}
+                          </td>
+                          <td className="py-3 text-slate-400 font-mono text-[11px]">
+                            {it.isDir ? '文件夹' : it.sizeFormatted}
+                          </td>
+                          <td className="py-3 text-slate-400 font-mono text-[11px]">
+                            {it.deletedAtString}
+                          </td>
+                          <td className="py-3 text-right pr-2">
+                            <button
+                              onClick={() => handleRestoreTrash([it.id])}
+                              className="px-3 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-semibold flex items-center space-x-1 ml-auto transition"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>还原</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : loading ? (
             <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3">
               <RefreshCw className="w-8 h-8 text-sky-400 animate-spin" />
               <p className="text-xs">加载文件列表中...</p>
@@ -621,18 +984,61 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                 const isImage = !isDir && type === 'image';
                 const isVideo = !isDir && type === 'video';
                 const isAudio = !isDir && type === 'audio';
+                const isSelected = selectedPaths.has(item.path);
+                const isFav = favorites.includes(item.path);
 
                 return (
                   <div
                     key={item.path}
                     onClick={() => handleItemClick(item)}
-                    className="group relative p-3.5 rounded-2xl bg-slate-950/60 hover:bg-slate-800/80 border border-slate-800/80 hover:border-sky-500/40 transition-all flex flex-col justify-between cursor-pointer hover:shadow-xl hover:shadow-sky-500/5"
+                    className={`group relative p-3.5 rounded-2xl bg-slate-950/60 hover:bg-slate-800/80 border transition-all flex flex-col justify-between cursor-pointer hover:shadow-xl hover:shadow-sky-500/5 ${
+                      isSelected
+                        ? 'border-sky-500 bg-sky-500/10 ring-1 ring-sky-500/40'
+                        : 'border-slate-800/80 hover:border-sky-500/40'
+                    }`}
                   >
+                    {/* Top Left Selection Checkbox */}
+                    <div
+                      className={`absolute top-2.5 left-2.5 z-20 transition-opacity ${
+                        isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                      onClick={(e) => toggleSelectItem(item.path, e)}
+                    >
+                      <div className={`p-1 rounded-md transition ${isSelected ? 'text-sky-400' : 'text-slate-400 hover:text-white bg-slate-900/80'}`}>
+                        {isSelected ? <CheckSquare className="w-4 h-4 fill-sky-500/20" /> : <Square className="w-4 h-4" />}
+                      </div>
+                    </div>
+
                     {/* Top Right Action Menu */}
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center space-x-1 z-10 bg-slate-900/90 rounded-lg p-1 shadow-lg border border-slate-700/60">
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center space-x-0.5 z-20 bg-slate-900/95 rounded-lg p-1 shadow-lg border border-slate-700/60">
+                      {/* Star / Favorite */}
+                      <button
+                        onClick={(e) => toggleFavorite(item.path, e)}
+                        className="p-1 text-slate-400 hover:text-amber-400 rounded hover:bg-slate-800 transition"
+                        title={isFav ? '取消收藏' : '收藏'}
+                      >
+                        <Star className={`w-3 h-3 ${isFav ? 'text-amber-400 fill-amber-400' : ''}`} />
+                      </button>
+                      {/* Copy */}
+                      <button
+                        onClick={(e) => handleCopy([item.path], e)}
+                        className="p-1 text-slate-400 hover:text-sky-400 rounded hover:bg-slate-800 transition"
+                        title="复制"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                      {/* Cut */}
+                      <button
+                        onClick={(e) => handleCut([item.path], e)}
+                        className="p-1 text-slate-400 hover:text-amber-400 rounded hover:bg-slate-800 transition"
+                        title="剪切 (移动)"
+                      >
+                        <Scissors className="w-3 h-3" />
+                      </button>
+                      {/* Rename */}
                       <button
                         onClick={(e) => handleOpenRename(item, e)}
-                        className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800"
+                        className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition"
                         title="重命名"
                       >
                         <Edit3 className="w-3 h-3" />
@@ -642,16 +1048,17 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                           href={api.getFileDownloadUrl(item.path)}
                           onClick={(e) => e.stopPropagation()}
                           download
-                          className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800"
+                          className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition"
                           title="下载"
                         >
                           <Download className="w-3 h-3" />
                         </a>
                       )}
+                      {/* Delete */}
                       <button
                         onClick={(e) => handleOpenDelete(item, e)}
-                        className="p-1 text-slate-400 hover:text-rose-400 rounded hover:bg-slate-800"
-                        title="删除"
+                        className="p-1 text-slate-400 hover:text-rose-400 rounded hover:bg-slate-800 transition"
+                        title="移入回收站"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -717,7 +1124,16 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-400 uppercase font-mono text-[10px]">
-                    <th className="pb-3 font-semibold pl-2">名称</th>
+                    <th className="w-8 pb-3 pl-2">
+                      <button onClick={handleSelectAll} className="p-0.5 text-slate-400 hover:text-white" title="全选 / 反选">
+                        {selectedPaths.size > 0 && selectedPaths.size === filteredFiles.length ? (
+                          <CheckSquare className="w-3.5 h-3.5 text-sky-400 fill-sky-500/20" />
+                        ) : (
+                          <Square className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="pb-3 font-semibold">名称</th>
                     <th className="pb-3 font-semibold">大小</th>
                     <th className="pb-3 font-semibold">类型</th>
                     <th className="pb-3 font-semibold">最后修改</th>
@@ -728,14 +1144,34 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                   {filteredFiles.map((item) => {
                     const isDir = item.isDir;
                     const type = getFileType(item.ext);
+                    const isSelected = selectedPaths.has(item.path);
+                    const isFav = favorites.includes(item.path);
                     return (
                       <tr
                         key={item.path}
                         onClick={() => handleItemClick(item)}
-                        className="group hover:bg-slate-800/40 cursor-pointer transition-colors"
+                        className={`group cursor-pointer transition-colors ${
+                          isSelected ? 'bg-sky-500/10' : 'hover:bg-slate-800/40'
+                        }`}
                       >
-                        <td className="py-2.5 pl-2">
+                        <td className="w-8 py-2.5 pl-2" onClick={(e) => toggleSelectItem(item.path, e)}>
+                          <div className="p-0.5 text-slate-400 hover:text-white">
+                            {isSelected ? (
+                              <CheckSquare className="w-3.5 h-3.5 text-sky-400 fill-sky-500/20" />
+                            ) : (
+                              <Square className="w-3.5 h-3.5" />
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5">
                           <div className="flex items-center space-x-2.5 truncate max-w-sm">
+                            <button
+                              onClick={(e) => toggleFavorite(item.path, e)}
+                              className="text-slate-500 hover:text-amber-400 shrink-0"
+                              title={isFav ? '取消收藏' : '收藏'}
+                            >
+                              <Star className={`w-3.5 h-3.5 ${isFav ? 'text-amber-400 fill-amber-400' : 'opacity-0 group-hover:opacity-100'}`} />
+                            </button>
                             {isDir ? (
                               <Folder className="w-4 h-4 text-amber-400 shrink-0" />
                             ) : type === 'video' ? (
@@ -764,7 +1200,21 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                           {item.mtimeString}
                         </td>
                         <td className="py-2.5 text-right pr-2">
-                          <div className="flex items-center justify-end space-x-2" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end space-x-1" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={(e) => handleCopy([item.path], e)}
+                              className="p-1 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-slate-800 transition"
+                              title="复制"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => handleCut([item.path], e)}
+                              className="p-1 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition"
+                              title="剪切 (移动)"
+                            >
+                              <Scissors className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               onClick={(e) => handleOpenRename(item, e)}
                               className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
@@ -785,7 +1235,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                             <button
                               onClick={(e) => handleOpenDelete(item, e)}
                               className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
-                              title="删除"
+                              title="移入回收站"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -799,6 +1249,47 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
             </div>
           )}
         </div>
+
+        {/* Floating Multi-Selection Action Bar */}
+        {selectedPaths.size > 0 && !viewingTrash && (
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 border border-sky-500/40 rounded-2xl shadow-2xl px-5 py-3 backdrop-blur-md flex items-center space-x-3 text-xs animate-in slide-in-from-bottom-5">
+            <div className="flex items-center space-x-2 pr-3 border-r border-slate-700">
+              <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+              <span className="font-bold text-white">已选择 {selectedPaths.size} 项</span>
+            </div>
+            <button
+              onClick={() => handleCopy(Array.from(selectedPaths))}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center space-x-1.5 transition"
+            >
+              <Copy className="w-3.5 h-3.5 text-sky-400" />
+              <span>复制</span>
+            </button>
+            <button
+              onClick={() => handleCut(Array.from(selectedPaths))}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center space-x-1.5 transition"
+            >
+              <Scissors className="w-3.5 h-3.5 text-amber-400" />
+              <span>剪切 (移动)</span>
+            </button>
+            <button
+              onClick={() => {
+                setDeleteTarget(null);
+                setShowDeleteModal(true);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-medium flex items-center space-x-1.5 transition"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>移入回收站</span>
+            </button>
+            <button
+              onClick={() => setSelectedPaths(new Set())}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              title="取消选择"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ========================================================================= */}
@@ -810,12 +1301,31 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
           <div className="w-full max-w-4xl rounded-2xl bg-slate-900 border border-slate-800 p-5 shadow-2xl flex flex-col space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <div className="flex items-center space-x-2">
-                <Film className="w-4 h-4 text-violet-400" />
-                <span className="font-bold text-white text-sm">{videoPreview.name}</span>
-                <span className="text-xs text-slate-500 font-mono">({videoPreview.sizeFormatted})</span>
+              <div className="flex items-center space-x-2 truncate">
+                <Film className="w-4 h-4 text-violet-400 shrink-0" />
+                <span className="font-bold text-white text-sm truncate">{videoPreview.name}</span>
+                <span className="text-xs text-slate-500 font-mono shrink-0">({videoPreview.sizeFormatted})</span>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  onClick={() => {
+                    if (videoRef.current) {
+                      const next = !videoMuted;
+                      videoRef.current.muted = next;
+                      setVideoMuted(next);
+                      if (!next) videoRef.current.volume = 1.0;
+                    }
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center space-x-1 border transition ${
+                    videoMuted
+                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30'
+                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
+                  }`}
+                  title="切换静音/开启声音"
+                >
+                  {videoMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                  <span>{videoMuted ? '点击开启声音' : `音量 ${Math.round(videoVolume * 100)}%`}</span>
+                </button>
                 <a
                   href={api.getFileDownloadUrl(videoPreview.path)}
                   download
@@ -835,9 +1345,16 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
             <div className="relative rounded-xl overflow-hidden bg-black flex items-center justify-center max-h-[70vh]">
               <video
+                ref={videoRef}
                 src={api.getFileRawUrl(videoPreview.path)}
                 controls
                 autoPlay
+                playsInline
+                onVolumeChange={(e) => {
+                  const el = e.target as HTMLVideoElement;
+                  setVideoVolume(el.volume);
+                  setVideoMuted(el.muted);
+                }}
                 className="w-full h-auto max-h-[70vh] rounded-xl"
               >
                 您的浏览器不支持流式播放此视频。
@@ -1085,41 +1602,63 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         </div>
       )}
 
-      {/* 3. Delete Confirmation Modal */}
-      {showDeleteModal && deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-slate-900 border border-rose-500/30 p-6 shadow-2xl space-y-4">
-            <div className="flex items-center space-x-3 text-rose-400">
-              <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20">
+      {/* 3. Delete / Move to Trash Modal */}
+      {showDeleteModal && (deleteTarget || selectedPaths.size > 0) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
                 <Trash2 className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-bold text-white text-sm">确认彻底删除？</h3>
-                <p className="text-[11px] text-slate-400">此操作不可撤销，请谨慎核对</p>
+                <h3 className="font-bold text-white text-base">删除文件确认</h3>
+                <p className="text-xs text-slate-400">建议优先移入回收站，可随时安全还原</p>
               </div>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-              <span className="text-slate-400">即将删除: </span>
-              <strong className="text-white font-mono">{deleteTarget.name}</strong>
-              <p className="text-[10px] text-slate-500 font-mono mt-1">{deleteTarget.path}</p>
+              <span className="text-slate-400">即将处理: </span>
+              {deleteTarget ? (
+                <>
+                  <strong className="text-white font-mono">{deleteTarget.name}</strong>
+                  <p className="text-[10px] text-slate-500 font-mono mt-1 truncate">{deleteTarget.path}</p>
+                </>
+              ) : (
+                <strong className="text-white">已勾选的 {selectedPaths.size} 个项目</strong>
+              )}
             </div>
 
-            <div className="flex justify-end space-x-2 pt-2">
+            <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-200 text-xs flex items-start space-x-2">
+              <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+              <span>
+                <strong>回收站机制</strong>: 移入回收站后文件暂存于 <code className="text-sky-300 font-mono">/data/.trash</code>，点击侧边栏回收站即可一键找回。
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setShowDeleteModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-medium"
+                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-medium transition"
               >
                 取消
               </button>
               <button
                 type="button"
-                onClick={handleDeleteConfirm}
+                onClick={handlePermanentDeleteConfirm}
                 disabled={deleting}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold disabled:opacity-50"
+                className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition disabled:opacity-50"
               >
-                {deleting ? '删除中...' : '确认删除'}
+                彻底抹除
+              </button>
+              <button
+                type="button"
+                onClick={handleMoveToTrashConfirm}
+                disabled={deleting}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold shadow-lg shadow-sky-600/25 flex items-center justify-center space-x-1.5 transition disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{deleting ? '处理中...' : '移入回收站 (推荐)'}</span>
               </button>
             </div>
           </div>
