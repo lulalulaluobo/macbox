@@ -51,6 +51,8 @@ type Manager struct {
 	instanceName string
 	mu           sync.RWMutex
 	lastError    string
+	vmAction     string // "starting", "stopping", "restarting", "" (idle)
+	configDirty  bool   // true when config changed and VM needs restart
 }
 
 func (m *Manager) SetLastError(err string) {
@@ -63,6 +65,30 @@ func (m *Manager) GetLastError() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.lastError
+}
+
+func (m *Manager) SetVMAction(action string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.vmAction = action
+}
+
+func (m *Manager) GetVMAction() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.vmAction
+}
+
+func (m *Manager) SetConfigDirty(dirty bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.configDirty = dirty
+}
+
+func (m *Manager) IsConfigDirty() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.configDirty
 }
 
 func NewManager(cfg *config.Config) *Manager {
@@ -307,8 +333,42 @@ func (m *Manager) Stop(ctx context.Context) error {
 func (m *Manager) Restart(ctx context.Context, projectRoot string) error {
 	_ = m.Stop(ctx)
 	time.Sleep(2 * time.Second)
-	return m.Start(ctx, projectRoot)
+	if err := m.Start(ctx, projectRoot); err != nil {
+		return err
+	}
+	// Wait for VM to be fully ready then sync bind mounts
+	time.Sleep(3 * time.Second)
+	m.SyncMounts(ctx)
+	return nil
 }
+
+// SyncMounts regenerates and re-applies VirtioFS bind mount script inside the running VM
+func (m *Manager) SyncMounts(ctx context.Context) {
+	if len(m.cfg.Storage.LocalMounts) == 0 {
+		return
+	}
+
+	// Build the mount script content
+	script := "#!/bin/bash\nset -e\n"
+	for _, mount := range m.cfg.Storage.LocalMounts {
+		if !mount.Enabled {
+			continue
+		}
+		script += fmt.Sprintf(
+			"if [ -d \"/mnt/macnas-mounts/%s\" ]; then\n"+
+				"  mkdir -p \"/data/%s\"\n"+
+				"  mountpoint -q \"/data/%s\" || mount --bind \"/mnt/macnas-mounts/%s\" \"/data/%s\"\n"+
+				"fi\n",
+			mount.ID, mount.GuestTarget, mount.GuestTarget, mount.ID, mount.GuestTarget,
+		)
+	}
+
+	// Write script and execute
+	writeCmd := fmt.Sprintf("cat > /usr/local/bin/macnas-mounts.sh << 'SCRIPT_EOF'\n%sSCRIPT_EOF\nchmod +x /usr/local/bin/macnas-mounts.sh", script)
+	_, _ = m.Exec(ctx, "sudo", "bash", "-c", writeCmd)
+	_, _ = m.Exec(ctx, "sudo", "systemctl", "restart", "macnas-mounts.service")
+}
+
 
 // Exec runs a command inside the Lima VM via limactl shell
 func (m *Manager) Exec(ctx context.Context, command ...string) (string, error) {

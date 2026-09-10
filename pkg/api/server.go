@@ -169,6 +169,8 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"power":   s.powerMgr.GetStatus(),
 		"service": s.serviceMgr.GetStatus(),
 		"vm":      vmStat,
+		"vmAction":    s.vmMgr.GetVMAction(),
+		"configDirty": s.vmMgr.IsConfigDirty(),
 		"docker": map[string]interface{}{
 			"ready":        vmStat.DockerReady,
 			"total":        len(containers),
@@ -238,34 +240,44 @@ func (s *Server) handleSystemServiceUninstall(w http.ResponseWriter, r *http.Req
 
 // VM Handlers
 func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
+	s.vmMgr.SetVMAction("starting")
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		if err := s.vmMgr.Start(ctx, s.projectRoot); err != nil {
 			log.Printf("[MacNAS] VM Start error: %v", err)
+		} else {
+			s.vmMgr.SetConfigDirty(false)
 		}
+		s.vmMgr.SetVMAction("")
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting", "message": "虚拟机启动中..."})
 }
 
 func (s *Server) handleVMStop(w http.ResponseWriter, r *http.Request) {
+	s.vmMgr.SetVMAction("stopping")
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		if err := s.vmMgr.Stop(ctx); err != nil {
 			log.Printf("[MacNAS] VM Stop error: %v", err)
 		}
+		s.vmMgr.SetVMAction("")
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping", "message": "虚拟机停止中..."})
 }
 
 func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
+	s.vmMgr.SetVMAction("restarting")
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		if err := s.vmMgr.Restart(ctx, s.projectRoot); err != nil {
 			log.Printf("[MacNAS] VM Restart error: %v", err)
+		} else {
+			s.vmMgr.SetConfigDirty(false)
 		}
+		s.vmMgr.SetVMAction("")
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting", "message": "虚拟机重启中..."})
 }
@@ -369,6 +381,7 @@ func (s *Server) handleStorageMountsAdd(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	s.vmMgr.SetConfigDirty(true)
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
@@ -387,6 +400,7 @@ func (s *Server) handleStorageMountsToggle(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	s.vmMgr.SetConfigDirty(true)
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	msg := "已开启该直通目录，重启虚拟机后生效"
 	if !enabled {
@@ -409,6 +423,7 @@ func (s *Server) handleStorageMountsDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	s.vmMgr.SetConfigDirty(true)
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
@@ -644,6 +659,8 @@ func (s *Server) handleWSLogs(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		select {
+		case <-r.Context().Done():
+			return
 		case <-ticker.C:
 			var logs string
 			var err error

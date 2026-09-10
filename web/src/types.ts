@@ -135,6 +135,8 @@ export interface SystemOverview {
   power?: PowerStatus;
   service?: ServiceStatus;
   vm: VMStatus;
+  vmAction?: string;    // "starting" | "stopping" | "restarting" | "" (idle)
+  configDirty?: boolean; // true when config changed and VM needs restart
   docker: {
     ready: boolean;
     total: number;

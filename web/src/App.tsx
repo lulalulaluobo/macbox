@@ -29,8 +29,22 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     refreshData();
-    const timer = setInterval(refreshData, 4000);
-    return () => clearInterval(timer);
+    let timer = setInterval(refreshData, 10000);
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        clearInterval(timer);
+      } else {
+        refreshData();
+        timer = setInterval(refreshData, 10000);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   return (

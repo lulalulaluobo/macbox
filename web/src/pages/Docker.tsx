@@ -8,6 +8,7 @@ export const Docker: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'running' | 'stopped'>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Logs modal
   const [activeLogContainer, setActiveLogContainer] = useState<string | null>(null);
@@ -29,8 +30,22 @@ export const Docker: React.FC = () => {
 
   useEffect(() => {
     loadContainers();
-    const interval = setInterval(loadContainers, 5000);
-    return () => clearInterval(interval);
+    let interval = setInterval(loadContainers, 8000);
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        clearInterval(interval);
+      } else {
+        loadContainers();
+        interval = setInterval(loadContainers, 8000);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   const handleContainerAction = async (id: string, action: 'start' | 'stop' | 'restart') => {
@@ -41,7 +56,7 @@ export const Docker: React.FC = () => {
       if (action === 'restart') await api.restartContainer(id);
       await loadContainers();
     } catch (err: any) {
-      alert(`操作失败: ${err.message}`);
+      setAlertMsg({ type: 'error', text: `操作失败: ${err.message}` });
     } finally {
       setActionLoading(null);
     }
@@ -74,6 +89,17 @@ export const Docker: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Alert Banner */}
+      {alertMsg && (
+        <div className={`p-4 rounded-xl text-sm flex items-center justify-between ${
+          alertMsg.type === 'success'
+            ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+            : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+        }`}>
+          <span>{alertMsg.text}</span>
+          <button onClick={() => setAlertMsg(null)} className="text-xs opacity-70 hover:opacity-100">关闭</button>
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

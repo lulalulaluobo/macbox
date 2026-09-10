@@ -62,8 +62,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  const vmAction = overview?.vmAction || '';
+  const configDirty = overview?.configDirty || false;
+
   const handleVMAction = async (action: 'start' | 'stop' | 'restart') => {
-    setActionLoading(action);
     setMessage(null);
     try {
       if (action === 'start') await api.startVM();
@@ -76,19 +78,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
           ? '虚拟机正在停止...'
           : '虚拟机正在重启...'
       );
-
-      let attempts = 0;
-      const pollInterval = setInterval(() => {
-        attempts++;
-        onRefresh();
-        if (attempts >= 20) {
-          clearInterval(pollInterval);
-          setActionLoading(null);
-        }
-      }, 3000);
+      // Refresh once immediately to pick up the new vmAction state
+      setTimeout(onRefresh, 1000);
     } catch (err: any) {
       setMessage(`操作失败: ${err.message}`);
-      setActionLoading(null);
     }
   };
 

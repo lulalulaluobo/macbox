@@ -74,16 +74,48 @@ provision:
     chmod -R 0777 /data || true
     {{end}}
 
-    # 3. 挂载 VirtioFS 本地直通目录至 /data (使用 Linux bind mount 保证 Docker 容器无缝直接访问)
+    # 3. 创建 VirtioFS bind mount 持久化 systemd 服务 (保证 VM 每次启动自动挂载)
     mkdir -p /mnt/macnas-mounts
+    cat <<'MOUNT_SCRIPT' > /usr/local/bin/macnas-mounts.sh
+    #!/bin/bash
+    # MacNAS VirtioFS bind mount — 每次 VM 启动自动执行
+    set -e
+    sleep 2  # 等待 VirtioFS 挂载就绪
+    MOUNT_SCRIPT
+
     {{range .LocalMounts}}
     {{if .Enabled}}
+    cat <<'ENTRY_END' >> /usr/local/bin/macnas-mounts.sh
     if [ -d "/mnt/macnas-mounts/{{.ID}}" ]; then
       mkdir -p "/data/{{.GuestTarget}}"
       mountpoint -q "/data/{{.GuestTarget}}" || mount --bind "/mnt/macnas-mounts/{{.ID}}" "/data/{{.GuestTarget}}"
+      echo "[macnas-mounts] bind mounted {{.ID}} -> /data/{{.GuestTarget}}"
     fi
+    ENTRY_END
     {{end}}
     {{end}}
+
+    chmod +x /usr/local/bin/macnas-mounts.sh
+
+    cat <<'SERVICE_EOF' > /etc/systemd/system/macnas-mounts.service
+    [Unit]
+    Description=MacNAS VirtioFS bind mounts
+    After=local-fs.target docker.service
+    Wants=docker.service
+
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    ExecStart=/usr/local/bin/macnas-mounts.sh
+
+    [Install]
+    WantedBy=multi-user.target
+    SERVICE_EOF
+
+    systemctl daemon-reload
+    systemctl enable macnas-mounts.service
+    systemctl start macnas-mounts.service || true
+
 
     # 3. 配置 Samba
     cat <<'EOF' > /etc/samba/smb.conf
