@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, HardDrive, Box, Grid, Check, Copy, Activity, Terminal, Settings } from 'lucide-react';
+import { LayoutDashboard, HardDrive, Box, Grid, Check, Copy, Activity, Terminal, Settings, Sun, Moon } from 'lucide-react';
 import { VMStatus } from '../types';
+import { useTheme } from '../theme';
 
 interface NavbarProps {
   activeTab: 'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings';
@@ -18,6 +19,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   primaryIP,
 }) => {
   const [copied, setCopied] = useState(false);
+  const { isDark, toggleTheme } = useTheme();
 
   const handleCopyIP = () => {
     if (primaryIP) {
@@ -117,6 +119,25 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Activity className={`w-3.5 h-3.5 ${dockerReady ? 'text-emerald-400' : 'text-slate-500'}`} />
               <span className="text-slate-300">Docker {dockerReady ? '就绪' : '离线'}</span>
             </div>
+
+            {/* Theme Toggle Button */}
+            <button
+              onClick={toggleTheme}
+              title={isDark ? '切换至明亮模式 (白天)' : '切换至暗黑模式 (夜间)'}
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 border border-slate-700/60 text-slate-300 hover:text-white transition active:scale-95 shadow-sm"
+            >
+              {isDark ? (
+                <>
+                  <Sun className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-semibold hidden md:inline">日间模式</span>
+                </>
+              ) : (
+                <>
+                  <Moon className="w-4 h-4 text-sky-400" />
+                  <span className="text-xs font-semibold hidden md:inline">夜间模式</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
       </div>

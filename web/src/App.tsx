@@ -8,8 +8,10 @@ import { TerminalPage } from './pages/TerminalPage';
 import { Settings } from './pages/Settings';
 import { SystemOverview, AppMetadata } from './types';
 import { api } from './api';
+import { useTheme } from './theme';
 
 export const App: React.FC = () => {
+  useTheme();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings'>('dashboard');
   const [overview, setOverview] = useState<SystemOverview | undefined>(undefined);
   const [apps, setApps] = useState<AppMetadata[]>([]);
@@ -50,7 +52,7 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#090d16] text-slate-100">
+    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-[#090d16] text-slate-900 dark:text-slate-100 transition-colors duration-200">
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}

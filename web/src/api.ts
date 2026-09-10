@@ -1,4 +1,4 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult } from './types';
+import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult } from './types';
 
 const BASE_URL = '/api';
 
@@ -199,6 +199,23 @@ export const api = {
   updateSambaPassword: (password: string) => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/samba/password`, {
     method: 'POST',
     body: JSON.stringify({ password }),
+  }),
+  addOrUpdateSMBShare: (share: Partial<SMBShare> & { name: string; path: string }) => fetchJSON<{ status: string; share: SMBShare }>(`${BASE_URL}/samba/shares`, {
+    method: 'POST',
+    body: JSON.stringify(share),
+  }),
+  toggleSMBShare: (id: string) => fetchJSON<{ status: string; enabled: boolean }>(`${BASE_URL}/samba/shares/${id}/toggle`, {
+    method: 'POST',
+  }),
+  deleteSMBShare: (id: string) => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/samba/shares/${id}`, {
+    method: 'DELETE',
+  }),
+  toggleSMBService: (enable: boolean) => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/samba/service/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({ enable }),
+  }),
+  restartSMBService: () => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/samba/service/restart`, {
+    method: 'POST',
   }),
 
   // VM Specs

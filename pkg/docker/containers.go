@@ -175,13 +175,29 @@ func (c *Client) RestartContainer(ctx context.Context, idOrName string) error {
 }
 
 func (c *Client) RemoveContainer(ctx context.Context, idOrName string, force bool) error {
+	// Inspect to get container name before removing
+	inspectOut, _ := c.runDockerCmd(ctx, "inspect", "--format", "{{.Name}}", idOrName)
+	cleanName := strings.TrimPrefix(strings.TrimSpace(string(inspectOut)), "/")
+	if cleanName == "" {
+		cleanName = strings.TrimPrefix(idOrName, "/")
+	}
+
 	args := []string{"rm"}
 	if force {
 		args = append(args, "-f")
 	}
 	args = append(args, idOrName)
-	_, err := c.runDockerCmd(ctx, args...)
-	return err
+	if _, err := c.runDockerCmd(ctx, args...); err != nil {
+		return err
+	}
+
+	// If it was a macnas app container, clean up /data/appdata/<appId>/compose.yaml
+	if strings.HasPrefix(cleanName, "macnas-") {
+		appId := strings.TrimPrefix(cleanName, "macnas-")
+		_, _ = c.vmMgr.Exec(ctx, "bash", "-c", fmt.Sprintf("rm -f /data/appdata/%s/compose.yaml", appId))
+	}
+
+	return nil
 }
 
 func (c *Client) GetLogs(ctx context.Context, idOrName string, tail int) (string, error) {

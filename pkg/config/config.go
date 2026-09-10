@@ -49,11 +49,23 @@ type StorageConfig struct {
 	LocalMounts    []LocalMount `yaml:"localMounts"`    // VirtioFS direct folder mounts from Mac
 }
 
+type SMBShare struct {
+	ID         string `json:"id" yaml:"id"`
+	Name       string `json:"name" yaml:"name"`
+	Path       string `json:"path" yaml:"path"`
+	Comment    string `json:"comment" yaml:"comment"`
+	Writable   bool   `json:"writable" yaml:"writable"`     // true = 读写, false = 只读
+	GuestOk    bool   `json:"guestOk" yaml:"guestOk"`       // true = 允许访客免密
+	Enabled    bool   `json:"enabled" yaml:"enabled"`       // true = 开启共享
+	DiskSource string `json:"diskSource" yaml:"diskSource"` // "primary", "secondary", "passthrough", "custom"
+}
+
 type SambaConfig struct {
-	ShareName string `yaml:"shareName"`
-	Port      int    `yaml:"port"`
-	User      string `yaml:"user"`
-	Password  string `yaml:"password"`
+	ShareName string     `yaml:"shareName"`
+	Port      int        `yaml:"port"`
+	User      string     `yaml:"user"`
+	Password  string     `yaml:"password"`
+	Shares    []SMBShare `yaml:"shares"`
 }
 
 func DefaultConfig() *Config {

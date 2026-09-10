@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   HardDrive, Check, Copy, KeyRound, CheckCircle2, AlertCircle, RefreshCw, FolderLock, RotateCw,
-  Layers, X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, ShieldCheck, Plus, ToggleLeft, ToggleRight, Folder, Lock, Edit3, Zap
+  Layers, X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, ShieldCheck, Plus, ToggleLeft, ToggleRight, Folder, Lock, Unlock, Edit3, Zap, Power
 } from 'lucide-react';
-import { DiskInfo, ManagedDisk, SambaStatus, LocalMount } from '../../types';
+import { DiskInfo, ManagedDisk, SambaStatus, LocalMount, SMBShare, AvailableTarget } from '../../types';
 import { api } from '../../api';
 
 export interface StorageSettingsProps {
@@ -19,7 +19,20 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   const [dataPath, setDataPath] = useState<string>('');
   const [samba, setSamba] = useState<SambaStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
+
+  // SMB Multi-Share States
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [editingShare, setEditingShare] = useState<SMBShare | null>(null);
+  const [shareFormName, setShareFormName] = useState('');
+  const [shareFormPath, setShareFormPath] = useState('');
+  const [shareFormComment, setShareFormComment] = useState('');
+  const [shareFormWritable, setShareFormWritable] = useState(true);
+  const [shareFormGuestOk, setShareFormGuestOk] = useState(true);
+  const [shareFormEnabled, setShareFormEnabled] = useState(true);
+  const [shareFormDiskSource, setShareFormDiskSource] = useState<'primary' | 'secondary' | 'passthrough' | 'custom'>('custom');
+  const [shareActionLoading, setShareActionLoading] = useState<string | null>(null);
+  const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
+  const [restartingSamba, setRestartingSamba] = useState(false);
 
   // Local Mounts (VirtioFS)
   const [localMounts, setLocalMounts] = useState<LocalMount[]>([]);
@@ -284,11 +297,133 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
     }
   };
 
-  const handleCopySMB = () => {
-    if (samba?.address) {
-      navigator.clipboard.writeText(samba.address);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+
+  const handleCopyShareAddress = (address: string, id: string) => {
+    navigator.clipboard.writeText(address);
+    setCopiedShareId(id);
+    setTimeout(() => setCopiedShareId(null), 2000);
+  };
+
+  const handleOpenAddShare = (preset?: AvailableTarget) => {
+    setEditingShare(null);
+    if (preset) {
+      let cleanName = preset.path.replace(/^\/data\/?/, '').replace(/[^a-zA-Z0-9_\-]/g, '-');
+      if (!cleanName) cleanName = 'DataShare';
+      if (preset.source === 'primary') cleanName = 'MacNAS';
+      else if (preset.source === 'secondary') cleanName = 'MacNAS-SSD2';
+
+      setShareFormName(cleanName);
+      setShareFormPath(preset.path);
+      setShareFormComment(preset.description || preset.name);
+      setShareFormDiskSource((preset.source as any) || 'custom');
+    } else {
+      setShareFormName('');
+      setShareFormPath('/data/');
+      setShareFormComment('');
+      setShareFormDiskSource('custom');
+    }
+    setShareFormWritable(true);
+    setShareFormGuestOk(true);
+    setShareFormEnabled(true);
+    setShowShareModal(true);
+  };
+
+  const handleOpenEditShare = (share: SMBShare) => {
+    setEditingShare(share);
+    setShareFormName(share.name);
+    setShareFormPath(share.path);
+    setShareFormComment(share.comment || '');
+    setShareFormWritable(share.writable);
+    setShareFormGuestOk(share.guestOk);
+    setShareFormEnabled(share.enabled);
+    setShareFormDiskSource((share.diskSource as any) || 'custom');
+    setShowShareModal(true);
+  };
+
+  const handleSaveShare = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shareFormName.trim() || !shareFormPath.trim()) return;
+
+    setShareActionLoading('save');
+    try {
+      await api.addOrUpdateSMBShare({
+        id: editingShare?.id,
+        name: shareFormName.trim(),
+        path: shareFormPath.trim(),
+        comment: shareFormComment.trim(),
+        writable: shareFormWritable,
+        guestOk: shareFormGuestOk,
+        enabled: shareFormEnabled,
+        diskSource: shareFormDiskSource,
+      });
+
+      const updatedSamba = await api.getSambaStatus();
+      setSamba(updatedSamba);
+      setAlertMsg({ type: 'success', text: `SMB 共享 [${shareFormName.trim()}] 配置已成功保存并即时生效！` });
+      setShowShareModal(false);
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `保存共享失败: ${err.message}` });
+    } finally {
+      setShareActionLoading(null);
+    }
+  };
+
+  const handleToggleShare = async (share: SMBShare) => {
+    setShareActionLoading(`toggle-${share.id}`);
+    try {
+      await api.toggleSMBShare(share.id);
+      const updatedSamba = await api.getSambaStatus();
+      setSamba(updatedSamba);
+      setAlertMsg({ type: 'success', text: `共享 [${share.name}] 已${share.enabled ? '暂停' : '开启'}` });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `切换共享状态失败: ${err.message}` });
+    } finally {
+      setShareActionLoading(null);
+    }
+  };
+
+  const handleDeleteShare = async (share: SMBShare) => {
+    if (!confirm(`确定要删除 SMB 共享 [${share.name}] 吗？这仅取消局域网共享，不会影响真实文件。`)) {
+      return;
+    }
+    setShareActionLoading(`delete-${share.id}`);
+    try {
+      await api.deleteSMBShare(share.id);
+      const updatedSamba = await api.getSambaStatus();
+      setSamba(updatedSamba);
+      setAlertMsg({ type: 'success', text: `共享 [${share.name}] 已删除` });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `删除共享失败: ${err.message}` });
+    } finally {
+      setShareActionLoading(null);
+    }
+  };
+
+  const handleRestartSamba = async () => {
+    setRestartingSamba(true);
+    try {
+      await api.restartSMBService();
+      const updatedSamba = await api.getSambaStatus();
+      setSamba(updatedSamba);
+      setAlertMsg({ type: 'success', text: 'Samba 服务已重新加载配置并平滑重启！' });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `重启 Samba 失败: ${err.message}` });
+    } finally {
+      setRestartingSamba(false);
+    }
+  };
+
+  const handleToggleSMBService = async (enable: boolean) => {
+    setShareActionLoading('service-toggle');
+    try {
+      await api.toggleSMBService(enable);
+      const updatedSamba = await api.getSambaStatus();
+      setSamba(updatedSamba);
+      setAlertMsg({ type: 'success', text: `Samba 服务已${enable ? '启动' : '停止'}` });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `操作 Samba 服务失败: ${err.message}` });
+    } finally {
+      setShareActionLoading(null);
     }
   };
 
@@ -342,67 +477,314 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
         </div>
       )}
 
-      {/* Section 1: SMB File Sharing Card */}
-      <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900/90 to-indigo-950/40 border border-slate-800/90 shadow-xl space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800/80 gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-sky-400">
+      {/* Section 1: SMB Multi-Share & Granular Permission Management Hub */}
+      <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900/95 to-indigo-950/40 border border-slate-800/90 shadow-2xl space-y-6">
+        {/* Top Header & Global Actions */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-5 border-b border-slate-800/80 gap-4">
+          <div className="flex items-start space-x-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sky-500/20 to-indigo-500/20 border border-sky-500/30 flex items-center justify-center text-sky-400 shadow-inner shrink-0 mt-0.5">
               <FolderLock className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <h3 className="text-lg font-bold text-white">Samba (SMB) 局域网文件共享</h3>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                  samba?.status === 'running' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-lg font-bold text-white tracking-wide">Samba (SMB) 局域网多硬盘与文件夹共享</h3>
+                <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center space-x-1.5 ${
+                  samba?.status === 'running'
+                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                 }`}>
-                  {samba?.status === 'running' ? '运行中' : '已停止'}
+                  <span className={`w-1.5 h-1.5 rounded-full ${samba?.status === 'running' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                  <span>{samba?.status === 'running' ? '服务运行中' : '服务已停止'}</span>
+                </span>
+                <span className="text-xs px-2.5 py-0.5 rounded-full font-mono bg-slate-800 text-slate-300 border border-slate-700">
+                  端口: {samba?.port || 4455}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">供 Windows 资源管理器、Mac Finder 及移动端电视盒子通过标准 SMB 访问。</p>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                针对不同物理硬盘（主存储盘、第二高速盘）及自定义文件夹独立设置共享开关、读写安全权限及免密访客访问。
+              </p>
             </div>
           </div>
 
-          <button
-            onClick={() => setShowPasswordModal(true)}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition"
-          >
-            <KeyRound className="w-3.5 h-3.5 text-sky-400" />
-            <span>修改共享密码</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleOpenAddShare()}
+              className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-sky-600/20 transition active:scale-95"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>+ 新增共享目录</span>
+            </button>
+            <button
+              onClick={handleRestartSamba}
+              disabled={restartingSamba}
+              title="重新加载配置并平滑重启 Samba"
+              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition disabled:opacity-50"
+            >
+              <RotateCw className={`w-3.5 h-3.5 text-sky-400 ${restartingSamba ? 'animate-spin' : ''}`} />
+              <span>{restartingSamba ? '重启中...' : '重启服务'}</span>
+            </button>
+            <button
+              onClick={() => setShowPasswordModal(true)}
+              className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+              <span>修改密码</span>
+            </button>
+            <button
+              onClick={() => handleToggleSMBService(samba?.status !== 'running')}
+              disabled={shareActionLoading === 'service-toggle'}
+              className={`p-2 rounded-xl border text-xs font-medium transition ${
+                samba?.status === 'running'
+                  ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/30'
+                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+              }`}
+              title={samba?.status === 'running' ? '停止 Samba 共享服务' : '启动 Samba 共享服务'}
+            >
+              <Power className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* SMB Details Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-800">
-            <span className="text-xs text-slate-400">共享连接地址 (局域网)</span>
-            <div className="mt-1.5 flex items-center justify-between">
-              <span className="text-sm font-mono font-bold text-sky-300 select-all truncate">
-                {samba?.address || 'smb://127.0.0.1:4455/MacNAS'}
+        {/* Global Connection Instructions */}
+        <div className="p-3.5 rounded-xl bg-slate-800/40 border border-slate-800/90 text-xs text-slate-300 flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+          <div className="flex items-center space-x-2">
+            <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0" />
+            <span>
+              <strong>连接指引：</strong>Mac 按 <kbd className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-200 font-mono">Cmd + K</kbd> 输入下方任一共享连接串；Windows 资源管理器地址栏输入 <code>\\&lt;IP&gt;\&lt;共享名&gt;</code>。
+            </span>
+          </div>
+          <div className="flex items-center space-x-3 text-slate-400 text-[11px] shrink-0">
+            <span>默认账户: <code className="text-sky-300 font-mono font-bold">{samba?.user || 'macnas'}</code></span>
+            <span>•</span>
+            <span>权限模型: <span className="text-slate-300">Linux 原生 ACL 0777</span></span>
+          </div>
+        </div>
+
+        {/* Quick Add Presets (Quick-start badges for 硬盘1, 硬盘2, 媒体, 下载) */}
+        {samba?.availableTargets && samba.availableTargets.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400 flex items-center space-x-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>快捷预设：点击一键共享推荐磁盘与目录</span>
               </span>
-              <button
-                onClick={handleCopySMB}
-                title="复制连接串"
-                className="ml-2 p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {samba.availableTargets.map((target, idx) => {
+                const alreadyShared = samba.shares?.some(s => s.path === target.path);
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleOpenAddShare(target)}
+                    className="p-3 rounded-xl bg-slate-800/30 hover:bg-slate-800/80 border border-slate-800 hover:border-sky-500/40 text-left transition group flex items-start justify-between"
+                  >
+                    <div className="space-y-1 overflow-hidden pr-2">
+                      <div className="flex items-center space-x-2">
+                        {target.source === 'primary' ? (
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-bold border border-indigo-500/30">主硬盘1</span>
+                        ) : target.source === 'secondary' ? (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">第二硬盘2</span>
+                        ) : target.source === 'passthrough' ? (
+                          <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-bold border border-cyan-500/30">Mac直通</span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px] font-bold">推荐目录</span>
+                        )}
+                        <span className="text-xs font-bold text-white group-hover:text-sky-400 transition truncate">
+                          {target.name}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 truncate">{target.description}</p>
+                    </div>
+                    <span className="shrink-0 text-[11px] font-semibold px-2 py-1 rounded-lg bg-slate-800 text-slate-300 group-hover:bg-sky-500 group-hover:text-white transition mt-0.5">
+                      {alreadyShared ? '再添共享' : '+ 快速配置'}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
+        )}
 
-          <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-800">
-            <span className="text-xs text-slate-400">默认共享账户</span>
-            <p className="text-base font-bold text-white mt-1 font-mono">{samba?.user || 'macnas'}</p>
+        {/* Multi-Share List */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+              当前已生效的共享目录清单 ({samba?.shares?.length || 0})
+            </h4>
+            <span className="text-[11px] text-slate-400">所有开启中的共享项均支持局域网设备同时访问</span>
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-800">
-            <span className="text-xs text-slate-400">挂载目录</span>
-            <p className="text-base font-bold text-white mt-1 font-mono">/data</p>
-          </div>
-        </div>
+          <div className="grid grid-cols-1 gap-3.5">
+            {(!samba?.shares || samba.shares.length === 0) ? (
+              <div className="p-8 rounded-xl bg-slate-800/20 border border-dashed border-slate-800 text-center space-y-3">
+                <FolderLock className="w-8 h-8 text-slate-600 mx-auto" />
+                <p className="text-sm text-slate-400">当前尚未配置任何共享目录</p>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddShare()}
+                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition shadow"
+                >
+                  立即创建首个共享
+                </button>
+              </div>
+            ) : (
+              samba.shares.map((share) => {
+                const isToggling = shareActionLoading === `toggle-${share.id}`;
+                const isDeleting = shareActionLoading === `delete-${share.id}`;
+                const isCopied = copiedShareId === share.id;
 
-        <div className="p-3 rounded-xl bg-slate-800/30 border border-slate-800 text-xs text-slate-400 flex items-center space-x-2">
-          <span className="w-2 h-2 rounded-full bg-sky-400" />
-          <span>连接说明: 在 Mac Finder 按快捷键 <code>Cmd + K</code>，输入上方地址即可连接；Windows 资源管理器在地址栏输入 <code>\\&lt;IP&gt;\MacNAS</code> 即可。</span>
+                return (
+                  <div
+                    key={share.id}
+                    className={`p-4 rounded-xl border transition flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                      share.enabled
+                        ? 'bg-slate-800/40 border-slate-800 hover:border-slate-700/80 shadow-md'
+                        : 'bg-slate-900/40 border-slate-800/40 opacity-60'
+                    }`}
+                  >
+                    {/* Share Identification & Path */}
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-base font-bold text-white font-mono tracking-tight flex items-center space-x-1.5">
+                          <Folder className={`w-4 h-4 ${share.enabled ? 'text-sky-400' : 'text-slate-500'}`} />
+                          <span>{share.name}</span>
+                        </span>
+
+                        {share.diskSource === 'primary' && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/25 font-semibold">
+                            主硬盘 1 (2TB 池)
+                          </span>
+                        )}
+                        {share.diskSource === 'secondary' && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 font-semibold flex items-center space-x-1">
+                            <Zap className="w-2.5 h-2.5" />
+                            <span>第二硬盘 (256GB SSD)</span>
+                          </span>
+                        )}
+                        {share.diskSource === 'passthrough' && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/25 font-semibold">
+                            Mac 本机直通
+                          </span>
+                        )}
+                        {(!share.diskSource || share.diskSource === 'custom') && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 font-semibold">
+                            自定义目录
+                          </span>
+                        )}
+
+                        {share.enabled ? (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-bold">
+                            已开启共享
+                          </span>
+                        ) : (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-bold">
+                            已暂停共享
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                        <span>真实路径: <code className="text-slate-300 font-mono bg-slate-800/80 px-1.5 py-0.5 rounded">{share.path}</code></span>
+                        {share.comment && <span>备注: <span className="text-slate-300">{share.comment}</span></span>}
+                      </div>
+
+                      {/* Connection Address Box */}
+                      {share.address && (
+                        <div className="inline-flex items-center space-x-2 px-2.5 py-1 rounded-lg bg-slate-900/80 border border-slate-800 max-w-full">
+                          <span className="text-xs font-mono font-bold text-sky-300 truncate select-all">
+                            {share.address}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyShareAddress(share.address!, share.id)}
+                            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition"
+                            title="复制共享直连地址"
+                          >
+                            {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Permissions & Controls */}
+                    <div className="flex flex-wrap items-center gap-3 shrink-0">
+                      {/* Permission Badges */}
+                      <div className="flex items-center space-x-2">
+                        {share.writable ? (
+                          <span className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center space-x-1" title="允许用户在共享中新建、修改和删除文件">
+                            <Unlock className="w-3 h-3" />
+                            <span>读写 (RW)</span>
+                          </span>
+                        ) : (
+                          <span className="text-xs px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 font-semibold flex items-center space-x-1" title="只读保护模式，禁止客户端修改或删除文件">
+                            <Lock className="w-3 h-3" />
+                            <span>只读 (RO)</span>
+                          </span>
+                        )}
+
+                        {share.guestOk ? (
+                          <span className="text-xs px-2.5 py-1 rounded-lg bg-sky-500/10 text-sky-300 border border-sky-500/20 font-semibold" title="局域网设备无需输入密码即可免密访问">
+                            访客免密
+                          </span>
+                        ) : (
+                          <span className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 font-semibold flex items-center space-x-1" title="必须输入 macnas 账号密码才能访问">
+                            <ShieldCheck className="w-3 h-3 text-slate-400" />
+                            <span>需密码</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center space-x-1.5 pl-2 border-l border-slate-700/60">
+                        {/* Toggle Share Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleShare(share)}
+                          disabled={isToggling}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1 transition ${
+                            share.enabled
+                              ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                              : 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30'
+                          }`}
+                          title={share.enabled ? '点击暂停此共享' : '点击启用此共享'}
+                        >
+                          {isToggling ? (
+                            <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : share.enabled ? (
+                            <span>暂停</span>
+                          ) : (
+                            <span>启用</span>
+                          )}
+                        </button>
+
+                        {/* Edit Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditShare(share)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                          title="编辑共享设置"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Delete Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteShare(share)}
+                          disabled={isDeleting}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
+                          title="删除此共享项"
+                        >
+                          {isDeleting ? <RotateCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
@@ -849,6 +1231,231 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-semibold shadow-md transition disabled:opacity-50"
                 >
                   {passwordLoading ? '保存中...' : '确认修改'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add / Edit SMB Share Modal */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="w-full max-w-xl p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div>
+                <h3 className="text-lg font-bold text-white">
+                  {editingShare ? '编辑 SMB 共享目录与权限' : '新增 SMB 共享目录'}
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  为局域网设备定义共享名称、映射硬盘/目录及安全访问权限。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShareModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveShare} className="space-y-4">
+              {/* Quick Preset Selector */}
+              {samba?.availableTargets && samba.availableTargets.length > 0 && !editingShare && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">快捷选择已有存储目标</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {samba.availableTargets.map((t, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          let cleanName = t.path.replace(/^\/data\/?/, '').replace(/[^a-zA-Z0-9_\-]/g, '-');
+                          if (!cleanName) cleanName = 'DataShare';
+                          if (t.source === 'primary') cleanName = 'MacNAS';
+                          else if (t.source === 'secondary') cleanName = 'MacNAS-SSD2';
+
+                          setShareFormName(cleanName);
+                          setShareFormPath(t.path);
+                          setShareFormComment(t.description || t.name);
+                          setShareFormDiskSource((t.source as any) || 'custom');
+                        }}
+                        className={`p-2 rounded-xl text-left border text-xs transition flex items-center justify-between ${
+                          shareFormPath === t.path
+                            ? 'bg-sky-500/15 border-sky-500/40 text-sky-200'
+                            : 'bg-slate-800/40 border-slate-800 hover:bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        <div className="truncate pr-1">
+                          <span className="font-bold block truncate">{t.name}</span>
+                          <span className="text-[10px] text-slate-400 font-mono truncate">{t.path}</span>
+                        </div>
+                        {shareFormPath === t.path && <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Share Name */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  共享服务名称 (Share Name) <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={shareFormName}
+                  onChange={(e) => setShareFormName(e.target.value)}
+                  placeholder="例如: MacNAS, MacNAS-SSD2, Movies"
+                  required
+                  pattern="^[a-zA-Z0-9_\-]+$"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-sm font-mono focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  局域网访问连接预览: <code className="text-sky-300 font-mono">smb://&lt;IP&gt;:{samba?.port || 4455}/{shareFormName || '名称'}</code> (仅支持英文、数字与连字符)
+                </p>
+              </div>
+
+              {/* Target Path */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  虚拟机共享目录路径 (Path) <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={shareFormPath}
+                  onChange={(e) => setShareFormPath(e.target.value)}
+                  placeholder="例如: /data, /data/volume2-ssd, /data/media"
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-sm font-mono focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  若目录不存在，系统将在保存时自动为您在虚拟机内创建。
+                </p>
+              </div>
+
+              {/* Disk Source & Comment */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">关联物理存储来源</label>
+                  <select
+                    value={shareFormDiskSource}
+                    onChange={(e) => setShareFormDiskSource(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white text-xs focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="primary">主硬盘 1 存储池 (2TB)</option>
+                    <option value="secondary">第二硬盘 2 本机高速盘 (256GB SSD)</option>
+                    <option value="passthrough">Mac 本机直通目录</option>
+                    <option value="custom">自定义文件夹目录</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">备注说明</label>
+                  <input
+                    type="text"
+                    value={shareFormComment}
+                    onChange={(e) => setShareFormComment(e.target.value)}
+                    placeholder="例如: 家庭相册 / 高速传输专用"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+              </div>
+
+              {/* Permissions & Auth Selector */}
+              <div className="p-3.5 rounded-xl bg-slate-800/50 border border-slate-700/70 space-y-3">
+                <span className="text-xs font-bold text-slate-300 block">共享权限与安全控制</span>
+
+                {/* Read-Write vs Read-Only */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setShareFormWritable(true)}
+                    className={`p-3 rounded-xl border text-left transition flex items-start space-x-2 ${
+                      shareFormWritable
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-white'
+                        : 'bg-slate-800/40 border-slate-700/60 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Unlock className={`w-4 h-4 mt-0.5 ${shareFormWritable ? 'text-emerald-400' : 'text-slate-500'}`} />
+                    <div>
+                      <span className="text-xs font-bold block">读写模式 (RW)</span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">允许客户端上传、修改与删除文件</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShareFormWritable(false)}
+                    className={`p-3 rounded-xl border text-left transition flex items-start space-x-2 ${
+                      !shareFormWritable
+                        ? 'bg-amber-500/15 border-amber-500/40 text-white'
+                        : 'bg-slate-800/40 border-slate-700/60 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Lock className={`w-4 h-4 mt-0.5 ${!shareFormWritable ? 'text-amber-400' : 'text-slate-500'}`} />
+                    <div>
+                      <span className="text-xs font-bold block">只读保护模式 (RO)</span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">仅允许浏览与下载，防止误改误删</span>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Guest Access Toggle */}
+                <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/60 transition cursor-pointer">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-bold text-slate-200 block">允许匿名访客免密直接访问 (Guest OK)</span>
+                    <span className="text-[11px] text-slate-400 block">开启后局域网电视盒子、手机平板无需输入密码即可浏览；关闭后强制 macnas 密码验证。</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={shareFormGuestOk}
+                    onChange={(e) => setShareFormGuestOk(e.target.checked)}
+                    className="w-4 h-4 text-sky-500 rounded border-slate-700 focus:ring-0 cursor-pointer"
+                  />
+                </label>
+
+                {/* Enabled Toggle */}
+                <label className="flex items-center justify-between p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/60 transition cursor-pointer">
+                  <div className="space-y-0.5">
+                    <span className="text-xs font-bold text-slate-200 block">立即开启此项共享 (Enabled)</span>
+                    <span className="text-[11px] text-slate-400 block">保存后立即通过 Samba 广播并在局域网中生效。</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={shareFormEnabled}
+                    onChange={(e) => setShareFormEnabled(e.target.checked)}
+                    className="w-4 h-4 text-emerald-500 rounded border-slate-700 focus:ring-0 cursor-pointer"
+                  />
+                </label>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowShareModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={shareActionLoading === 'save'}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-sky-600/20 transition flex items-center space-x-1.5 disabled:opacity-50"
+                >
+                  {shareActionLoading === 'save' ? (
+                    <>
+                      <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>正在应用配置...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{editingShare ? '保存修改' : '立即创建并生效'}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

@@ -20,16 +20,22 @@ import {
   FileKey,
   Sparkles,
   X,
+  Sun,
+  Moon,
+  Monitor,
+  Palette,
 } from 'lucide-react';
 import { SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult } from '../types';
 import { api } from '../api';
+import { useTheme } from '../theme';
 
 interface SettingsProps {
   primaryIP?: string;
 }
 
 export const Settings: React.FC<SettingsProps> = ({ primaryIP = '192.168.2.123' }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'rootpwd' | 'ssh' | 'terminal'>('users');
+  const { theme, setTheme } = useTheme();
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'rootpwd' | 'ssh' | 'terminal' | 'appearance'>('users');
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // 1. Users state
@@ -408,6 +414,18 @@ export const Settings: React.FC<SettingsProps> = ({ primaryIP = '192.168.2.123' 
         >
           <Terminal className="w-4 h-4 text-sky-300" />
           <span>终端登录身份设置</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('appearance')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
+            activeSubTab === 'appearance'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+          }`}
+        >
+          <Palette className="w-4 h-4 text-indigo-400" />
+          <span>外观与主题</span>
         </button>
       </div>
 
@@ -1004,6 +1022,182 @@ export const Settings: React.FC<SettingsProps> = ({ primaryIP = '192.168.2.123' 
           <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
             <span>当前默认配置: <strong className="font-mono text-white font-bold">{terminalSettings.defaultLoginUser === 'root' ? '👑 root 超级管理员' : '👤 普通用户'}</strong></span>
             {termSaving && <span className="text-sky-400 flex items-center space-x-1"><RefreshCw className="w-3 h-3 animate-spin" /><span>保存中...</span></span>}
+          </div>
+        </div>
+      )}
+
+      {/* ===================== 5. Appearance & Theme Settings ===================== */}
+      {activeSubTab === 'appearance' && (
+        <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-xl space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                <Palette className="w-5 h-5 text-indigo-400" />
+                <span>外观与主题模式设置</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                支持在明亮日间模式、极客夜间暗黑模式及跟随操作系统之间自由切换。
+              </p>
+            </div>
+            <span className="text-xs font-mono font-semibold px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+              当前: {theme === 'dark' ? '🌙 夜间暗黑' : theme === 'light' ? '☀️ 日间浅色' : '💻 跟随系统'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Dark Theme Option */}
+            <div
+              onClick={() => setTheme('dark')}
+              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between space-y-4 ${
+                theme === 'dark'
+                  ? 'bg-slate-800/80 border-sky-500 shadow-lg shadow-sky-500/10'
+                  : 'bg-slate-800/40 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                {/* Mockup Preview Box */}
+                <div className="w-full h-24 rounded-xl bg-[#090d16] border border-slate-700/80 p-2.5 flex flex-col justify-between shadow-inner">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                    <div className="flex items-center space-x-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    </div>
+                    <div className="w-12 h-2 rounded bg-slate-800" />
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-6 h-6 rounded-lg bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-[10px]">🍎</div>
+                    <div className="space-y-1 flex-1">
+                      <div className="w-16 h-2 rounded bg-slate-700" />
+                      <div className="w-24 h-1.5 rounded bg-slate-800" />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm text-white flex items-center space-x-1.5">
+                      <Moon className="w-4 h-4 text-sky-400" />
+                      <span>夜间暗黑模式 (Dark)</span>
+                    </span>
+                    {theme === 'dark' && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    专为极客与夜间运维调校的深色美学，弱光护眼，专注沉浸。
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <span className={`text-xs font-semibold px-3 py-1 rounded-lg block text-center ${
+                  theme === 'dark' ? 'bg-sky-500 text-white font-bold' : 'bg-slate-700/60 text-slate-300'
+                }`}>
+                  {theme === 'dark' ? '当前已生效' : '选择夜间模式'}
+                </span>
+              </div>
+            </div>
+
+            {/* Light Theme Option */}
+            <div
+              onClick={() => setTheme('light')}
+              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between space-y-4 ${
+                theme === 'light'
+                  ? 'bg-slate-800/80 border-sky-500 shadow-lg shadow-sky-500/10'
+                  : 'bg-slate-800/40 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                {/* Mockup Preview Box */}
+                <div className="w-full h-24 rounded-xl bg-slate-100 border border-slate-300 p-2.5 flex flex-col justify-between shadow-inner">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                    <div className="flex items-center space-x-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    </div>
+                    <div className="w-12 h-2 rounded bg-slate-300" />
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-6 h-6 rounded-lg bg-sky-100 border border-sky-300 flex items-center justify-center text-[10px]">🍎</div>
+                    <div className="space-y-1 flex-1">
+                      <div className="w-16 h-2 rounded bg-slate-400" />
+                      <div className="w-24 h-1.5 rounded bg-slate-300" />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm text-white flex items-center space-x-1.5">
+                      <Sun className="w-4 h-4 text-amber-400" />
+                      <span>日间浅色模式 (Light)</span>
+                    </span>
+                    {theme === 'light' && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    清爽雅致的浅灰白底配色，强光办公清晰易读，典雅自然。
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <span className={`text-xs font-semibold px-3 py-1 rounded-lg block text-center ${
+                  theme === 'light' ? 'bg-sky-500 text-white font-bold' : 'bg-slate-700/60 text-slate-300'
+                }`}>
+                  {theme === 'light' ? '当前已生效' : '选择日间模式'}
+                </span>
+              </div>
+            </div>
+
+            {/* System Theme Option */}
+            <div
+              onClick={() => setTheme('system')}
+              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between space-y-4 ${
+                theme === 'system'
+                  ? 'bg-slate-800/80 border-sky-500 shadow-lg shadow-sky-500/10'
+                  : 'bg-slate-800/40 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                {/* Mockup Preview Box */}
+                <div className="w-full h-24 rounded-xl bg-gradient-to-r from-slate-900 to-slate-100 border border-slate-700/80 p-2.5 flex flex-col justify-between shadow-inner">
+                  <div className="flex items-center justify-between pb-1.5">
+                    <div className="flex items-center space-x-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    </div>
+                    <Monitor className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
+                  <div className="text-center py-1">
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800/80 text-sky-300">
+                      Auto (macOS)
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm text-white flex items-center space-x-1.5">
+                      <Monitor className="w-4 h-4 text-emerald-400" />
+                      <span>跟随系统设置 (Auto)</span>
+                    </span>
+                    {theme === 'system' && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    智能跟随 Mac 或客户端系统的深浅色设置自动平滑过渡。
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <span className={`text-xs font-semibold px-3 py-1 rounded-lg block text-center ${
+                  theme === 'system' ? 'bg-sky-500 text-white font-bold' : 'bg-slate-700/60 text-slate-300'
+                }`}>
+                  {theme === 'system' ? '当前已生效' : '选择跟随系统'}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       )}

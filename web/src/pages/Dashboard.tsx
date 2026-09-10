@@ -139,6 +139,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  const handleStartApp = async (appId: string) => {
+    setActionLoading(`start-${appId}`);
+    try {
+      await api.startApp(appId);
+      setMessage('应用正在启动中...');
+      setTimeout(onRefresh, 1000);
+    } catch (err: any) {
+      setMessage(`启动应用失败: ${err.message}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const isVMRunning = vm?.status === 'Running';
   const installedApps = apps.filter(a => a.installed);
 
@@ -445,15 +458,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="flex items-center space-x-3">
               <Globe className="w-5 h-5 text-sky-400 flex-shrink-0" />
               <div>
-                <p className="text-sm font-semibold text-white">局域网 SMB 共享已开启</p>
-                <p className="text-xs text-sky-300/80 font-mono mt-0.5">smb://{sys?.primaryIP || '127.0.0.1'}:4455/MacNAS</p>
+                <p className="text-sm font-semibold text-white">局域网 SMB 多硬盘与文件夹共享已就绪</p>
+                <p className="text-xs text-sky-300/80 font-mono mt-0.5">smb://{sys?.primaryIP || '127.0.0.1'}:4455/ (支持主硬盘、第二硬盘及自定义目录)</p>
               </div>
             </div>
             <button
               onClick={() => onNavigateTab('storage')}
               className="text-xs px-3 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-medium transition"
             >
-              配置 SMB 共享 →
+              管理 SMB 共享 →
             </button>
           </div>
         </div>
@@ -535,7 +548,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   </span>
                 </div>
 
-                {app.status === 'running' && (
+                {app.status === 'running' ? (
                   <a
                     href={app.webUrl}
                     target="_blank"
@@ -545,6 +558,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <span>打开</span>
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
+                ) : (
+                  <button
+                    onClick={() => handleStartApp(app.id)}
+                    disabled={actionLoading === `start-${app.id}`}
+                    className="flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-emerald-600/80 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition disabled:opacity-50"
+                  >
+                    {actionLoading === `start-${app.id}` ? (
+                      <RotateCw className="w-3.5 h-3.5 animate-spin text-slate-400" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5 text-emerald-400" />
+                    )}
+                    <span>启动</span>
+                  </button>
                 )}
               </div>
             ))}

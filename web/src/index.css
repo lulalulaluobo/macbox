@@ -6,6 +6,7 @@
   body {
     background-color: #090d16;
     color: #f1f5f9;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 }
 
@@ -26,4 +27,184 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: #475569;
+}
+
+/* ======================================================== */
+/* Light Mode Adaptations                                   */
+/* ======================================================== */
+
+html.light {
+  color-scheme: light;
+}
+
+html.light body {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html.light .bg-\[\#090d16\] {
+  background-color: #f8fafc !important;
+}
+
+html.light .bg-\[\#090d16\]\/80 {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+}
+
+html.light .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+
+html.light .bg-slate-900,
+html.light .bg-slate-900\/40,
+html.light .bg-slate-900\/50,
+html.light .bg-slate-900\/60,
+html.light .bg-slate-900\/70,
+html.light .bg-slate-900\/80,
+html.light .bg-slate-900\/90,
+html.light .bg-slate-900\/95 {
+  background-color: #ffffff !important;
+}
+
+html.light .bg-slate-800,
+html.light .bg-slate-800\/20,
+html.light .bg-slate-800\/30,
+html.light .bg-slate-800\/40,
+html.light .bg-slate-800\/50,
+html.light .bg-slate-800\/60,
+html.light .bg-slate-800\/70,
+html.light .bg-slate-800\/80 {
+  background-color: #f1f5f9 !important;
+}
+
+html.light .bg-slate-800\/90 {
+  background-color: #f8fafc !important;
+}
+
+html.light .bg-slate-700 {
+  background-color: #e2e8f0 !important;
+}
+
+html.light .hover\:bg-slate-800:hover,
+html.light .hover\:bg-slate-800\/50:hover,
+html.light .hover\:bg-slate-800\/80:hover {
+  background-color: #e2e8f0 !important;
+}
+
+html.light .hover\:bg-slate-700:hover {
+  background-color: #cbd5e1 !important;
+}
+
+html.light .border-slate-800,
+html.light .border-slate-800\/40,
+html.light .border-slate-800\/60,
+html.light .border-slate-800\/80,
+html.light .border-slate-800\/90,
+html.light .border-slate-700,
+html.light .border-slate-700\/50,
+html.light .border-slate-700\/60,
+html.light .border-slate-700\/70 {
+  border-color: #e2e8f0 !important;
+}
+
+html.light .text-white {
+  color: #0f172a !important;
+}
+
+html.light .text-slate-100,
+html.light .text-slate-200 {
+  color: #1e293b !important;
+}
+
+html.light .text-slate-300 {
+  color: #334155 !important;
+}
+
+html.light .text-slate-400 {
+  color: #64748b !important;
+}
+
+html.light .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.light .hover\:text-white:hover {
+  color: #0f172a !important;
+}
+
+html.light .hover\:text-slate-200:hover {
+  color: #1e293b !important;
+}
+
+/* Ensure solid action buttons and primary headers preserve white text */
+html.light button.bg-sky-500,
+html.light button.bg-sky-600,
+html.light button.bg-emerald-600,
+html.light button.bg-rose-600,
+html.light button.bg-indigo-600,
+html.light .bg-sky-500.text-white,
+html.light .bg-sky-600.text-white,
+html.light .bg-emerald-600.text-white,
+html.light .bg-rose-600.text-white,
+html.light .bg-indigo-600.text-white,
+html.light .bg-sky-500 .text-white,
+html.light .bg-sky-600 .text-white,
+html.light .bg-emerald-600 .text-white,
+html.light .bg-rose-600 .text-white,
+html.light .bg-indigo-600 .text-white,
+html.light .bg-gradient-to-r button,
+html.light [class*="from-sky-600"] span,
+html.light [class*="from-sky-500"] span,
+html.light [class*="from-purple-600"] span,
+html.light [class*="bg-emerald-600"] span,
+html.light [class*="bg-sky-500"] span,
+html.light [class*="bg-sky-600"] span,
+html.light .bg-sky-500,
+html.light .bg-sky-600 {
+  color: #ffffff !important;
+}
+
+/* Light Mode Input & Form elements */
+html.light input,
+html.light select,
+html.light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Modal Backdrops */
+html.light .bg-black\/70,
+html.light .bg-black\/75,
+html.light .bg-black\/80 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+}
+
+/* Banner Gradients in Light Mode */
+html.light .bg-gradient-to-r.from-sky-950\/40 {
+  --tw-gradient-from: #f0f9ff var(--tw-gradient-from-position) !important;
+  --tw-gradient-via: #f8fafc var(--tw-gradient-via-position) !important;
+  --tw-gradient-to: #ffffff var(--tw-gradient-to-position) !important;
+  border-color: #bae6fd !important;
+}
+
+html.light .bg-gradient-to-br.from-slate-900 {
+  --tw-gradient-from: #ffffff var(--tw-gradient-from-position) !important;
+  --tw-gradient-via: #ffffff var(--tw-gradient-via-position) !important;
+  --tw-gradient-to: #f8fafc var(--tw-gradient-to-position) !important;
+}
+
+/* Scrollbars in Light Mode */
+html.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+html.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }

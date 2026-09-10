@@ -108,28 +108,47 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 			appMeta.WebURL = strings.ReplaceAll(appMeta.WebURL, "{{.HostIP}}", hostIP)
 		}
 
-		// Check if container exists
+		// Check if container exists in Docker
 		containerName := "macnas-" + id
+		var matchedContainer *docker.ContainerInfo
 		if c, exists := containerMap[containerName]; exists {
+			cCopy := c
+			matchedContainer = &cCopy
+		} else if c, exists := containerMap[id]; exists {
+			cCopy := c
+			matchedContainer = &cCopy
+		} else {
+			for _, c := range containers {
+				if c.Project == id || c.Project == "macnas-"+id || c.Names == containerName || strings.HasPrefix(c.Names, containerName+"-") {
+					cCopy := c
+					matchedContainer = &cCopy
+					break
+				}
+			}
+		}
+
+		if matchedContainer != nil {
 			appMeta.Installed = true
-			if c.State == "running" {
+			if matchedContainer.State == "running" {
 				appMeta.Status = "running"
 			} else {
 				appMeta.Status = "stopped"
 			}
 			// Update WebURL if actual port was found
-			if len(c.PortsMap) > 0 {
-				appMeta.Port = c.PortsMap[0].HostPort
+			if len(matchedContainer.PortsMap) > 0 {
+				appMeta.Port = matchedContainer.PortsMap[0].HostPort
 				appMeta.WebURL = fmt.Sprintf("http://%s:%d", hostIP, appMeta.Port)
 			}
 		} else {
-			// Fast O(1) memory lookup from single batch query
+			// No container exists in Docker for this app -> Not installed!
+			appMeta.Installed = false
+			appMeta.Status = "not_installed"
+
+			// If an orphan compose.yaml was left behind because container was deleted directly, clean it up
 			if existingConfigs[id] {
-				appMeta.Installed = true
-				appMeta.Status = "stopped"
-			} else {
-				appMeta.Installed = false
-				appMeta.Status = "not_installed"
+				go func(appId string) {
+					_, _ = m.vmMgr.Exec(context.Background(), "bash", "-c", fmt.Sprintf("rm -f /data/appdata/%s/compose.yaml", appId))
+				}(id)
 			}
 		}
 
