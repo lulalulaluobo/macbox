@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -191,7 +192,7 @@ func isSystemProtectedDir(p string) bool {
 		p == "/root" || p == "/sys" || p == "/usr" || p == "/var" || p == "/home"
 }
 
-// DeletePath deletes file or folder inside VM safely
+// DeletePath deletes file or folder inside VM safely and stages to Mac ~/.Trash
 func DeletePath(instanceName, targetPath string) error {
 	if instanceName == "" {
 		instanceName = "macnas"
@@ -200,6 +201,17 @@ func DeletePath(instanceName, targetPath string) error {
 
 	if isSystemProtectedDir(targetPath) {
 		return fmt.Errorf("禁止删除系统保护目录: %s", targetPath)
+	}
+
+	// Stage to host ~/.Trash before deleting from VM as an extra safety net
+	baseName := path.Base(targetPath)
+	stagingDir := filepath.Join(os.TempDir(), "macnas-trash-staging")
+	_ = os.MkdirAll(stagingDir, 0755)
+	stagedPath := filepath.Join(stagingDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), baseName))
+
+	copyCmd := exec.Command("limactl", "copy", "-r", fmt.Sprintf("%s:%s", instanceName, targetPath), stagedPath)
+	if err := copyCmd.Run(); err == nil {
+		_ = MoveFileOrDirToMacTrash(stagedPath, baseName)
 	}
 
 	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "rm", "-rf", targetPath)
@@ -540,17 +552,138 @@ with open(manifest_path, 'w', encoding='utf-8') as f:
 	return nil
 }
 
-// EmptyTrash permanently deletes all items in trash
-func EmptyTrash(instanceName string) error {
+// MoveFileOrDirToMacTrash moves a file or directory from host path into ~/.Trash
+func MoveFileOrDirToMacTrash(hostPath string, customName string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	macTrash := filepath.Join(home, ".Trash")
+	if err := os.MkdirAll(macTrash, 0700); err != nil {
+		return err
+	}
+
+	fileName := customName
+	if fileName == "" {
+		fileName = filepath.Base(hostPath)
+	}
+
+	destPath := filepath.Join(macTrash, fileName)
+	if _, err := os.Stat(destPath); err == nil {
+		ext := filepath.Ext(fileName)
+		nameWithoutExt := strings.TrimSuffix(fileName, ext)
+		destPath = filepath.Join(macTrash, fmt.Sprintf("%s_%d%s", nameWithoutExt, time.Now().Unix(), ext))
+	}
+
+	cmd := exec.Command("mv", hostPath, destPath)
+	return cmd.Run()
+}
+
+func deleteAndSendToMacTrash(instanceName string, item TrashItem) error {
+	stagingDir := filepath.Join(os.TempDir(), "macnas-trash-staging")
+	_ = os.MkdirAll(stagingDir, 0755)
+
+	safeName := item.Name
+	if safeName == "" {
+		safeName = filepath.Base(item.TrashPath)
+	}
+	stagedPath := filepath.Join(stagingDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), safeName))
+
+	var copyCmd *exec.Cmd
+	if item.IsDir {
+		copyCmd = exec.Command("limactl", "copy", "-r", fmt.Sprintf("%s:%s", instanceName, item.TrashPath), stagedPath)
+	} else {
+		copyCmd = exec.Command("limactl", "copy", fmt.Sprintf("%s:%s", instanceName, item.TrashPath), stagedPath)
+	}
+
+	if err := copyCmd.Run(); err == nil {
+		_ = MoveFileOrDirToMacTrash(stagedPath, safeName)
+	}
+
+	// Always clean up from VM
+	rmCmd := exec.Command("limactl", "shell", instanceName, "sudo", "rm", "-rf", item.TrashPath)
+	_ = rmCmd.Run()
+	return nil
+}
+
+// DeleteTrashItems deletes selected items from trash and safely moves them to Mac host's ~/.Trash
+func DeleteTrashItems(instanceName string, itemIDs []string) (int, error) {
 	if instanceName == "" {
 		instanceName = "macnas"
 	}
-	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "rm", "-rf", "/data/.trash")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("清空回收站失败: %s (%w)", string(out), err)
+	if len(itemIDs) == 0 {
+		return 0, nil
 	}
-	return nil
+
+	items, err := ListTrash(instanceName)
+	if err != nil {
+		return 0, err
+	}
+
+	idSet := make(map[string]bool)
+	for _, id := range itemIDs {
+		idSet[id] = true
+	}
+
+	deletedCount := 0
+	var toDeleteIds []string
+	for _, it := range items {
+		if idSet[it.ID] || idSet[it.Name] {
+			toDeleteIds = append(toDeleteIds, it.ID)
+			_ = deleteAndSendToMacTrash(instanceName, it)
+			deletedCount++
+		}
+	}
+
+	if len(toDeleteIds) > 0 {
+		idsJSON, _ := json.Marshal(toDeleteIds)
+		b64Payload := base64.StdEncoding.EncodeToString(idsJSON)
+		pyScript := fmt.Sprintf(`python3 -c "
+import os, sys, json, base64
+
+ids = set(json.loads(base64.b64decode('%s').decode('utf-8')))
+manifest_path = '/data/.trash/.manifest.json'
+if not os.path.exists(manifest_path):
+    sys.exit(0)
+
+try:
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        items = json.load(f)
+except Exception:
+    items = []
+
+remaining = [it for it in items if it.get('id') not in ids and it.get('name') not in ids]
+
+with open(manifest_path, 'w', encoding='utf-8') as f:
+    json.dump(remaining, f, ensure_ascii=False, indent=2)
+"`, b64Payload)
+		_ = exec.Command("limactl", "shell", instanceName, "sudo", "bash", "-c", pyScript).Run()
+	}
+
+	return deletedCount, nil
+}
+
+// EmptyTrash moves all items in trash into Mac's ~/.Trash and clears /data/.trash
+func EmptyTrash(instanceName string) (int, error) {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+
+	items, err := ListTrash(instanceName)
+	if err != nil {
+		items = []TrashItem{}
+	}
+
+	count := 0
+	for _, it := range items {
+		_ = deleteAndSendToMacTrash(instanceName, it)
+		count++
+	}
+
+	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "rm", "-rf", "/data/.trash")
+	_ = cmd.Run()
+
+	return count, nil
 }
 
 var rangeRegex = regexp.MustCompile(`bytes=(\d+)-(\d*)`)

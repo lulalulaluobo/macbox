@@ -51,6 +51,21 @@ export const api = {
   unbindStorage: () => fetchJSON<{ status: string; message: string; requiresRestart: boolean }>(`${BASE_URL}/storage/unbind`, {
     method: 'POST',
   }),
+  bindSecondaryDisk: (diskId: string, mountPoint?: string, targetDir?: string, guestTarget?: string) =>
+    fetchJSON<{
+      status: string;
+      message: string;
+      requiresRestart: boolean;
+      targetDir: string;
+      guestTarget: string;
+    }>(`${BASE_URL}/storage/bind-secondary`, {
+      method: 'POST',
+      body: JSON.stringify({ diskId, mountPoint, targetDir, guestTarget }),
+    }),
+  unbindSecondaryDisk: () =>
+    fetchJSON<{ status: string; message: string; requiresRestart: boolean }>(`${BASE_URL}/storage/unbind-secondary`, {
+      method: 'POST',
+    }),
 
   // Local Mounts (VirtioFS Direct Passthrough)
   getLocalMounts: () => fetchJSON<LocalMountsResponse>(`${BASE_URL}/storage/mounts`),
@@ -228,10 +243,17 @@ export const api = {
       body: JSON.stringify({ ids }),
     }
   ),
-  emptyTrash: () => fetchJSON<{ status: string; message: string }>(
+  emptyTrash: () => fetchJSON<{ status: string; message: string; count?: number }>(
     `${BASE_URL}/terminal/files/empty-trash`,
     {
       method: 'POST',
+    }
+  ),
+  deleteTrashItems: (ids: string[]) => fetchJSON<{ status: string; message: string; count?: number }>(
+    `${BASE_URL}/terminal/files/trash/delete`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
     }
   ),
 };

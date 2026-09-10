@@ -41,10 +41,12 @@ type LocalMount struct {
 }
 
 type StorageConfig struct {
-	SelectedDisk string       `yaml:"selectedDisk"` // e.g. /dev/disk4
-	MountPoint   string       `yaml:"mountPoint"`   // Host mount point if any
-	DataPath     string       `yaml:"dataPath"`     // Host path holding data or managed disk
-	LocalMounts  []LocalMount `yaml:"localMounts"`  // VirtioFS direct folder mounts from Mac
+	SelectedDisk   string       `yaml:"selectedDisk"`   // e.g. /dev/disk4 (Primary NAS Data Disk)
+	MountPoint     string       `yaml:"mountPoint"`     // Host mount point if any
+	DataPath       string       `yaml:"dataPath"`       // Host path holding data or managed disk
+	SecondaryDisk  string       `yaml:"secondaryDisk"`  // e.g. disk0 (Secondary / High-Speed SSD Pool)
+	SecondaryMount string       `yaml:"secondaryMount"` // Host path on secondary disk
+	LocalMounts    []LocalMount `yaml:"localMounts"`    // VirtioFS direct folder mounts from Mac
 }
 
 type SambaConfig struct {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   HardDrive, Check, Copy, KeyRound, CheckCircle2, AlertCircle, RefreshCw, FolderLock, RotateCw,
-  Layers, X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, ShieldCheck, Plus, ToggleLeft, ToggleRight, Folder, Lock, Edit3
+  Layers, X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, ShieldCheck, Plus, ToggleLeft, ToggleRight, Folder, Lock, Edit3, Zap
 } from 'lucide-react';
 import { DiskInfo, ManagedDisk, SambaStatus, LocalMount } from '../../types';
 import { api } from '../../api';
@@ -44,6 +44,12 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   const [restartPrompt, setRestartPrompt] = useState(false);
   const [restartingVM, setRestartingVM] = useState(false);
 
+  // Secondary Volume Modal
+  const [showSecondaryModal, setShowSecondaryModal] = useState(false);
+  const [secondaryTargetDisk, setSecondaryTargetDisk] = useState<DiskInfo | null>(null);
+  const [secondaryCustomDir, setSecondaryCustomDir] = useState('');
+  const [bindingSecondary, setBindingSecondary] = useState(false);
+
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const loadData = async () => {
@@ -72,17 +78,6 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   useEffect(() => {
     loadData();
   }, []);
-
-  const handleSelectDisk = async (identifier: string) => {
-    try {
-      await api.selectDisk(identifier);
-      setSelectedDiskId(identifier);
-      setAlertMsg({ type: 'success', text: `已成功选择磁盘 ${identifier} 作为 NAS 数据盘目标！` });
-      loadData();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `选择失败: ${err.message}` });
-    }
-  };
 
   const handleOpenBindModal = (disk: DiskInfo) => {
     setBindingDisk(disk);
@@ -123,6 +118,52 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       loadData();
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `解除绑定失败: ${err.message}` });
+    }
+  };
+
+  const handleOpenSecondaryModal = (disk: DiskInfo) => {
+    setSecondaryTargetDisk(disk);
+    let defaultDir = '/Volumes/Data/Users/Shared/MacNAS-SSD-Pool';
+    if (disk.mountPoint && disk.mountPoint !== '/' && disk.mountPoint !== '/System/Volumes/Data') {
+      defaultDir = `${disk.mountPoint}/MacNAS-SSD-Pool`;
+    }
+    setSecondaryCustomDir(defaultDir);
+    setShowSecondaryModal(true);
+  };
+
+  const handleConfirmBindSecondary = async () => {
+    if (!secondaryTargetDisk) return;
+    setBindingSecondary(true);
+    try {
+      const res = await api.bindSecondaryDisk(
+        secondaryTargetDisk.identifier,
+        secondaryTargetDisk.mountPoint,
+        secondaryCustomDir,
+        'volume2-ssd'
+      );
+      setAlertMsg({ type: 'success', text: res.message });
+      setShowSecondaryModal(false);
+      setSecondaryTargetDisk(null);
+      setRestartPrompt(true);
+      loadData();
+      if (onRefreshOverview) onRefreshOverview();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `挂载扩展盘失败: ${err.message}` });
+    } finally {
+      setBindingSecondary(false);
+    }
+  };
+
+  const handleUnbindSecondary = async () => {
+    if (!confirm('确定要解除存储空间 2 (扩展盘) 的挂载吗？')) return;
+    try {
+      const res = await api.unbindSecondaryDisk();
+      setAlertMsg({ type: 'success', text: res.message });
+      setRestartPrompt(true);
+      loadData();
+      if (onRefreshOverview) onRefreshOverview();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `解除挂载失败: ${err.message}` });
     }
   };
 
@@ -630,12 +671,17 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                         </div>
                       </div>
 
-                      {isSelected && (
+                      {isSelected ? (
                         <span className="flex items-center space-x-1 text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                           <Check className="w-3.5 h-3.5" />
-                          <span>当前 NAS 数据盘</span>
+                          <span>当前主数据盘 (空间 1)</span>
                         </span>
-                      )}
+                      ) : disk.isSecondary ? (
+                        <span className="flex items-center space-x-1 text-xs px-2.5 py-1 rounded-full font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          <Zap className="w-3.5 h-3.5 text-yellow-300" />
+                          <span>扩展存储盘 (空间 2)</span>
+                        </span>
+                      ) : null}
                     </div>
 
                     {/* Capacity Bar */}
@@ -648,7 +694,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                       </div>
                       <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
                         <div
-                          className={`h-full transition-all duration-500 ${isSelected ? 'bg-sky-500' : 'bg-slate-600'}`}
+                          className={`h-full transition-all duration-500 ${isSelected ? 'bg-sky-500' : disk.isSecondary ? 'bg-purple-500' : 'bg-slate-600'}`}
                           style={{ width: `${Math.min(disk.usedPercent || 0, 100)}%` }}
                         />
                       </div>
@@ -691,25 +737,39 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                             </span>
                           )}
                         </>
+                      ) : disk.isSecondary ? (
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[11px] text-purple-300 font-mono">
+                            卷: volume2-ssd
+                          </span>
+                          <button
+                            onClick={handleUnbindSecondary}
+                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40 transition text-xs font-semibold"
+                            title="解除扩展存储空间 2 挂载"
+                          >
+                            解除扩展绑定
+                          </button>
+                        </div>
                       ) : (
-                        <>
-                          {disk.mountPoint ? (
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleOpenSecondaryModal(disk)}
+                            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold transition shadow-md shadow-purple-600/20 flex items-center space-x-1.5"
+                            title="将此硬盘挂载为扩展存储空间 2 (高速固态池)，与 2TB 外接盘协同运作"
+                          >
+                            <Zap className="w-3.5 h-3.5 text-yellow-300" />
+                            <span>挂载为存储空间 2</span>
+                          </button>
+                          {disk.mountPoint && (
                             <button
                               onClick={() => handleOpenBindModal(disk)}
-                              className="px-3.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white border border-sky-500 font-semibold transition shadow-md shadow-sky-500/20 flex items-center space-x-1.5"
+                              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 font-medium transition"
+                              title="设为主数据盘 (替换现有主盘)"
                             >
-                              <Layers className="w-3.5 h-3.5" />
-                              <span>设为 NAS 数据盘</span>
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleSelectDisk(disk.identifier)}
-                              className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-sky-600 text-slate-200 hover:text-white border border-slate-700 hover:border-sky-500 font-semibold transition"
-                            >
-                              选择此盘
+                              设为主盘
                             </button>
                           )}
-                        </>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1011,6 +1071,88 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Secondary Disk Bind Modal */}
+      {showSecondaryModal && secondaryTargetDisk && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 rounded-2xl bg-purple-500/15 border border-purple-500/30 text-purple-400">
+                  <Zap className="w-6 h-6 text-yellow-300" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">挂载为扩展存储空间 (存储空间 2)</h3>
+                  <p className="text-xs text-slate-400">双硬盘同时挂载协同工作 · 充分利用 256GB 高速固态</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSecondaryModal(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-400">物理磁盘设备:</span>
+                <span className="text-white font-mono font-bold">{secondaryTargetDisk.name} ({secondaryTargetDisk.totalSizeString})</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">可用空闲容量:</span>
+                <span className="text-emerald-400 font-mono font-bold">{secondaryTargetDisk.freeSpaceString} 可用</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">虚拟机目标挂载点:</span>
+                <span className="text-purple-300 font-mono font-bold">/data/volume2-ssd</span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 text-xs">
+              <label className="block font-semibold text-slate-300">
+                Mac 本机高速存储池目录 (持久化存储)
+              </label>
+              <input
+                type="text"
+                value={secondaryCustomDir}
+                onChange={(e) => setSecondaryCustomDir(e.target.value)}
+                placeholder="/Volumes/Data/Users/Shared/MacNAS-SSD-Pool"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-purple-500 transition"
+              />
+              <p className="text-[11px] text-slate-500">
+                系统将在此目录下建立存储池，通过 Apple VirtioFS 原生直通给 NAS，享受 3~5 GB/s 的 NVMe 读写极速。
+              </p>
+            </div>
+
+            <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-200 text-xs flex items-start space-x-2">
+              <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+              <span>
+                <strong>双盘协同架构</strong>: 主数据盘 (2TB 外接盘) 保留为主存储；256GB 本机固态将作为高速存储卷，在文件管理器与 Docker 中直接可用。
+              </span>
+            </div>
+
+            <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowSecondaryModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-medium transition"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBindSecondary}
+                disabled={bindingSecondary}
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-purple-600/20 flex items-center space-x-1.5 transition disabled:opacity-50"
+              >
+                <Zap className="w-3.5 h-3.5 text-yellow-300" />
+                <span>{bindingSecondary ? '正在挂载...' : '立即挂载为存储空间 2'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

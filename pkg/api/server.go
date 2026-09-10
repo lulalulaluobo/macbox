@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -103,6 +104,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/storage/select", s.handleStorageSelect)
 	s.mux.HandleFunc("POST /api/storage/bind", s.handleStorageBind)
 	s.mux.HandleFunc("POST /api/storage/unbind", s.handleStorageUnbind)
+	s.mux.HandleFunc("POST /api/storage/bind-secondary", s.handleStorageBindSecondary)
+	s.mux.HandleFunc("POST /api/storage/unbind-secondary", s.handleStorageUnbindSecondary)
 	s.mux.HandleFunc("GET /api/storage/mounts", s.handleStorageMountsList)
 	s.mux.HandleFunc("POST /api/storage/mounts", s.handleStorageMountsAdd)
 	s.mux.HandleFunc("POST /api/storage/mounts/{id}/toggle", s.handleStorageMountsToggle)
@@ -149,6 +152,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/terminal/files/trash", s.handleTerminalFilesTrash)
 	s.mux.HandleFunc("GET /api/terminal/files/trash", s.handleTerminalFilesTrashList)
 	s.mux.HandleFunc("POST /api/terminal/files/restore", s.handleTerminalFilesRestore)
+	s.mux.HandleFunc("POST /api/terminal/files/trash/delete", s.handleTerminalFilesTrashDelete)
 	s.mux.HandleFunc("POST /api/terminal/files/empty-trash", s.handleTerminalFilesEmptyTrash)
 }
 
@@ -342,7 +346,7 @@ func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
 
 // Storage Handlers
 func (s *Server) handleStorageDisks(w http.ResponseWriter, r *http.Request) {
-	disks, err := storage.ListDisks(s.cfg.Storage.SelectedDisk)
+	disks, err := storage.ListDisks(s.cfg.Storage.SelectedDisk, s.cfg.Storage.SecondaryDisk)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -354,6 +358,8 @@ func (s *Server) handleStorageDisks(w http.ResponseWriter, r *http.Request) {
 		"disks":            disks,
 		"managedDisks":     managed,
 		"selectedDisk":     s.cfg.Storage.SelectedDisk,
+		"secondaryDisk":    s.cfg.Storage.SecondaryDisk,
+		"secondaryMount":   s.cfg.Storage.SecondaryMount,
 		"isExternalActive": isExternal,
 		"dataPath":         s.cfg.Storage.DataPath,
 		"mountPoint":       s.cfg.Storage.MountPoint,
@@ -416,6 +422,56 @@ func (s *Server) handleStorageUnbind(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
 		"message":         "已解除外接盘绑定，切回内置虚拟数据盘",
+		"requiresRestart": true,
+	})
+}
+
+func (s *Server) handleStorageBindSecondary(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DiskID      string `json:"diskId"`
+		MountPoint  string `json:"mountPoint"`
+		TargetDir   string `json:"targetDir"`
+		GuestTarget string `json:"guestTarget"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	res, err := storage.BindSecondaryDisk(s.cfg, req.DiskID, req.MountPoint, req.TargetDir, req.GuestTarget, s.projectRoot, s.cfg.VM.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Also regenerate lima config
+	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	home, _ := os.UserHomeDir()
+	outputPath := filepath.Join(home, ".macnas", "macnas.yaml")
+	_ = s.vmMgr.GenerateConfigFile(tmplPath, outputPath)
+	s.vmMgr.SetConfigDirty(true)
+	go s.vmMgr.SyncMounts(context.Background())
+
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleStorageUnbindSecondary(w http.ResponseWriter, r *http.Request) {
+	err := storage.UnbindSecondaryDisk(s.cfg, s.projectRoot, s.cfg.VM.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	home, _ := os.UserHomeDir()
+	outputPath := filepath.Join(home, ".macnas", "macnas.yaml")
+	_ = s.vmMgr.GenerateConfigFile(tmplPath, outputPath)
+	s.vmMgr.SetConfigDirty(true)
+	go s.vmMgr.SyncMounts(context.Background())
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         "已成功解除第二存储卷绑定",
 		"requiresRestart": true,
 	})
 }
@@ -1151,13 +1207,40 @@ func (s *Server) handleTerminalFilesRestore(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-func (s *Server) handleTerminalFilesEmptyTrash(w http.ResponseWriter, r *http.Request) {
-	if err := terminal.EmptyTrash(s.cfg.VM.Name); err != nil {
+func (s *Server) handleTerminalFilesTrashDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析错误")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "未选择要删除的项目")
+		return
+	}
+
+	count, err := terminal.DeleteTrashItems(s.cfg.VM.Name, req.IDs)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":  "success",
-		"message": "回收站已彻底清空",
+		"message": fmt.Sprintf("已成功将 %d 个项目移入 Mac 本机废纸篓 (~/.Trash)", count),
+		"count":   count,
+	})
+}
+
+func (s *Server) handleTerminalFilesEmptyTrash(w http.ResponseWriter, r *http.Request) {
+	count, err := terminal.EmptyTrash(s.cfg.VM.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("回收站已清空，所有 %d 个项目已安全移入 Mac 本机废纸篓 (~/.Trash)", count),
+		"count":   count,
 	})
 }

@@ -50,6 +50,8 @@ export interface DiskInfo {
   isSSD: boolean;
   isWholeDisk: boolean;
   isSelected: boolean;
+  isSecondary?: boolean;
+  secondaryTarget?: string;
 }
 
 export interface ManagedDisk {

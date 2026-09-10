@@ -35,7 +35,10 @@ type DiskInfo struct {
 	IsExternal       bool   `json:"isExternal"`
 	IsSSD            bool   `json:"isSSD"`
 	IsWholeDisk      bool   `json:"isWholeDisk"`
+	IsVirtual        bool   `json:"isVirtual"`
 	IsSelected       bool   `json:"isSelected"`
+	IsSecondary      bool   `json:"isSecondary"`
+	SecondaryTarget  string `json:"secondaryTarget,omitempty"`
 }
 
 type ManagedDisk struct {
@@ -49,6 +52,7 @@ type ManagedDisk struct {
 
 type StorageOverview struct {
 	SelectedDisk     *DiskInfo     `json:"selectedDisk,omitempty"`
+	SecondaryDisk    *DiskInfo     `json:"secondaryDisk,omitempty"`
 	Disks            []DiskInfo    `json:"disks"`
 	ManagedDisks     []ManagedDisk `json:"managedDisks"`
 	NASDataDir       string        `json:"nasDataDir"`
@@ -76,9 +80,15 @@ func InvalidateDisksCache() {
 }
 
 // ListDisks scans all physical disks and accurately maps APFS containers and volumes (cached 5s)
-func ListDisks(selectedDiskIdentifier string) ([]DiskInfo, error) {
+func ListDisks(selectedDiskIdentifier string, secondaryDiskIdentifier ...string) ([]DiskInfo, error) {
+	secondary := ""
+	if len(secondaryDiskIdentifier) > 0 {
+		secondary = secondaryDiskIdentifier[0]
+	}
+
 	disksCacheMu.Lock()
-	if cachedDisks != nil && cachedSelected == selectedDiskIdentifier && time.Since(cachedDisksAt) < 5*time.Second {
+	cacheKey := selectedDiskIdentifier + "|" + secondary
+	if cachedDisks != nil && cachedSelected == cacheKey && time.Since(cachedDisksAt) < 5*time.Second {
 		res := make([]DiskInfo, len(cachedDisks))
 		copy(res, cachedDisks)
 		disksCacheMu.Unlock()
@@ -86,16 +96,16 @@ func ListDisks(selectedDiskIdentifier string) ([]DiskInfo, error) {
 	}
 	disksCacheMu.Unlock()
 
-	disks, err := listDisksAPFS(selectedDiskIdentifier)
+	disks, err := listDisksAPFS(selectedDiskIdentifier, secondary)
 	if err != nil || len(disks) == 0 {
-		disks, err = listDisksFallback(selectedDiskIdentifier)
+		disks, err = listDisksFallback(selectedDiskIdentifier, secondary)
 	}
 	if err == nil && len(disks) > 0 {
 		disksCacheMu.Lock()
 		cachedDisks = make([]DiskInfo, len(disks))
 		copy(cachedDisks, disks)
 		cachedDisksAt = time.Now()
-		cachedSelected = selectedDiskIdentifier
+		cachedSelected = cacheKey
 		disksCacheMu.Unlock()
 	}
 	return disks, err
@@ -146,7 +156,7 @@ type diskutilInfoOutput struct {
 	FilesystemName    string `json:"FilesystemName"`
 }
 
-func listDisksAPFS(selectedDiskIdentifier string) ([]DiskInfo, error) {
+func listDisksAPFS(selectedDiskIdentifier, secondary string) ([]DiskInfo, error) {
 	cmdStr := "diskutil list -plist | plutil -convert json -r -o - -- -"
 	cmd := exec.Command("sh", "-c", cmdStr)
 	output, err := cmd.Output()
@@ -169,82 +179,52 @@ func listDisksAPFS(selectedDiskIdentifier string) ([]DiskInfo, error) {
 		}
 	}
 
-	systemRoles := map[string]bool{
-		"iSCPreboot": true,
-		"Preboot":    true,
-		"Recovery":   true,
-		"VM":         true,
-		"Update":     true,
-		"xART":       true,
-		"Hardware":   true,
-	}
-
 	var results []DiskInfo
-	for _, p := range listData.AllDisksAndPartitions {
-		dev := p.DeviceIdentifier
-		if dev == "" {
+	for _, entry := range listData.AllDisksAndPartitions {
+		if !strings.HasPrefix(entry.DeviceIdentifier, "disk") {
+			continue
+		}
+		// Filter out synthetic disks and virtual images
+		inf, err := inspectDisk(entry.DeviceIdentifier)
+		if err != nil || inf.TotalSize == 0 || !inf.IsWholeDisk {
+			continue
+		}
+		if inf.IsVirtual {
 			continue
 		}
 
-		infoCmdStr := fmt.Sprintf("diskutil info -plist %s | plutil -convert json -r -o - -- -", dev)
-		infoCmd := exec.Command("sh", "-c", infoCmdStr)
-		infoOut, err := infoCmd.Output()
-		if err != nil {
-			continue
+		disk := *inf
+
+		// Find volumes belonging to this disk
+		var vols []apfsVolumeEntry
+		for _, part := range entry.Partitions {
+			if v, ok := partToVolumes[part.DeviceIdentifier]; ok {
+				vols = append(vols, v...)
+			}
+		}
+		if len(entry.APFSVolumes) > 0 {
+			vols = append(vols, entry.APFSVolumes...)
 		}
 
-		var inf diskutilInfoOutput
-		if err := json.Unmarshal(infoOut, &inf); err != nil {
-			continue
-		}
-
-		// Filter out virtual loopbacks, DMGs, or non-whole disks
-		if inf.MediaName == "Disk Image" || inf.VirtualOrPhysical == "Virtual" || !inf.WholeDisk {
-			continue
-		}
-
-		disk := DiskInfo{
-			DeviceIdentifier: dev,
-			DeviceNode:       "/dev/" + dev,
-			Name:             inf.MediaName,
-			TotalSize:        inf.TotalSize,
-			TotalSizeString:  formatBytes(inf.TotalSize),
-			IsExternal:       !inf.Internal,
-			IsSSD:            inf.SolidState,
-			IsWholeDisk:      inf.WholeDisk,
-			FileSystem:       "RAW",
-		}
-
-		// Inspect associated APFS volumes for this physical disk
-		var mainVol *apfsVolumeEntry
-		for _, part := range p.Partitions {
-			if vols, ok := partToVolumes[part.DeviceIdentifier]; ok {
-				for _, v := range vols {
-					if systemRoles[v.VolumeName] {
-						continue
-					}
-					if v.MountPoint != "" {
-						if strings.Contains(v.MountPoint, "/System/Volumes/Data") {
-							copyV := v
-							mainVol = &copyV
-							break
-						} else if mainVol == nil {
-							copyV := v
-							mainVol = &copyV
-						}
-					}
+		if len(vols) > 0 {
+			var mainVol *apfsVolumeEntry
+			for i := range vols {
+				v := &vols[i]
+				if v.MountPoint == "/" || v.MountPoint == "/System/Volumes/Data" {
+					mainVol = v
+					break
+				}
+				if mainVol == nil && v.MountPoint != "" {
+					mainVol = v
 				}
 			}
-			if mainVol != nil && strings.Contains(mainVol.MountPoint, "/System/Volumes/Data") {
-				break
+			if mainVol == nil {
+				mainVol = &vols[0]
 			}
-		}
 
-		if mainVol != nil {
-			disk.VolumeName = mainVol.VolumeName
 			disk.MountPoint = mainVol.MountPoint
-			disk.Mounted = true
-			disk.FileSystem = "APFS"
+			disk.Mounted = (mainVol.MountPoint != "")
+			disk.VolumeName = mainVol.VolumeName
 			disk.UsedSpace = mainVol.CapacityInUse
 			disk.UsedSpaceString = formatBytes(mainVol.CapacityInUse)
 			if disk.TotalSize >= mainVol.CapacityInUse {
@@ -252,17 +232,14 @@ func listDisksAPFS(selectedDiskIdentifier string) ([]DiskInfo, error) {
 				disk.FreeSpaceString = formatBytes(disk.FreeSpace)
 				disk.UsedPercent = float64(mainVol.CapacityInUse) / float64(disk.TotalSize) * 100
 			}
-		} else if inf.MountPoint != "" {
-			disk.MountPoint = inf.MountPoint
-			disk.Mounted = true
-			disk.VolumeName = inf.VolumeName
-			if inf.FilesystemName != "" {
-				disk.FileSystem = inf.FilesystemName
-			}
 		}
 
 		if selectedDiskIdentifier != "" && (disk.DeviceIdentifier == selectedDiskIdentifier || disk.DeviceNode == selectedDiskIdentifier) {
 			disk.IsSelected = true
+		}
+		if secondary != "" && (disk.DeviceIdentifier == secondary || disk.DeviceNode == secondary) {
+			disk.IsSecondary = true
+			disk.SecondaryTarget = "/data/volume2-ssd"
 		}
 
 		results = append(results, disk)
@@ -271,7 +248,7 @@ func listDisksAPFS(selectedDiskIdentifier string) ([]DiskInfo, error) {
 	return results, nil
 }
 
-func listDisksFallback(selectedDiskIdentifier string) ([]DiskInfo, error) {
+func listDisksFallback(selectedDiskIdentifier, secondary string) ([]DiskInfo, error) {
 	cmd := exec.Command("diskutil", "list")
 	output, err := cmd.Output()
 	if err != nil {
@@ -297,6 +274,10 @@ func listDisksFallback(selectedDiskIdentifier string) ([]DiskInfo, error) {
 		}
 		if selectedDiskIdentifier != "" && (info.DeviceIdentifier == selectedDiskIdentifier || info.DeviceNode == selectedDiskIdentifier) {
 			info.IsSelected = true
+		}
+		if secondary != "" && (info.DeviceIdentifier == secondary || info.DeviceNode == secondary) {
+			info.IsSecondary = true
+			info.SecondaryTarget = "/data/volume2-ssd"
 		}
 		results = append(results, *info)
 	}
@@ -354,6 +335,8 @@ func inspectDisk(diskID string) (*DiskInfo, error) {
 			info.IsSSD = (val == "Yes")
 		case "Whole":
 			info.IsWholeDisk = (val == "Yes")
+		case "Virtual":
+			info.IsVirtual = (val == "Yes")
 		case "Disk Size", "Container Total Space", "Total Size":
 			if info.TotalSize == 0 {
 				info.TotalSizeString = strings.Split(val, "(")[0]
@@ -541,6 +524,71 @@ func UnbindExternalDisk(cfg *config.Config) error {
 	cfg.Storage.SelectedDisk = ""
 	cfg.Storage.MountPoint = ""
 	cfg.Storage.DataPath = ""
+	InvalidateDisksCache()
+	return config.SaveConfig(cfg)
+}
+
+// BindSecondaryDisk configures a secondary physical disk as high-speed Volume 2
+func BindSecondaryDisk(cfg *config.Config, diskID, mountPoint, targetDir, guestTarget, projectRoot, instanceName string) (map[string]interface{}, error) {
+	if targetDir == "" {
+		if fi, err := os.Stat("/Volumes/Data/Users/Shared"); err == nil && fi.IsDir() {
+			targetDir = "/Volumes/Data/Users/Shared/MacNAS-SSD-Pool"
+		} else if mountPoint != "" {
+			targetDir = filepath.Join(mountPoint, "MacNAS-SSD-Pool")
+		} else {
+			home, _ := os.UserHomeDir()
+			targetDir = filepath.Join(home, "MacNAS-SSD-Pool")
+		}
+	}
+
+	if err := os.MkdirAll(targetDir, 0777); err != nil {
+		return nil, fmt.Errorf("创建存储空间 2 目录失败: %w", err)
+	}
+
+	if guestTarget == "" {
+		guestTarget = "volume2-ssd"
+	}
+
+	mount := config.LocalMount{
+		ID:          "volume2-ssd",
+		Name:        "存储空间 2 (256GB 本机高速盘)",
+		HostPath:    targetDir,
+		GuestTarget: guestTarget,
+		Writable:    true,
+		Enabled:     true,
+		Category:    "volume2",
+		Description: "Mac 本机 256GB 高速 NVMe 固态硬盘扩展存储池，支持原生 3~5 GB/s 零拷贝极速读写",
+	}
+
+	if err := AddOrUpdateLocalMount(cfg, mount); err != nil {
+		return nil, err
+	}
+
+	cfg.Storage.SecondaryDisk = diskID
+	cfg.Storage.SecondaryMount = targetDir
+	_ = config.SaveConfig(cfg)
+	InvalidateDisksCache()
+
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "mkdir", "-p", "/data/"+guestTarget)
+	_ = cmd.Run()
+
+	return map[string]interface{}{
+		"status":          "success",
+		"message":         "已成功将 256GB 高速固态盘挂载为存储空间 2！请平稳重启虚拟机以激活 VirtioFS 设备",
+		"requiresRestart": true,
+		"targetDir":       targetDir,
+		"guestTarget":     guestTarget,
+	}, nil
+}
+
+// UnbindSecondaryDisk removes the secondary disk volume
+func UnbindSecondaryDisk(cfg *config.Config, projectRoot, instanceName string) error {
+	_ = DeleteLocalMount(cfg, "volume2-ssd")
+	cfg.Storage.SecondaryDisk = ""
+	cfg.Storage.SecondaryMount = ""
 	InvalidateDisksCache()
 	return config.SaveConfig(cfg)
 }
