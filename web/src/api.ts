@@ -179,4 +179,12 @@ export const api = {
     return res.json();
   },
   getFileDownloadUrl: (path: string) => `${BASE_URL}/terminal/files/download?path=${encodeURIComponent(path)}`,
+  getFileRawUrl: (path: string) => `${BASE_URL}/terminal/files/raw?path=${encodeURIComponent(path)}`,
+  renameFile: (oldPath: string, newPath: string) => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files/rename`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ oldPath, newPath }),
+    }
+  ),
 };

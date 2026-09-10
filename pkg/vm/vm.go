@@ -415,26 +415,38 @@ func (m *Manager) SyncMounts(ctx context.Context) {
 	}
 
 	// Build the mount script content
-	script := "#!/bin/bash\nset -e\nsleep 1\n"
+	script := "#!/bin/bash\nset -e\n" +
+		"for i in $(seq 1 30); do\n" +
+		"  REAL_DATA=\"$(readlink -f /data || true)\"\n" +
+		"  if [ -n \"$REAL_DATA\" ] && [ -d \"$REAL_DATA\" ]; then\n" +
+		"    break\n" +
+		"  fi\n" +
+		"  sleep 1\n" +
+		"done\n" +
+		"sleep 1\n"
+
 	for _, mount := range m.cfg.Storage.LocalMounts {
 		if !mount.Enabled {
 			continue
 		}
 		script += fmt.Sprintf(
 			"if [ -d \"/mnt/macnas-mounts/%s\" ]; then\n"+
-				"  mkdir -p \"/data/%s\"\n"+
-				"  mountpoint -q \"/data/%s\" || mount --bind \"/mnt/macnas-mounts/%s\" \"/data/%s\"\n"+
-				"  echo \"[macnas-mounts] mounted %s -> /data/%s\"\n"+
+				"  REAL_DATA=\"$(readlink -f /data || echo /data)\"\n"+
+				"  TARGET_DIR=\"${REAL_DATA}/%s\"\n"+
+				"  mkdir -p \"$TARGET_DIR\"\n"+
+				"  if ! grep -qs \" ${TARGET_DIR} \" /proc/mounts; then\n"+
+				"    mount --bind \"/mnt/macnas-mounts/%s\" \"$TARGET_DIR\"\n"+
+				"    echo \"[macnas-mounts] mounted %s -> $TARGET_DIR\"\n"+
+				"  fi\n"+
 				"fi\n",
-			mount.ID, mount.GuestTarget, mount.GuestTarget, mount.ID, mount.GuestTarget,
-			mount.ID, mount.GuestTarget,
+			mount.ID, mount.GuestTarget, mount.ID, mount.ID,
 		)
 	}
 
 	serviceContent := `[Unit]
 Description=MacNAS VirtioFS bind mounts
-After=local-fs.target docker.service
-Wants=docker.service
+After=cloud-init.target cloud-final.service local-fs.target docker.service
+Wants=cloud-final.service
 
 [Service]
 Type=oneshot

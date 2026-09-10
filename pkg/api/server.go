@@ -138,8 +138,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/terminal/files/write", s.handleTerminalFileWrite)
 	s.mux.HandleFunc("POST /api/terminal/files/mkdir", s.handleTerminalFileMkdir)
 	s.mux.HandleFunc("POST /api/terminal/files/upload", s.handleTerminalFileUpload)
+	s.mux.HandleFunc("POST /api/terminal/files/rename", s.handleTerminalFileRename)
 	s.mux.HandleFunc("DELETE /api/terminal/files", s.handleTerminalFileDelete)
 	s.mux.HandleFunc("GET /api/terminal/files/download", s.handleTerminalFileDownload)
+	s.mux.HandleFunc("GET /api/terminal/files/raw", s.handleTerminalFileRaw)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -431,6 +433,7 @@ func (s *Server) handleStorageMountsAdd(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.vmMgr.SetConfigDirty(true)
+	go s.vmMgr.SyncMounts(context.Background())
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
@@ -450,6 +453,7 @@ func (s *Server) handleStorageMountsToggle(w http.ResponseWriter, r *http.Reques
 	}
 
 	s.vmMgr.SetConfigDirty(true)
+	go s.vmMgr.SyncMounts(context.Background())
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	msg := "已开启该直通目录，重启虚拟机后生效"
 	if !enabled {
@@ -473,6 +477,7 @@ func (s *Server) handleStorageMountsDelete(w http.ResponseWriter, r *http.Reques
 	}
 
 	s.vmMgr.SetConfigDirty(true)
+	go s.vmMgr.SyncMounts(context.Background())
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
@@ -927,4 +932,38 @@ func (s *Server) handleTerminalFileDownload(w http.ResponseWriter, r *http.Reque
 	}
 
 	terminal.DownloadFile(w, r, s.cfg.VM.Name, targetPath)
+}
+
+func (s *Server) handleTerminalFileRename(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OldPath string `json:"oldPath"`
+		NewPath string `json:"newPath"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析错误")
+		return
+	}
+
+	if req.OldPath == "" || req.NewPath == "" {
+		writeError(w, http.StatusBadRequest, "原路径和新路径均不能为空")
+		return
+	}
+
+	if err := terminal.RenamePath(s.cfg.VM.Name, req.OldPath, req.NewPath); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "重命名成功"})
+}
+
+func (s *Server) handleTerminalFileRaw(w http.ResponseWriter, r *http.Request) {
+	targetPath := r.URL.Query().Get("path")
+	if targetPath == "" {
+		writeError(w, http.StatusBadRequest, "缺少路径参数")
+		return
+	}
+
+	terminal.StreamMediaFile(w, r, s.cfg.VM.Name, targetPath)
 }

@@ -80,16 +80,27 @@ provision:
     #!/bin/bash
     # MacNAS VirtioFS bind mount — 每次 VM 启动自动执行
     set -e
-    sleep 2  # 等待 VirtioFS 挂载就绪
+    for i in $(seq 1 30); do
+      REAL_DATA="$(readlink -f /data || true)"
+      if [ -n "$REAL_DATA" ] && [ -d "$REAL_DATA" ]; then
+        break
+      fi
+      sleep 1
+    done
+    sleep 2
     MOUNT_SCRIPT
 
     {{range .LocalMounts}}
     {{if .Enabled}}
     cat <<'ENTRY_END' >> /usr/local/bin/macnas-mounts.sh
     if [ -d "/mnt/macnas-mounts/{{.ID}}" ]; then
-      mkdir -p "/data/{{.GuestTarget}}"
-      mountpoint -q "/data/{{.GuestTarget}}" || mount --bind "/mnt/macnas-mounts/{{.ID}}" "/data/{{.GuestTarget}}"
-      echo "[macnas-mounts] bind mounted {{.ID}} -> /data/{{.GuestTarget}}"
+      REAL_DATA="$(readlink -f /data || echo /data)"
+      TARGET_DIR="${REAL_DATA}/{{.GuestTarget}}"
+      mkdir -p "$TARGET_DIR"
+      if ! grep -qs " ${TARGET_DIR} " /proc/mounts; then
+        mount --bind "/mnt/macnas-mounts/{{.ID}}" "$TARGET_DIR"
+        echo "[macnas-mounts] bind mounted {{.ID}} -> $TARGET_DIR"
+      fi
     fi
     ENTRY_END
     {{end}}
@@ -100,8 +111,8 @@ provision:
     cat <<'SERVICE_EOF' > /etc/systemd/system/macnas-mounts.service
     [Unit]
     Description=MacNAS VirtioFS bind mounts
-    After=local-fs.target docker.service
-    Wants=docker.service
+    After=cloud-init.target cloud-final.service local-fs.target docker.service
+    Wants=cloud-final.service
 
     [Service]
     Type=oneshot

@@ -250,3 +250,102 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 	}
 	return nil
 }
+
+// RenamePath renames or moves a file or folder inside the VM
+func RenamePath(instanceName, oldPath, newPath string) error {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	oldPath = path.Clean(oldPath)
+	newPath = path.Clean(newPath)
+
+	if oldPath == "/" || oldPath == "/data" || oldPath == "/bin" || oldPath == "/etc" ||
+		oldPath == "/usr" || oldPath == "/var" || oldPath == "/home" {
+		return fmt.Errorf("禁止重命名系统核心目录: %s", oldPath)
+	}
+	if newPath == "" || newPath == "/" {
+		return fmt.Errorf("无效的目标路径")
+	}
+
+	cmd := exec.Command("limactl", "shell", instanceName, "mv", oldPath, newPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("重命名失败: %s (%w)", string(out), err)
+	}
+	return nil
+}
+
+// StreamMediaFile streams media files directly for inline preview (video/image/audio)
+func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, filePath string) {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	filePath = path.Clean(filePath)
+	fileName := path.Base(filePath)
+	ext := strings.TrimPrefix(filepath.Ext(fileName), ".")
+
+	cmd := exec.Command("limactl", "shell", instanceName, "cat", filePath)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		_ = cmd.Wait()
+	}()
+
+	mime := getMimeType(ext)
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename*=UTF-8''%s", url.PathEscape(fileName)))
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	_, _ = io.Copy(w, stdout)
+}
+
+func getMimeType(ext string) string {
+	switch strings.ToLower(ext) {
+	case "mp4":
+		return "video/mp4"
+	case "webm":
+		return "video/webm"
+	case "ogg":
+		return "video/ogg"
+	case "mkv":
+		return "video/x-matroska"
+	case "mov":
+		return "video/quicktime"
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "png":
+		return "image/png"
+	case "gif":
+		return "image/gif"
+	case "webp":
+		return "image/webp"
+	case "svg":
+		return "image/svg+xml"
+	case "ico":
+		return "image/x-icon"
+	case "mp3":
+		return "audio/mpeg"
+	case "wav":
+		return "audio/wav"
+	case "flac":
+		return "audio/flac"
+	case "aac":
+		return "audio/aac"
+	case "m4a":
+		return "audio/mp4"
+	case "pdf":
+		return "application/pdf"
+	case "txt", "log", "md", "sh", "yaml", "yml", "json", "xml", "conf", "ini":
+		return "text/plain; charset=utf-8"
+	default:
+		return "application/octet-stream"
+	}
+}
