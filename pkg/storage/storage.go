@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/luluen/mac-nas/pkg/config"
 )
@@ -59,14 +61,44 @@ type StorageOverview struct {
 	UsedPercent      float64       `json:"usedPercent"`
 }
 
-// ListDisks scans all physical disks and accurately maps APFS containers and volumes
+var (
+	disksCacheMu   sync.Mutex
+	cachedDisks    []DiskInfo
+	cachedDisksAt  time.Time
+	cachedSelected string
+)
+
+// InvalidateDisksCache forces the next ListDisks call to re-query diskutil
+func InvalidateDisksCache() {
+	disksCacheMu.Lock()
+	defer disksCacheMu.Unlock()
+	cachedDisks = nil
+}
+
+// ListDisks scans all physical disks and accurately maps APFS containers and volumes (cached 5s)
 func ListDisks(selectedDiskIdentifier string) ([]DiskInfo, error) {
-	disks, err := listDisksAPFS(selectedDiskIdentifier)
-	if err == nil && len(disks) > 0 {
-		return disks, nil
+	disksCacheMu.Lock()
+	if cachedDisks != nil && cachedSelected == selectedDiskIdentifier && time.Since(cachedDisksAt) < 5*time.Second {
+		res := make([]DiskInfo, len(cachedDisks))
+		copy(res, cachedDisks)
+		disksCacheMu.Unlock()
+		return res, nil
 	}
-	// Fallback to basic scanning if plist command fails
-	return listDisksFallback(selectedDiskIdentifier)
+	disksCacheMu.Unlock()
+
+	disks, err := listDisksAPFS(selectedDiskIdentifier)
+	if err != nil || len(disks) == 0 {
+		disks, err = listDisksFallback(selectedDiskIdentifier)
+	}
+	if err == nil && len(disks) > 0 {
+		disksCacheMu.Lock()
+		cachedDisks = make([]DiskInfo, len(disks))
+		copy(cachedDisks, disks)
+		cachedDisksAt = time.Now()
+		cachedSelected = selectedDiskIdentifier
+		disksCacheMu.Unlock()
+	}
+	return disks, err
 }
 
 type diskutilListOutput struct {
@@ -484,6 +516,7 @@ func BindExternalDisk(cfg *config.Config, diskID, mountPoint string, sizeGB int)
 	cfg.Storage.MountPoint = mountPoint
 	cfg.Storage.DataPath = imgFile
 	_ = config.SaveConfig(cfg)
+	InvalidateDisksCache()
 
 	return imgFile, nil
 }
@@ -508,5 +541,6 @@ func UnbindExternalDisk(cfg *config.Config) error {
 	cfg.Storage.SelectedDisk = ""
 	cfg.Storage.MountPoint = ""
 	cfg.Storage.DataPath = ""
+	InvalidateDisksCache()
 	return config.SaveConfig(cfg)
 }

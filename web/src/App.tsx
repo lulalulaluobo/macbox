@@ -74,7 +74,12 @@ export const App: React.FC = () => {
           />
         )}
 
-        {activeTab === 'storage' && <Storage />}
+        {activeTab === 'storage' && (
+          <Storage
+            configDirty={overview?.configDirty}
+            onRefreshOverview={refreshData}
+          />
+        )}
 
         {activeTab === 'docker' && <Docker />}
 

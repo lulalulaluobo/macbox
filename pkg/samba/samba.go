@@ -79,8 +79,18 @@ func (m *Manager) UpdatePassword(ctx context.Context, newPassword string) error 
 	return config.SaveConfig(m.cfg)
 }
 
+func (m *Manager) EnsurePassword(ctx context.Context) error {
+	pwd := m.cfg.Samba.Password
+	if pwd == "" {
+		pwd = "macnas"
+	}
+	cmd := fmt.Sprintf("id -u macnas &>/dev/null || useradd -M -s /usr/sbin/nologin macnas; (echo '%s'; echo '%s') | smbpasswd -a macnas -s && smbpasswd -e macnas", pwd, pwd)
+	_, err := m.vmMgr.Exec(ctx, "sudo", "bash", "-c", cmd)
+	return err
+}
+
 func (m *Manager) Restart(ctx context.Context) error {
-	out, err := m.vmMgr.Exec(ctx, "systemctl", "restart", "smbd", "nmbd")
+	out, err := m.vmMgr.Exec(ctx, "sudo", "systemctl", "restart", "smbd", "nmbd")
 	if err != nil {
 		return fmt.Errorf("重启 Samba 失败: %s (%w)", out, err)
 	}

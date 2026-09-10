@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -154,7 +155,12 @@ func LoadConfig() (*Config, error) {
 	return cfg, nil
 }
 
+var configMu sync.Mutex
+
 func SaveConfig(cfg *Config) error {
+	configMu.Lock()
+	defer configMu.Unlock()
+
 	path, err := ConfigFilePath()
 	if err != nil {
 		return err
@@ -163,5 +169,10 @@ func SaveConfig(cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }

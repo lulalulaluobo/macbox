@@ -53,12 +53,21 @@ type Manager struct {
 	lastError    string
 	vmAction     string // "starting", "stopping", "restarting", "" (idle)
 	configDirty  bool   // true when config changed and VM needs restart
+	cachedStatus *VMStatus
+	cachedAt     time.Time
+}
+
+func (m *Manager) InvalidateCache() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cachedStatus = nil
 }
 
 func (m *Manager) SetLastError(err string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.lastError = err
+	m.cachedStatus = nil
 }
 
 func (m *Manager) GetLastError() string {
@@ -71,6 +80,7 @@ func (m *Manager) SetVMAction(action string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.vmAction = action
+	m.cachedStatus = nil
 }
 
 func (m *Manager) GetVMAction() string {
@@ -102,18 +112,31 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 }
 
-// GetStatus checks Lima for the current status of the MacNAS instance
+// GetStatus checks Lima for the current status of the MacNAS instance (cached with 3s TTL)
 func (m *Manager) GetStatus() (*VMStatus, error) {
+	m.mu.RLock()
+	if m.cachedStatus != nil && time.Since(m.cachedAt) < 3*time.Second {
+		cpy := *m.cachedStatus
+		m.mu.RUnlock()
+		return &cpy, nil
+	}
+	m.mu.RUnlock()
+
 	cmd := exec.Command("limactl", "list", "--json")
 	output, err := cmd.Output()
 	if err != nil {
 		// limactl might fail or no instances
-		return &VMStatus{
+		res := &VMStatus{
 			Name:        m.instanceName,
 			Status:      "NotCreated",
 			UpdatedAt:   time.Now(),
 			DockerReady: false,
-		}, nil
+		}
+		m.mu.Lock()
+		m.cachedStatus = res
+		m.cachedAt = time.Now()
+		m.mu.Unlock()
+		return res, nil
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(output))
@@ -130,7 +153,7 @@ func (m *Manager) GetStatus() (*VMStatus, error) {
 					errs = append(errs, lastErr)
 				}
 
-				return &VMStatus{
+				res := &VMStatus{
 					Name:         inst.Name,
 					Status:       inst.Status,
 					Dir:          inst.Dir,
@@ -143,7 +166,12 @@ func (m *Manager) GetStatus() (*VMStatus, error) {
 					DockerReady:  ready,
 					Errors:       errs,
 					UpdatedAt:    time.Now(),
-				}, nil
+				}
+				m.mu.Lock()
+				m.cachedStatus = res
+				m.cachedAt = time.Now()
+				m.mu.Unlock()
+				return res, nil
 			}
 		}
 	}
@@ -153,13 +181,18 @@ func (m *Manager) GetStatus() (*VMStatus, error) {
 		notCreatedErrs = append(notCreatedErrs, lastErr)
 	}
 
-	return &VMStatus{
+	res := &VMStatus{
 		Name:        m.instanceName,
 		Status:      "NotCreated",
 		Errors:      notCreatedErrs,
 		UpdatedAt:   time.Now(),
 		DockerReady: false,
-	}, nil
+	}
+	m.mu.Lock()
+	m.cachedStatus = res
+	m.cachedAt = time.Now()
+	m.mu.Unlock()
+	return res, nil
 }
 
 func (m *Manager) GetDockerSocketPath(instanceDir string) string {
@@ -260,12 +293,16 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 
 // Start launches the Lima VM
 func (m *Manager) Start(ctx context.Context, projectRoot string) error {
+	m.InvalidateCache()
 	err := m.startInternal(ctx, projectRoot)
 	if err != nil {
 		m.SetLastError(err.Error())
 	} else {
 		m.SetLastError("")
+		time.Sleep(3 * time.Second)
+		m.SyncMounts(ctx)
 	}
+	m.InvalidateCache()
 	return err
 }
 
@@ -321,8 +358,10 @@ func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 
 // Stop stops the Lima VM
 func (m *Manager) Stop(ctx context.Context) error {
+	m.InvalidateCache()
 	cmd := exec.CommandContext(ctx, "limactl", "stop", m.instanceName)
 	out, err := cmd.CombinedOutput()
+	m.InvalidateCache()
 	if err != nil {
 		return fmt.Errorf("limactl stop failed: %s (%w)", string(out), err)
 	}
@@ -331,15 +370,10 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 // Restart restarts the Lima VM
 func (m *Manager) Restart(ctx context.Context, projectRoot string) error {
+	m.InvalidateCache()
 	_ = m.Stop(ctx)
 	time.Sleep(2 * time.Second)
-	if err := m.Start(ctx, projectRoot); err != nil {
-		return err
-	}
-	// Wait for VM to be fully ready then sync bind mounts
-	time.Sleep(3 * time.Second)
-	m.SyncMounts(ctx)
-	return nil
+	return m.Start(ctx, projectRoot)
 }
 
 // SyncMounts regenerates and re-applies VirtioFS bind mount script inside the running VM
@@ -349,7 +383,7 @@ func (m *Manager) SyncMounts(ctx context.Context) {
 	}
 
 	// Build the mount script content
-	script := "#!/bin/bash\nset -e\n"
+	script := "#!/bin/bash\nset -e\nsleep 1\n"
 	for _, mount := range m.cfg.Storage.LocalMounts {
 		if !mount.Enabled {
 			continue
@@ -358,15 +392,38 @@ func (m *Manager) SyncMounts(ctx context.Context) {
 			"if [ -d \"/mnt/macnas-mounts/%s\" ]; then\n"+
 				"  mkdir -p \"/data/%s\"\n"+
 				"  mountpoint -q \"/data/%s\" || mount --bind \"/mnt/macnas-mounts/%s\" \"/data/%s\"\n"+
+				"  echo \"[macnas-mounts] mounted %s -> /data/%s\"\n"+
 				"fi\n",
 			mount.ID, mount.GuestTarget, mount.GuestTarget, mount.ID, mount.GuestTarget,
+			mount.ID, mount.GuestTarget,
 		)
 	}
 
-	// Write script and execute
-	writeCmd := fmt.Sprintf("cat > /usr/local/bin/macnas-mounts.sh << 'SCRIPT_EOF'\n%sSCRIPT_EOF\nchmod +x /usr/local/bin/macnas-mounts.sh", script)
-	_, _ = m.Exec(ctx, "sudo", "bash", "-c", writeCmd)
-	_, _ = m.Exec(ctx, "sudo", "systemctl", "restart", "macnas-mounts.service")
+	serviceContent := `[Unit]
+Description=MacNAS VirtioFS bind mounts
+After=local-fs.target docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/macnas-mounts.sh
+
+[Install]
+WantedBy=multi-user.target`
+
+	// Write script, install systemd service if missing/updated, and execute
+	setupCmd := fmt.Sprintf(
+		"mkdir -p /mnt/macnas-mounts && "+
+			"cat > /usr/local/bin/macnas-mounts.sh << 'SCRIPT_EOF'\n%s\nSCRIPT_EOF\n"+
+			"chmod +x /usr/local/bin/macnas-mounts.sh && "+
+			"cat > /etc/systemd/system/macnas-mounts.service << 'SERVICE_EOF'\n%s\nSERVICE_EOF\n"+
+			"systemctl daemon-reload && "+
+			"systemctl enable macnas-mounts.service && "+
+			"/usr/local/bin/macnas-mounts.sh || true",
+		script, serviceContent,
+	)
+	_, _ = m.Exec(ctx, "sudo", "bash", "-c", setupCmd)
 }
 
 

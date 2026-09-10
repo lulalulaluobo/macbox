@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Play, Square, RotateCw, Cpu, HardDrive, Server, Globe, ExternalLink, ShieldCheck, Coffee, Zap, Rocket } from 'lucide-react';
 import { SystemOverview, AppMetadata } from '../types';
 import { api } from '../api';
@@ -64,8 +64,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const vmAction = overview?.vmAction || '';
   const configDirty = overview?.configDirty || false;
+  const isActionBusy = !!actionLoading || !!vmAction;
+  const currentAction = actionLoading || vmAction;
+
+  useEffect(() => {
+    if (!overview?.vmAction) {
+      setActionLoading(null);
+    }
+  }, [overview?.vmAction]);
 
   const handleVMAction = async (action: 'start' | 'stop' | 'restart') => {
+    setActionLoading(action);
     setMessage(null);
     try {
       if (action === 'start') await api.startVM();
@@ -82,6 +91,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setTimeout(onRefresh, 1000);
     } catch (err: any) {
       setMessage(`操作失败: ${err.message}`);
+      setActionLoading(null);
     }
   };
 
@@ -283,33 +293,51 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {!isVMRunning ? (
                 <button
                   onClick={() => handleVMAction('start')}
-                  disabled={actionLoading !== null}
+                  disabled={isActionBusy}
                   className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold shadow-lg shadow-emerald-600/30 transition disabled:opacity-50"
                 >
                   <Play className="w-4 h-4 fill-white" />
-                  <span>{actionLoading === 'start' ? '启动中...' : '启动服务'}</span>
+                  <span>{currentAction === 'start' ? '启动中...' : '启动服务'}</span>
                 </button>
               ) : (
                 <button
                   onClick={() => handleVMAction('stop')}
-                  disabled={actionLoading !== null}
+                  disabled={isActionBusy}
                   className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/30 text-sm font-medium transition disabled:opacity-50"
                 >
                   <Square className="w-3.5 h-3.5" />
-                  <span>{actionLoading === 'stop' ? '停止中...' : '停止服务'}</span>
+                  <span>{currentAction === 'stop' ? '停止中...' : '停止服务'}</span>
                 </button>
               )}
 
               <button
                 onClick={() => handleVMAction('restart')}
-                disabled={actionLoading !== null}
+                disabled={isActionBusy}
                 className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-sm font-medium transition disabled:opacity-50"
               >
-                <RotateCw className={`w-3.5 h-3.5 ${actionLoading === 'restart' ? 'animate-spin text-sky-400' : ''}`} />
-                <span>重启 VM</span>
+                <RotateCw className={`w-3.5 h-3.5 ${currentAction === 'restart' ? 'animate-spin text-sky-400' : ''}`} />
+                <span>{currentAction === 'restart' ? '重启中...' : '重启 VM'}</span>
               </button>
             </div>
           </div>
+
+          {/* Config Dirty Notice Banner */}
+          {configDirty && isVMRunning && (
+            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <RotateCw className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>直通目录或磁盘配置已变更，需重启 VM 生效</span>
+              </div>
+              <button
+                onClick={() => handleVMAction('restart')}
+                disabled={isActionBusy}
+                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition flex items-center space-x-1 shrink-0"
+              >
+                <RotateCw className={`w-3 h-3 ${currentAction === 'restart' ? 'animate-spin' : ''}`} />
+                <span>{currentAction === 'restart' ? '重启中...' : '立即重启'}</span>
+              </button>
+            </div>
+          )}
 
           {/* VM Specs Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

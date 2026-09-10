@@ -141,10 +141,8 @@ provision:
        force user = root
     EOF
 
-    # 4. 创建默认用户 macnas 并设置密码
+    # 4. 创建默认用户 macnas
     id -u macnas &>/dev/null || useradd -M -s /usr/sbin/nologin macnas
-    (echo "{{.SambaPassword}}"; echo "{{.SambaPassword}}") | smbpasswd -a macnas -s || true
-    smbpasswd -e macnas || true
 
     systemctl restart smbd nmbd || true
     systemctl restart docker || true

@@ -6,7 +6,12 @@ import {
 import { DiskInfo, ManagedDisk, SambaStatus, LocalMount } from '../types';
 import { api } from '../api';
 
-export const Storage: React.FC = () => {
+interface StorageProps {
+  configDirty?: boolean;
+  onRefreshOverview?: () => void;
+}
+
+export const Storage: React.FC<StorageProps> = ({ configDirty, onRefreshOverview }) => {
   const [disks, setDisks] = useState<DiskInfo[]>([]);
   const [managedDisks, setManagedDisks] = useState<ManagedDisk[]>([]);
   const [selectedDiskId, setSelectedDiskId] = useState<string>('');
@@ -199,6 +204,7 @@ export const Storage: React.FC = () => {
       await api.restartVM();
       setAlertMsg({ type: 'success', text: '正在重启虚拟机以挂载新数据盘，请稍候约 30 秒...' });
       setRestartPrompt(false);
+      onRefreshOverview?.();
       setTimeout(() => {
         loadData();
         setRestartingVM(false);
@@ -266,16 +272,16 @@ export const Storage: React.FC = () => {
       )}
 
       {/* Restart VM Alert Banner */}
-      {restartPrompt && (
+      {(restartPrompt || configDirty) && (
         <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm flex items-center justify-between shadow-lg">
           <div className="flex items-center space-x-2.5">
-            <RotateCw className="w-4 h-4 text-amber-400" />
-            <span>数据盘挂载配置已变更！需要重启 Linux 虚拟机以重新加载数据卷挂载生效。</span>
+            <RotateCw className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>数据盘挂载或直通配置已变更！需要重启 Linux 虚拟机以重新加载挂载生效。</span>
           </div>
           <button
             onClick={handleRestartVM}
             disabled={restartingVM}
-            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition flex items-center space-x-1"
+            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition flex items-center space-x-1 shrink-0"
           >
             <RotateCw className={`w-3.5 h-3.5 ${restartingVM ? 'animate-spin' : ''}`} />
             <span>{restartingVM ? '重启中...' : '立即重启 VM'}</span>

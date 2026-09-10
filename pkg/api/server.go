@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -135,40 +136,69 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// System Status Overview
+// System Status Overview (Parallelized for low latency)
 func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
-	sysStats, err := system.GetSystemStats()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	var (
+		sysStats           *system.SystemStats
+		sysErr             error
+		vmStat             *vm.VMStatus
+		containers         []docker.ContainerInfo
+		dockerRunningCount int
+		selectedDisk       *storage.DiskInfo
+		disks              []storage.DiskInfo
+		wg                 sync.WaitGroup
+	)
+
+	wg.Add(4)
+
+	// 1. Host system stats
+	go func() {
+		defer wg.Done()
+		sysStats, sysErr = system.GetSystemStats()
+	}()
+
+	// 2. VM status
+	go func() {
+		defer wg.Done()
+		vmStat, _ = s.vmMgr.GetStatus()
+	}()
+
+	// 3. Docker containers
+	go func() {
+		defer wg.Done()
+		containers, _ = s.dockerClient.ListContainers(r.Context())
+		for _, c := range containers {
+			if c.State == "running" {
+				dockerRunningCount++
+			}
+		}
+	}()
+
+	// 4. Storage overview
+	go func() {
+		defer wg.Done()
+		disks, _ = storage.ListDisks(s.cfg.Storage.SelectedDisk)
+		for _, d := range disks {
+			if d.IsSelected {
+				diskCopy := d
+				selectedDisk = &diskCopy
+				break
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	if sysErr != nil {
+		writeError(w, http.StatusInternalServerError, sysErr.Error())
 		return
 	}
 
-	vmStat, _ := s.vmMgr.GetStatus()
-
-	containers, _ := s.dockerClient.ListContainers(r.Context())
-	dockerRunningCount := 0
-	for _, c := range containers {
-		if c.State == "running" {
-			dockerRunningCount++
-		}
-	}
-
-	// Storage overview
-	disks, _ := storage.ListDisks(s.cfg.Storage.SelectedDisk)
-	var selectedDisk *storage.DiskInfo
-	for _, d := range disks {
-		if d.IsSelected {
-			diskCopy := d
-			selectedDisk = &diskCopy
-			break
-		}
-	}
-
 	resp := map[string]interface{}{
-		"system":  sysStats,
-		"power":   s.powerMgr.GetStatus(),
-		"service": s.serviceMgr.GetStatus(),
-		"vm":      vmStat,
+		"system":      sysStats,
+		"power":       s.powerMgr.GetStatus(),
+		"service":     s.serviceMgr.GetStatus(),
+		"vm":          vmStat,
 		"vmAction":    s.vmMgr.GetVMAction(),
 		"configDirty": s.vmMgr.IsConfigDirty(),
 		"docker": map[string]interface{}{
@@ -248,6 +278,7 @@ func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[MacNAS] VM Start error: %v", err)
 		} else {
 			s.vmMgr.SetConfigDirty(false)
+			_ = s.sambaMgr.EnsurePassword(ctx)
 		}
 		s.vmMgr.SetVMAction("")
 	}()
@@ -276,6 +307,7 @@ func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[MacNAS] VM Restart error: %v", err)
 		} else {
 			s.vmMgr.SetConfigDirty(false)
+			_ = s.sambaMgr.EnsurePassword(ctx)
 		}
 		s.vmMgr.SetVMAction("")
 	}()
@@ -312,6 +344,7 @@ func (s *Server) handleStorageSelect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cfg.Storage.SelectedDisk = body.Identifier
+	storage.InvalidateDisksCache()
 	if err := config.SaveConfig(s.cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
