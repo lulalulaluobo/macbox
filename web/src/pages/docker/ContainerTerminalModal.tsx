@@ -141,7 +141,7 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
       <div
-        className={`w-full flex flex-col rounded-2xl bg-[#090d16] border border-slate-800 shadow-2xl overflow-hidden transition-all duration-300 ${
+        className={`terminal-dark-preserve w-full flex flex-col rounded-2xl bg-[#090d16] border border-slate-800 shadow-2xl overflow-hidden transition-all duration-300 ${
           fullscreen ? 'h-[96vh] max-w-[96vw]' : 'h-[85vh] max-w-5xl'
         }`}
       >

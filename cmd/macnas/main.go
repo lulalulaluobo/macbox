@@ -120,6 +120,13 @@ func main() {
 			return
 		}
 
+		// Disable browser caching for SPA HTML entrypoints to prevent stale versions
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" || !strings.Contains(r.URL.Path, ".") {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+		}
+
 		// Try embedded FS first
 		f, err := embeddedFS.Open(strings.TrimPrefix(r.URL.Path, "/"))
 		if err == nil {

@@ -583,9 +583,9 @@ export const TerminalPage: React.FC = () => {
         )}
 
         {/* Right Side: Interactive Web Terminal */}
-        <div className={`${showSidebar ? 'lg:col-span-7' : 'w-full'} flex flex-col rounded-2xl bg-slate-900/90 border border-slate-800/80 shadow-xl overflow-hidden`}>
+        <div className={`terminal-dark-preserve ${showSidebar ? 'lg:col-span-7' : 'w-full'} flex flex-col rounded-2xl bg-[#090d16] border border-slate-800/80 shadow-xl overflow-hidden`}>
           {/* Terminal Top Toolbar */}
-          <div className="p-3.5 border-b border-slate-800/80 bg-slate-950/70 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="p-3.5 border-b border-slate-800/80 bg-[#0d121f] flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex items-center space-x-3">
               <button
                 onClick={() => setShowSidebar(!showSidebar)}

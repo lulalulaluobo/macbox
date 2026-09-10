@@ -25,18 +25,45 @@ import {
   Monitor,
   Palette,
 } from 'lucide-react';
-import { SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult } from '../types';
+import { SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult, NASUser } from '../types';
 import { api } from '../api';
 import { useTheme } from '../theme';
 
 interface SettingsProps {
   primaryIP?: string;
+  currentUser?: NASUser | null;
+  onCurrentUserUpdated?: (u: NASUser) => void;
 }
 
-export const Settings: React.FC<SettingsProps> = ({ primaryIP = '192.168.2.123' }) => {
+export const Settings: React.FC<SettingsProps> = ({
+  primaryIP = '192.168.2.123',
+  currentUser,
+  onCurrentUserUpdated,
+}) => {
   const { theme, setTheme } = useTheme();
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'rootpwd' | 'ssh' | 'terminal' | 'appearance'>('users');
+  const [activeSubTab, setActiveSubTab] = useState<'nas_users' | 'users' | 'rootpwd' | 'ssh' | 'terminal' | 'appearance'>('nas_users');
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // 0. NAS Users state (Web Console Authentication)
+  const [nasUsers, setNasUsers] = useState<NASUser[]>([]);
+  const [nasUsersLoading, setNasUsersLoading] = useState(false);
+  const [showAddNASModal, setShowAddNASModal] = useState(false);
+  const [newNASUsername, setNewNASUsername] = useState('');
+  const [newNASDisplayName, setNewNASDisplayName] = useState('');
+  const [newNASPassword, setNewNASPassword] = useState('');
+  const [newNASConfirmPassword, setNewNASConfirmPassword] = useState('');
+  const [newNASRole, setNewNASRole] = useState<'admin' | 'user'>('user');
+
+  // Edit / Promote NAS User
+  const [editingNASUser, setEditingNASUser] = useState<NASUser | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
+  const [editEnabled, setEditEnabled] = useState(true);
+  const [editNewPassword, setEditNewPassword] = useState('');
+
+  // Delete NAS User
+  const [deletingNASUser, setDeletingNASUser] = useState<NASUser | null>(null);
+  const [nasActionLoading, setNasActionLoading] = useState(false);
 
   // 1. Users state
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -93,20 +120,131 @@ export const Settings: React.FC<SettingsProps> = ({ primaryIP = '192.168.2.123' 
   const loadData = async () => {
     setUsersLoading(true);
     setSSHLoading(true);
+    setNasUsersLoading(true);
     try {
-      const [uList, sCfg, tCfg] = await Promise.all([
+      const [uList, sCfg, tCfg, nUsers] = await Promise.all([
         api.getUsers().catch(() => []),
         api.getSSHConfig().catch(() => null),
         api.getTerminalSettings().catch(() => null),
+        api.getNASUsers().catch(() => ({ users: [] })),
       ]);
       setUsers(uList || []);
       if (sCfg) setSSHConfig(sCfg);
       if (tCfg) setTerminalSettings(tCfg);
+      if (nUsers && nUsers.users) setNasUsers(nUsers.users);
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `加载系统设置失败: ${err.message}` });
     } finally {
       setUsersLoading(false);
       setSSHLoading(false);
+      setNasUsersLoading(false);
+    }
+  };
+
+  const loadNASUsers = async () => {
+    setNasUsersLoading(true);
+    try {
+      const res = await api.getNASUsers();
+      setNasUsers(res.users || []);
+    } catch (err: any) {
+      // ignore
+    } finally {
+      setNasUsersLoading(false);
+    }
+  };
+
+  const handleCreateNASUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNASUsername.trim() || !newNASPassword) {
+      setAlertMsg({ type: 'error', text: '请填写用户名和登录密码' });
+      return;
+    }
+    if (newNASPassword.length < 6) {
+      setAlertMsg({ type: 'error', text: '密码长度至少需要 6 个字符' });
+      return;
+    }
+    if (newNASPassword !== newNASConfirmPassword) {
+      setAlertMsg({ type: 'error', text: '两次输入的新密码不一致' });
+      return;
+    }
+
+    setNasActionLoading(true);
+    try {
+      await api.createNASUser({
+        username: newNASUsername.trim(),
+        displayName: newNASDisplayName.trim() || undefined,
+        password: newNASPassword,
+        role: newNASRole,
+      });
+      setAlertMsg({ type: 'success', text: `NAS 控制台用户 [${newNASUsername}] 创建成功！` });
+      setShowAddNASModal(false);
+      setNewNASUsername('');
+      setNewNASDisplayName('');
+      setNewNASPassword('');
+      setNewNASConfirmPassword('');
+      setNewNASRole('user');
+      await loadNASUsers();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `创建用户失败: ${err.message}` });
+    } finally {
+      setNasActionLoading(false);
+    }
+  };
+
+  const handleOpenEditNASUser = (u: NASUser) => {
+    setEditingNASUser(u);
+    setEditDisplayName(u.displayName || u.username);
+    setEditRole(u.role);
+    setEditEnabled(u.enabled);
+    setEditNewPassword('');
+  };
+
+  const handleUpdateNASUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNASUser) return;
+
+    setNasActionLoading(true);
+    try {
+      const payload: any = {
+        displayName: editDisplayName.trim() || undefined,
+        role: editRole,
+        enabled: editEnabled,
+      };
+      if (editNewPassword.trim()) {
+        if (editNewPassword.trim().length < 6) {
+          setAlertMsg({ type: 'error', text: '重置密码长度至少需要 6 个字符' });
+          setNasActionLoading(false);
+          return;
+        }
+        payload.newPassword = editNewPassword.trim();
+      }
+
+      const res = await api.updateNASUser(editingNASUser.id, payload);
+      setAlertMsg({ type: 'success', text: `用户 [${editingNASUser.username}] 配置已成功更新！` });
+      if (currentUser && currentUser.id === editingNASUser.id && onCurrentUserUpdated) {
+        onCurrentUserUpdated(res.user);
+      }
+      setEditingNASUser(null);
+      await loadNASUsers();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `更新用户失败: ${err.message}` });
+    } finally {
+      setNasActionLoading(false);
+    }
+  };
+
+  const handleDeleteNASUser = async () => {
+    if (!deletingNASUser) return;
+    setNasActionLoading(true);
+    try {
+      await api.deleteNASUser(deletingNASUser.id);
+      setAlertMsg({ type: 'success', text: `控制台用户 [${deletingNASUser.username}] 已成功删除！` });
+      setDeletingNASUser(null);
+      await loadNASUsers();
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `删除用户失败: ${err.message}` });
+    } finally {
+      setNasActionLoading(false);
     }
   };
 
@@ -367,67 +505,256 @@ export const Settings: React.FC<SettingsProps> = ({ primaryIP = '192.168.2.123' 
       )}
 
       {/* Navigation Sub-Tabs */}
-      <div className="flex items-center space-x-2 bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800/80 overflow-x-auto text-xs font-semibold">
+      <div className="flex items-center space-x-2 bg-slate-100/90 dark:bg-slate-900/70 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800/80 overflow-x-auto text-xs font-semibold shadow-xs">
         <button
-          onClick={() => setActiveSubTab('users')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
-            activeSubTab === 'users'
-              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+          onClick={() => setActiveSubTab('nas_users')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
+            activeSubTab === 'nas_users'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
-          <Users className="w-4 h-4" />
-          <span>终端用户管理</span>
+          <UserCheck className="w-4 h-4 text-sky-400" />
+          <span>👑 NAS 用户管理 (登录/管理员)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('users')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
+            activeSubTab === 'users'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
+          }`}
+        >
+          <Users className="w-4 h-4 text-slate-500" />
+          <span>Linux 终端用户</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('rootpwd')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
             activeSubTab === 'rootpwd'
-              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
-          <Crown className="w-4 h-4 text-amber-300" />
+          <Crown className="w-4 h-4 text-amber-500" />
           <span>Root 密码管理</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('ssh')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
             activeSubTab === 'ssh'
-              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
-          <Shield className="w-4 h-4 text-teal-300" />
+          <Shield className="w-4 h-4 text-teal-500" />
           <span>SSH 远程连接设置</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('terminal')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
             activeSubTab === 'terminal'
-              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
-          <Terminal className="w-4 h-4 text-sky-300" />
+          <Terminal className="w-4 h-4 text-sky-500" />
           <span>终端登录身份设置</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('appearance')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition ${
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
             activeSubTab === 'appearance'
-              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
-          <Palette className="w-4 h-4 text-indigo-400" />
+          <Palette className="w-4 h-4 text-indigo-500" />
           <span>外观与主题</span>
         </button>
       </div>
+
+      {/* ===================== 0. NAS Console Users Management Panel ===================== */}
+      {activeSubTab === 'nas_users' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/90 dark:border-slate-800/80 shadow-xs">
+            <div>
+              <div className="flex items-center space-x-2.5">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">NAS 控制台用户与超级管理员管理</h3>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/30 font-medium">
+                  Web 控制中枢
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                管理登录 Web 管理界面的权限账户。系统初始管理员为 <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">admin</span>，新建并授权其他超级管理员后，即可安全删除初始 admin 账户。
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAddNASModal(true)}
+              className="flex items-center space-x-1.5 px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold shadow-md shadow-sky-500/25 transition self-start sm:self-auto cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>添加 NAS 用户</span>
+            </button>
+          </div>
+
+          {/* User Stats Overview */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 shadow-xs flex items-center space-x-3.5">
+              <div className="w-10 h-10 rounded-xl bg-sky-50 dark:bg-sky-500/15 border border-sky-200 dark:border-sky-500/30 flex items-center justify-center text-sky-600 dark:text-sky-400">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">控制台用户总数</p>
+                <p className="text-xl font-extrabold text-slate-900 dark:text-white">{nasUsers.length} 人</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 shadow-xs flex items-center space-x-3.5">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                <Crown className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">超级管理员数量</p>
+                <p className="text-xl font-extrabold text-slate-900 dark:text-white">
+                  {nasUsers.filter((u) => u.role === 'admin' && u.enabled).length} 位
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 shadow-xs flex items-center space-x-3.5">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                <Shield className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">当前会话身份</p>
+                <p className="text-base font-bold text-slate-900 dark:text-white truncate">
+                  {currentUser?.username || 'admin'}
+                  {currentUser?.role === 'admin' && <span className="ml-1 text-xs text-amber-500 font-semibold">(超管)</span>}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* NAS Users Cards Grid */}
+          {nasUsersLoading ? (
+            <div className="p-8 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 text-center text-xs text-slate-500">
+              <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-sky-500" />
+              <span>正在加载 NAS 控制台用户列表...</span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {nasUsers.map((u) => {
+              const isSuper = u.role === 'admin';
+              const isMe = currentUser?.id === u.id;
+              const adminCount = nasUsers.filter((x) => x.role === 'admin' && x.enabled).length;
+              const isSoleAdmin = isSuper && adminCount <= 1;
+
+              return (
+                <div
+                  key={u.id}
+                  className="p-5 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700/80 flex flex-col justify-between space-y-4 transition shadow-xs hover:shadow-md"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div
+                          className={`w-11 h-11 rounded-2xl flex items-center justify-center border shadow-xs ${
+                            isSuper
+                              ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-600 dark:text-amber-400'
+                              : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {isSuper ? <Crown className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-bold text-base text-slate-900 dark:text-white font-mono">{u.username}</span>
+                            {isMe && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 font-semibold">
+                                当前登录
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{u.displayName || u.username}</p>
+                        </div>
+                      </div>
+
+                      <span
+                        className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold border ${
+                          isSuper
+                            ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/30'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        {isSuper ? '👑 超级管理员' : '普通用户'}
+                      </span>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-100 dark:border-slate-800/60 text-xs space-y-1 text-slate-500 dark:text-slate-400">
+                      <div className="flex justify-between">
+                        <span>账号状态:</span>
+                        <span className={u.enabled ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-rose-500 font-medium'}>
+                          {u.enabled ? '🟢 正常使用' : '⚪ 已禁用'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>最后登录:</span>
+                        <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                          {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('zh-CN', { hour12: false }) : '尚未登录'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>创建时间:</span>
+                        <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                          {new Date(u.createdAt).toLocaleDateString('zh-CN')}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+                    <button
+                      onClick={() => handleOpenEditNASUser(u)}
+                      className="flex-1 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition text-center shadow-xs"
+                    >
+                      编辑 / 授权
+                    </button>
+
+                    <button
+                      onClick={() => setDeletingNASUser(u)}
+                      disabled={isMe || isSoleAdmin}
+                      title={
+                        isMe
+                          ? '不能删除当前正在登录的账号'
+                          : isSoleAdmin
+                          ? '系统必须至少保留一位超级管理员'
+                          : u.username === 'admin'
+                          ? '点击可安全删除初始管理员 admin'
+                          : '删除用户'
+                      }
+                      className={`p-2 rounded-xl text-xs font-medium border transition ${
+                        isMe || isSoleAdmin
+                          ? 'opacity-30 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700'
+                          : 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-900/30 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800/30 cursor-pointer shadow-xs'
+                      }`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ===================== 1. Users Management Panel ===================== */}
       {activeSubTab === 'users' && (
@@ -1495,6 +1822,277 @@ export const Settings: React.FC<SettingsProps> = ({ primaryIP = '192.168.2.123' 
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Add NAS User Modal */}
+      {showAddNASModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-xl bg-sky-50 dark:bg-sky-500/20 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">添加新 NAS 控制台用户</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">用于网页控制台登录与管理</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddNASModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateNASUser} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">用户名 *</label>
+                <input
+                  type="text"
+                  value={newNASUsername}
+                  onChange={(e) => setNewNASUsername(e.target.value)}
+                  placeholder="英文字母、数字或下划线 (如 manager)"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">显示昵称</label>
+                <input
+                  type="text"
+                  value={newNASDisplayName}
+                  onChange={(e) => setNewNASDisplayName(e.target.value)}
+                  placeholder="用户备注名称 (可选)"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">初始登录密码 *</label>
+                <input
+                  type="password"
+                  value={newNASPassword}
+                  onChange={(e) => setNewNASPassword(e.target.value)}
+                  placeholder="至少 6 位密码"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">确认初始密码 *</label>
+                <input
+                  type="password"
+                  value={newNASConfirmPassword}
+                  onChange={(e) => setNewNASConfirmPassword(e.target.value)}
+                  placeholder="再次输入密码"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
+                  required
+                />
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">角色与权限授权</label>
+                <div className="flex items-center space-x-4 text-xs">
+                  <label className="flex items-center space-x-1.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="role"
+                      value="admin"
+                      checked={newNASRole === 'admin'}
+                      onChange={() => setNewNASRole('admin')}
+                      className="text-amber-500 focus:ring-amber-400"
+                    />
+                    <span className="font-semibold text-amber-600 dark:text-amber-400 flex items-center">
+                      <Crown className="w-3.5 h-3.5 mr-1" /> 授权超级管理员
+                    </span>
+                  </label>
+                  <label className="flex items-center space-x-1.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="role"
+                      value="user"
+                      checked={newNASRole === 'user'}
+                      onChange={() => setNewNASRole('user')}
+                      className="text-sky-500 focus:ring-sky-400"
+                    />
+                    <span className="text-slate-700 dark:text-slate-300">普通用户</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddNASModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={nasActionLoading}
+                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold shadow-md shadow-sky-500/25 transition disabled:opacity-50"
+                >
+                  {nasActionLoading ? '创建中...' : '确认创建用户'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit NAS User Modal */}
+      {editingNASUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">编辑用户与角色授权</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">账号: {editingNASUser.username}</p>
+              </div>
+              <button
+                onClick={() => setEditingNASUser(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateNASUser} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">显示昵称</label>
+                <input
+                  type="text"
+                  value={editDisplayName}
+                  onChange={(e) => setEditDisplayName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">权限角色分配</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div
+                    onClick={() => setEditRole('admin')}
+                    className={`p-3 rounded-xl border cursor-pointer transition flex items-center space-x-2 ${
+                      editRole === 'admin'
+                        ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-300 dark:border-amber-500/40 text-amber-800 dark:text-amber-300'
+                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <Crown className="w-4 h-4 text-amber-500" />
+                    <div>
+                      <p className="font-bold text-xs">超级管理员</p>
+                      <p className="text-[10px] opacity-75">全系统管理权限</p>
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setEditRole('user')}
+                    className={`p-3 rounded-xl border cursor-pointer transition flex items-center space-x-2 ${
+                      editRole === 'user'
+                        ? 'bg-sky-50 dark:bg-sky-500/15 border-sky-300 dark:border-sky-500/40 text-sky-800 dark:text-sky-300'
+                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <UserCheck className="w-4 h-4 text-sky-500" />
+                    <div>
+                      <p className="font-bold text-xs">普通用户</p>
+                      <p className="text-[10px] opacity-75">基础使用权限</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">重置密码 (留空则保持原密码不变)</label>
+                <input
+                  type="password"
+                  value={editNewPassword}
+                  onChange={(e) => setEditNewPassword(e.target.value)}
+                  placeholder="留空表示不修改密码"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div>
+                <label className="flex items-center space-x-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={editEnabled}
+                    onChange={(e) => setEditEnabled(e.target.checked)}
+                    className="rounded border-slate-300 dark:border-slate-700 text-sky-500 focus:ring-sky-400"
+                  />
+                  <span>账号处于启用状态 (允许登录控制台)</span>
+                </label>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingNASUser(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  disabled={nasActionLoading}
+                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold shadow-md shadow-sky-500/25 transition disabled:opacity-50"
+                >
+                  {nasActionLoading ? '保存中...' : '保存更改'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete NAS User Confirmation Modal */}
+      {deletingNASUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3 text-rose-500">
+              <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 flex items-center justify-center">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">删除控制台用户</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">操作不可撤销</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              确定要永久删除控制台用户 <span className="font-bold font-mono text-slate-900 dark:text-white">[{deletingNASUser.username}]</span> 吗？
+              {deletingNASUser.username === 'admin' && (
+                <span className="block mt-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 font-medium">
+                  ⚠️ 您正在删除初始管理员 admin。删除后，请确保您已牢记当前登录的管理员账户与密码。
+                </span>
+              )}
+            </p>
+
+            <div className="flex justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingNASUser(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteNASUser}
+                disabled={nasActionLoading}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/25 transition disabled:opacity-50"
+              >
+                {nasActionLoading ? '删除中...' : '确认永久删除'}
+              </button>
+            </div>
           </div>
         </div>
       )}

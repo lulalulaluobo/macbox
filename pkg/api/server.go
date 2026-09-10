@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/luluen/mac-nas/pkg/apps"
+	"github.com/luluen/mac-nas/pkg/auth"
 	"github.com/luluen/mac-nas/pkg/config"
 	"github.com/luluen/mac-nas/pkg/docker"
 	"github.com/luluen/mac-nas/pkg/samba"
@@ -44,8 +45,47 @@ type Server struct {
 	userMgr         *system.UserManager
 	sshMgr          *system.SSHManager
 	termSettingsMgr *system.TerminalSettingsManager
+	authMgr         *auth.Manager
 	projectRoot     string
 	mux             *http.ServeMux
+}
+
+type contextKey string
+
+const userContextKey contextKey = "macnas-user"
+
+func (s *Server) authenticateRequest(r *http.Request) (*auth.User, error) {
+	if s.authMgr == nil {
+		return nil, fmt.Errorf("auth manager not initialized")
+	}
+	authHeader := r.Header.Get("Authorization")
+	token := ""
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		token = strings.TrimPrefix(authHeader, "Bearer ")
+	} else if qToken := r.URL.Query().Get("token"); qToken != "" {
+		token = qToken
+	}
+	return s.authMgr.ValidateToken(token)
+}
+
+func getCurrentUser(r *http.Request) *auth.User {
+	if u, ok := r.Context().Value(userContextKey).(*auth.User); ok {
+		return u
+	}
+	return nil
+}
+
+func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) *auth.User {
+	u := getCurrentUser(r)
+	if u == nil {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return nil
+	}
+	if u.Role != "admin" {
+		writeError(w, http.StatusForbidden, "需要超级管理员权限")
+		return nil
+	}
+	return u
 }
 
 func NewServer(cfg *config.Config, projectRoot string) *Server {
@@ -61,6 +101,11 @@ func NewServer(cfg *config.Config, projectRoot string) *Server {
 	cfgDir, _ := config.ConfigDir()
 	termSettingsMgr := system.NewTerminalSettingsManager(cfgDir)
 
+	authMgr, err := auth.NewManager(cfgDir)
+	if err != nil {
+		log.Printf("[Auth] Warning: failed to init auth manager: %v", err)
+	}
+
 	s := &Server{
 		cfg:             cfg,
 		vmMgr:           vmMgr,
@@ -72,6 +117,7 @@ func NewServer(cfg *config.Config, projectRoot string) *Server {
 		userMgr:         userMgr,
 		sshMgr:          sshMgr,
 		termSettingsMgr: termSettingsMgr,
+		authMgr:         authMgr,
 		projectRoot:     projectRoot,
 		mux:             http.NewServeMux(),
 	}
@@ -90,6 +136,31 @@ func (s *Server) Handler() http.Handler {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+
+		// API Authentication Interceptor
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			// Whitelisted unauthenticated endpoints
+			if r.URL.Path == "/api/auth/login" {
+				s.mux.ServeHTTP(w, r)
+				return
+			}
+
+			user, err := s.authenticateRequest(r)
+			if err != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"error": "未登录或登录已过期，请重新登录",
+					"code":  "UNAUTHORIZED",
+				})
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), userContextKey, user)
+			s.mux.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
 		s.mux.ServeHTTP(w, r)
 	})
 }
@@ -215,6 +286,16 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/system/ssh/keys", s.handleClearSSHAuthorizedKeys)
 	s.mux.HandleFunc("GET /api/system/terminal/settings", s.handleGetTerminalSettings)
 	s.mux.HandleFunc("POST /api/system/terminal/settings", s.handleUpdateTerminalSettings)
+
+	// 10. Web Console Authentication & User Management
+	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+	s.mux.HandleFunc("GET /api/auth/me", s.handleAuthMe)
+	s.mux.HandleFunc("POST /api/auth/change-pwd", s.handleAuthChangePassword)
+	s.mux.HandleFunc("GET /api/auth/users", s.handleAuthListUsers)
+	s.mux.HandleFunc("POST /api/auth/users", s.handleAuthCreateUser)
+	s.mux.HandleFunc("PUT /api/auth/users/{id}", s.handleAuthUpdateUser)
+	s.mux.HandleFunc("DELETE /api/auth/users/{id}", s.handleAuthDeleteUser)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -1972,4 +2053,165 @@ func (s *Server) handleClearSSHAuthorizedKeys(w http.ResponseWriter, r *http.Req
 		"message": "Root 已授权公钥已全部清空",
 	})
 }
+
+// -------------------------------------------------------------
+// 10. Web Console Auth & User Management Handlers
+// -------------------------------------------------------------
+
+func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		RememberMe bool   `json:"rememberMe"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求参数解析错误")
+		return
+	}
+
+	token, user, err := s.authMgr.Login(req.Username, req.Password, req.RememberMe)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"token": token,
+		"user":  user,
+	})
+}
+
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token != "" && s.authMgr != nil {
+		s.authMgr.Logout(token)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	user := getCurrentUser(r)
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "未登录")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"user": user,
+	})
+}
+
+func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
+	user := getCurrentUser(r)
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "请先登录")
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"oldPassword"`
+		NewPassword string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求数据格式错误")
+		return
+	}
+
+	if err := s.authMgr.ChangePassword(user.ID, req.OldPassword, req.NewPassword); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "密码修改成功",
+	})
+}
+
+func (s *Server) handleAuthListUsers(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r) == nil {
+		return
+	}
+
+	users := s.authMgr.ListUsers()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"users": users,
+	})
+}
+
+func (s *Server) handleAuthCreateUser(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r) == nil {
+		return
+	}
+
+	var req auth.CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求数据格式错误")
+		return
+	}
+
+	newUser, err := s.authMgr.CreateUser(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "ok",
+		"user":   newUser,
+	})
+}
+
+func (s *Server) handleAuthUpdateUser(w http.ResponseWriter, r *http.Request) {
+	if s.requireAdmin(w, r) == nil {
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "用户 ID 不能为空")
+		return
+	}
+
+	var req auth.UpdateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求数据格式错误")
+		return
+	}
+
+	updatedUser, err := s.authMgr.UpdateUser(id, req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "ok",
+		"user":   updatedUser,
+	})
+}
+
+func (s *Server) handleAuthDeleteUser(w http.ResponseWriter, r *http.Request) {
+	currentUser := s.requireAdmin(w, r)
+	if currentUser == nil {
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "用户 ID 不能为空")
+		return
+	}
+
+	if err := s.authMgr.DeleteUser(id, currentUser.ID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "用户已成功删除",
+	})
+}
+
 

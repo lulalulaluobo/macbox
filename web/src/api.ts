@@ -1,15 +1,20 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult } from './types';
+import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult, NASUser, AuthResponse, CreateNASUserRequest, UpdateNASUserRequest } from './types';
 
 const BASE_URL = '/api';
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
+  const token = localStorage.getItem('macnas-auth-token');
   const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
   });
+  if (res.status === 401 && !url.endsWith('/api/auth/login')) {
+    window.dispatchEvent(new CustomEvent('macnas-unauthorized'));
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || 'Request failed');
@@ -384,5 +389,39 @@ export const api = {
     fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/terminal/settings`, {
       method: 'POST',
       body: JSON.stringify(settings),
+    }),
+
+  // Web Console Authentication & User Management
+  login: (username: string, password: string, rememberMe: boolean = false) =>
+    fetchJSON<AuthResponse>(`${BASE_URL}/auth/login`, {
+      method: 'POST',
+      body: JSON.stringify({ username, password, rememberMe }),
+    }),
+  logout: () =>
+    fetchJSON<{ status: string }>(`${BASE_URL}/auth/logout`, {
+      method: 'POST',
+    }),
+  getMe: () =>
+    fetchJSON<{ user: NASUser }>(`${BASE_URL}/auth/me`),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/auth/change-pwd`, {
+      method: 'POST',
+      body: JSON.stringify({ oldPassword, newPassword }),
+    }),
+  getNASUsers: () =>
+    fetchJSON<{ users: NASUser[] }>(`${BASE_URL}/auth/users`),
+  createNASUser: (req: CreateNASUserRequest) =>
+    fetchJSON<{ status: string; user: NASUser }>(`${BASE_URL}/auth/users`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+  updateNASUser: (id: string, req: UpdateNASUserRequest) =>
+    fetchJSON<{ status: string; user: NASUser }>(`${BASE_URL}/auth/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    }),
+  deleteNASUser: (id: string) =>
+    fetchJSON<{ status: string; message: string }>(`${BASE_URL}/auth/users/${id}`, {
+      method: 'DELETE',
     }),
 };

@@ -3,208 +3,255 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --bg-canvas: #f8fafc;
+    --bg-card: #ffffff;
+    --bg-card-subtle: #f1f5f9;
+    --border-color: #e2e8f0;
+    --border-subtle: #f1f5f9;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --card-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+    --card-shadow-hover: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+  }
+
+  html.dark {
+    --bg-canvas: #080c14;
+    --bg-card: #0f172a;
+    --bg-card-subtle: #1e293b;
+    --border-color: #1e293b;
+    --border-subtle: #1e293b;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --card-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
+    --card-shadow-hover: 0 4px 12px -2px rgba(0, 0, 0, 0.5);
+  }
+
   body {
-    background-color: #090d16;
-    color: #f1f5f9;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   }
 }
 
-/* Custom scrollbars for logs and terminal */
+/* Custom scrollbars */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 4px;
+  background: #cbd5e1;
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
 
 /* ======================================================== */
-/* Light Mode Adaptations                                   */
+/* Tactile Spring Micro-Interactions (apple-design)         */
+/* ======================================================== */
+button:active:not(:disabled),
+a:active:not(:disabled) {
+  transform: scale(0.98);
+  transition: transform 100ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ======================================================== */
+/* Terminal & Code Dark Independence Protection             */
+/* Preserves dark canvas for developer consoles in both modes */
+/* ======================================================== */
+.terminal-dark-preserve,
+.terminal-dark-preserve * {
+  /* Guard against light mode overrides */
+}
+
+/* ======================================================== */
+/* Apple HIG & UI-UX-Pro-Max: Light Mode System              */
 /* ======================================================== */
 
-html.light {
-  color-scheme: light;
-}
-
+/* 1. Base Canvas in Light Mode */
 html.light body {
-  background-color: #f8fafc !important;
-  color: #0f172a !important;
+  background-color: #f8fafc;
+  color: #0f172a;
 }
 
-html.light .bg-\[\#090d16\] {
-  background-color: #f8fafc !important;
-}
-
-html.light .bg-\[\#090d16\]\/80 {
-  background-color: rgba(255, 255, 255, 0.88) !important;
-}
-
-html.light .bg-slate-950 {
-  background-color: #f8fafc !important;
-}
-
-html.light .bg-slate-900,
-html.light .bg-slate-900\/40,
-html.light .bg-slate-900\/50,
-html.light .bg-slate-900\/60,
-html.light .bg-slate-900\/70,
-html.light .bg-slate-900\/80,
-html.light .bg-slate-900\/90,
-html.light .bg-slate-900\/95 {
+/* 2. Cards and Containers in Light Mode (excl. terminal) */
+html.light .bg-slate-900:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-900\/40:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-900\/50:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-900\/60:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-900\/70:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-900\/80:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-900\/90:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-900\/95:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-\[\#0d121f\]:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-\[\#0f172a\]:not(.terminal-dark-preserve):not(.terminal-dark-preserve *) {
   background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
 }
 
-html.light .bg-slate-800,
-html.light .bg-slate-800\/20,
-html.light .bg-slate-800\/30,
-html.light .bg-slate-800\/40,
-html.light .bg-slate-800\/50,
-html.light .bg-slate-800\/60,
-html.light .bg-slate-800\/70,
-html.light .bg-slate-800\/80 {
-  background-color: #f1f5f9 !important;
-}
-
-html.light .bg-slate-800\/90 {
+/* 3. Sub-panels, Pill Containers and Secondary Surfaces */
+html.light .bg-slate-800\/30:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-800\/40:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-800\/50:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-800\/60:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-800\/70:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-800\/80:not(.terminal-dark-preserve):not(.terminal-dark-preserve *) {
   background-color: #f8fafc !important;
-}
-
-html.light .bg-slate-700 {
-  background-color: #e2e8f0 !important;
-}
-
-html.light .hover\:bg-slate-800:hover,
-html.light .hover\:bg-slate-800\/50:hover,
-html.light .hover\:bg-slate-800\/80:hover {
-  background-color: #e2e8f0 !important;
-}
-
-html.light .hover\:bg-slate-700:hover {
-  background-color: #cbd5e1 !important;
-}
-
-html.light .border-slate-800,
-html.light .border-slate-800\/40,
-html.light .border-slate-800\/60,
-html.light .border-slate-800\/80,
-html.light .border-slate-800\/90,
-html.light .border-slate-700,
-html.light .border-slate-700\/50,
-html.light .border-slate-700\/60,
-html.light .border-slate-700\/70 {
   border-color: #e2e8f0 !important;
 }
 
-html.light .text-white {
+html.light .bg-slate-800:not(button):not(.terminal-dark-preserve):not(.terminal-dark-preserve *) {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* 4. Secondary Buttons in Light Mode */
+html.light button.bg-slate-800:not(.terminal-dark-preserve),
+html.light button.bg-slate-800\/80:not(.terminal-dark-preserve),
+html.light button.bg-slate-800\/90:not(.terminal-dark-preserve),
+html.light button.bg-slate-700:not(.terminal-dark-preserve) {
+  background-color: #ffffff !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+}
+
+html.light button.bg-slate-800:hover:not(.terminal-dark-preserve),
+html.light button.bg-slate-700:hover:not(.terminal-dark-preserve) {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
+}
+
+/* 5. Crisp Borders in Light Mode */
+html.light .border-slate-800:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .border-slate-800\/40:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .border-slate-800\/60:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .border-slate-800\/80:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .border-slate-800\/90:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .border-slate-700:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .border-slate-700\/40:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .border-slate-700\/50:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .border-slate-700\/60:not(.terminal-dark-preserve):not(.terminal-dark-preserve *) {
+  border-color: #e2e8f0 !important;
+}
+
+/* 6. Typography Contrast (WCAG AA: text >= 4.5:1 on light) */
+html.light .text-slate-100:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .text-slate-200:not(.terminal-dark-preserve):not(.terminal-dark-preserve *) {
   color: #0f172a !important;
 }
 
-html.light .text-slate-100,
-html.light .text-slate-200 {
-  color: #1e293b !important;
-}
-
-html.light .text-slate-300 {
+html.light .text-slate-300:not(.terminal-dark-preserve):not(.terminal-dark-preserve *) {
   color: #334155 !important;
 }
 
-html.light .text-slate-400 {
+html.light .text-slate-400:not(.terminal-dark-preserve):not(.terminal-dark-preserve *) {
+  color: #475569 !important; /* 4.6:1 contrast ratio against white */
+}
+
+html.light .text-slate-500:not(.terminal-dark-preserve):not(.terminal-dark-preserve *) {
   color: #64748b !important;
 }
 
-html.light .text-slate-500 {
-  color: #94a3b8 !important;
-}
-
-html.light .hover\:text-white:hover {
+/* Headings and bold titles in Light Mode */
+html.light h1.text-white,
+html.light h2.text-white,
+html.light h3.text-white,
+html.light h4.text-white,
+html.light p.text-white,
+html.light span.text-white:not([class*="bg-sky"]):not([class*="bg-emerald"]):not([class*="bg-indigo"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light div.text-white:not([class*="bg-sky"]):not([class*="bg-emerald"]):not([class*="bg-indigo"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not(.terminal-dark-preserve):not(.terminal-dark-preserve *) {
   color: #0f172a !important;
 }
 
-html.light .hover\:text-slate-200:hover {
-  color: #1e293b !important;
-}
-
-/* Ensure solid action buttons and primary headers preserve white text */
-html.light button.bg-sky-500,
-html.light button.bg-sky-600,
-html.light button.bg-emerald-600,
-html.light button.bg-rose-600,
-html.light button.bg-indigo-600,
-html.light .bg-sky-500.text-white,
-html.light .bg-sky-600.text-white,
-html.light .bg-emerald-600.text-white,
-html.light .bg-rose-600.text-white,
-html.light .bg-indigo-600.text-white,
-html.light .bg-sky-500 .text-white,
-html.light .bg-sky-600 .text-white,
-html.light .bg-emerald-600 .text-white,
-html.light .bg-rose-600 .text-white,
-html.light .bg-indigo-600 .text-white,
-html.light .bg-gradient-to-r button,
-html.light [class*="from-sky-600"] span,
-html.light [class*="from-sky-500"] span,
-html.light [class*="from-purple-600"] span,
-html.light [class*="bg-emerald-600"] span,
-html.light [class*="bg-sky-500"] span,
-html.light [class*="bg-sky-600"] span,
+/* 7. Solid Buttons & Badges: Guaranteed High Contrast Pure White Text */
 html.light .bg-sky-500,
-html.light .bg-sky-600 {
+html.light .bg-sky-600,
+html.light .bg-emerald-600,
+html.light .bg-emerald-500,
+html.light .bg-rose-600,
+html.light .bg-rose-500,
+html.light .bg-indigo-600,
+html.light .bg-indigo-500,
+html.light .bg-amber-500 {
   color: #ffffff !important;
 }
 
-/* Light Mode Input & Form elements */
-html.light input,
-html.light select,
-html.light textarea {
+html.light .bg-sky-500 *,
+html.light .bg-sky-600 *,
+html.light .bg-emerald-600 *,
+html.light .bg-emerald-500 *,
+html.light .bg-rose-600 *,
+html.light .bg-rose-500 *,
+html.light .bg-indigo-600 *,
+html.light .bg-indigo-500 *,
+html.light .bg-amber-500 * {
+  color: #ffffff !important;
+}
+
+/* 8. Inputs & Forms in Light Mode (Apple-style clean inputs) */
+html.light input:not(.terminal-dark-preserve *),
+html.light select:not(.terminal-dark-preserve *),
+html.light textarea:not(.terminal-dark-preserve *) {
   background-color: #ffffff !important;
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04) !important;
 }
 
-html.light input::placeholder,
-html.light textarea::placeholder {
+html.light input:focus:not(.terminal-dark-preserve *),
+html.light select:focus:not(.terminal-dark-preserve *),
+html.light textarea:focus:not(.terminal-dark-preserve *) {
+  border-color: #0ea5e9 !important;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15) !important;
+}
+
+html.light input::placeholder:not(.terminal-dark-preserve *),
+html.light textarea::placeholder:not(.terminal-dark-preserve *) {
   color: #94a3b8 !important;
 }
 
-/* Modal Backdrops */
+/* 9. Modal Overlays & Dialogs in Light Mode */
 html.light .bg-black\/70,
 html.light .bg-black\/75,
 html.light .bg-black\/80 {
   background-color: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(8px) !important;
 }
 
-/* Banner Gradients in Light Mode */
-html.light .bg-gradient-to-r.from-sky-950\/40 {
-  --tw-gradient-from: #f0f9ff var(--tw-gradient-from-position) !important;
-  --tw-gradient-via: #f8fafc var(--tw-gradient-via-position) !important;
-  --tw-gradient-to: #ffffff var(--tw-gradient-to-position) !important;
+/* 10. Top Daemon Banner in Light Mode */
+html.light .daemon-banner {
+  background: linear-gradient(135deg, #f0f9ff 0%, #eef2ff 50%, #ffffff 100%) !important;
   border-color: #bae6fd !important;
+  box-shadow: 0 4px 12px -2px rgba(14, 165, 233, 0.08) !important;
 }
 
-html.light .bg-gradient-to-br.from-slate-900 {
-  --tw-gradient-from: #ffffff var(--tw-gradient-from-position) !important;
-  --tw-gradient-via: #ffffff var(--tw-gradient-via-position) !important;
-  --tw-gradient-to: #f8fafc var(--tw-gradient-to-position) !important;
-}
-
-/* Scrollbars in Light Mode */
-html.light ::-webkit-scrollbar-track {
-  background: #f1f5f9;
-}
-html.light ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-}
-html.light ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+/* ======================================================== */
+/* Deep Midnight (Dark Mode) Glass & Glow Refinement       */
+/* ======================================================== */
+html.dark .daemon-banner {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.6) 100%);
+  border-color: rgba(51, 65, 85, 0.6);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.5);
 }

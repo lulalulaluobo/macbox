@@ -440,7 +440,7 @@ export const Apps: React.FC = () => {
       {/* Logs Modal */}
       {activeLogApp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-4xl h-[78vh] flex flex-col rounded-2xl bg-[#0b0f19] border border-slate-800 shadow-2xl overflow-hidden">
+          <div className="terminal-dark-preserve w-full max-w-4xl h-[78vh] flex flex-col rounded-2xl bg-[#0b0f19] border border-slate-800 shadow-2xl overflow-hidden">
             <div className="px-5 py-3.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
                 <Terminal className="w-4 h-4 text-sky-400" />
