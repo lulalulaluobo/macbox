@@ -1,0 +1,34 @@
+# standard ignores
+.gemini/
+.obsidian/workspace.json
+node_modules/
+dist/
+references/
+*.db-shm
+*.db-wal
+*.log
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Frontend / Temp
+tmp/
+*.tmp
+.env.local
+.env.*.local
+
