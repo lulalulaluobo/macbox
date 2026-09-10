@@ -151,3 +151,29 @@ export interface SystemOverview {
   };
   timestamp: string;
 }
+
+export interface VMConfigInfo {
+  cpus: number;
+  memory: number;
+  diskSize: number;
+  hostCpus: number;
+  hostMemoryGB: number;
+  vmStatus: string;
+  isDynamicMemory: boolean;
+  balloonDescription: string;
+  diskDescription: string;
+}
+
+export interface FileItem {
+  name: string;
+  path: string;
+  isDir: boolean;
+  isSymlink: boolean;
+  size: number;
+  sizeFormatted: string;
+  mode: string;
+  mtime: number;
+  mtimeString: string;
+  ext: string;
+}
+

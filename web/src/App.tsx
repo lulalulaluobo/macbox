@@ -4,11 +4,12 @@ import { Dashboard } from './pages/Dashboard';
 import { Storage } from './pages/Storage';
 import { Docker } from './pages/Docker';
 import { Apps } from './pages/Apps';
+import { TerminalPage } from './pages/TerminalPage';
 import { SystemOverview, AppMetadata } from './types';
 import { api } from './api';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'storage' | 'docker' | 'apps'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal'>('dashboard');
   const [overview, setOverview] = useState<SystemOverview | undefined>(undefined);
   const [apps, setApps] = useState<AppMetadata[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +85,8 @@ export const App: React.FC = () => {
         {activeTab === 'docker' && <Docker />}
 
         {activeTab === 'apps' && <Apps />}
+
+        {activeTab === 'terminal' && <TerminalPage />}
       </main>
 
       <footer className="border-t border-slate-800/60 py-6 text-center text-xs text-slate-500">

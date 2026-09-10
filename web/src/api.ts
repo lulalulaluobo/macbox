@@ -1,4 +1,4 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, AppMetadata, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse } from './types';
+import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, AppMetadata, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem } from './types';
 
 const BASE_URL = '/api';
 
@@ -122,4 +122,61 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ password }),
   }),
+
+  // VM Specs
+  getVMConfig: () => fetchJSON<VMConfigInfo>(`${BASE_URL}/vm/config`),
+  updateVMConfig: (cfg: { cpus: number; memory: number; diskSize: number }) => fetchJSON<{
+    status: string;
+    requiresRestart: boolean;
+    message: string;
+    cpus: number;
+    memory: number;
+    diskSize: number;
+  }>(`${BASE_URL}/vm/config`, {
+    method: 'POST',
+    body: JSON.stringify(cfg),
+  }),
+
+  // Web Terminal & File System
+  listFiles: (path?: string) => fetchJSON<{ status: string; path: string; items: FileItem[] }>(
+    `${BASE_URL}/terminal/files${path ? `?path=${encodeURIComponent(path)}` : ''}`
+  ),
+  readFile: (path: string) => fetchJSON<{ status: string; path: string; content: string }>(
+    `${BASE_URL}/terminal/files/read?path=${encodeURIComponent(path)}`
+  ),
+  writeFile: (path: string, content: string) => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files/write`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ path, content }),
+    }
+  ),
+  createFolder: (path: string) => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files/mkdir`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }
+  ),
+  deleteFile: (path: string) => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files?path=${encodeURIComponent(path)}`,
+    {
+      method: 'DELETE',
+    }
+  ),
+  uploadFile: async (file: File, targetDir: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('targetDir', targetDir);
+    const res = await fetch(`${BASE_URL}/terminal/files/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(err.error || 'Upload failed');
+    }
+    return res.json();
+  },
+  getFileDownloadUrl: (path: string) => `${BASE_URL}/terminal/files/download?path=${encodeURIComponent(path)}`,
 };

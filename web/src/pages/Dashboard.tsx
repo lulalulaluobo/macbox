@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Square, RotateCw, Cpu, HardDrive, Server, Globe, ExternalLink, ShieldCheck, Coffee, Zap, Rocket } from 'lucide-react';
-import { SystemOverview, AppMetadata } from '../types';
+import { Play, Square, RotateCw, Cpu, HardDrive, Server, Globe, ExternalLink, ShieldCheck, Coffee, Zap, Rocket, Settings, Sliders, Info, X } from 'lucide-react';
+import { SystemOverview, AppMetadata, VMConfigInfo } from '../types';
 import { api } from '../api';
 
 interface DashboardProps {
@@ -20,6 +20,50 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [powerLoading, setPowerLoading] = useState<boolean>(false);
   const [serviceLoading, setServiceLoading] = useState<boolean>(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  // VM Specs Modal
+  const [showSpecsModal, setShowSpecsModal] = useState(false);
+  const [specsLoading, setSpecsLoading] = useState(false);
+  const [specsSaving, setSpecsSaving] = useState(false);
+  const [specsInfo, setSpecsInfo] = useState<VMConfigInfo | null>(null);
+  const [editCPUs, setEditCPUs] = useState(2);
+  const [editMemory, setEditMemory] = useState(4);
+  const [editDisk, setEditDisk] = useState(20);
+
+  const handleOpenSpecs = async () => {
+    setSpecsLoading(true);
+    setShowSpecsModal(true);
+    try {
+      const cfg = await api.getVMConfig();
+      setSpecsInfo(cfg);
+      setEditCPUs(cfg.cpus || 2);
+      setEditMemory(cfg.memory || 4);
+      setEditDisk(cfg.diskSize || 20);
+    } catch (err: any) {
+      setMessage(`获取虚拟机配置失败: ${err.message}`);
+    } finally {
+      setSpecsLoading(false);
+    }
+  };
+
+  const handleSaveSpecs = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSpecsSaving(true);
+    try {
+      const res = await api.updateVMConfig({
+        cpus: editCPUs,
+        memory: editMemory,
+        diskSize: editDisk,
+      });
+      setMessage(res.message || '虚拟机硬件规格已更新！');
+      setShowSpecsModal(false);
+      onRefresh();
+    } catch (err: any) {
+      setMessage(`更新虚拟机规格失败: ${err.message}`);
+    } finally {
+      setSpecsSaving(false);
+    }
+  };
 
   const sys = overview?.system;
   const vm = overview?.vm;
@@ -318,6 +362,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <RotateCw className={`w-3.5 h-3.5 ${currentAction === 'restart' ? 'animate-spin text-sky-400' : ''}`} />
                 <span>{currentAction === 'restart' ? '重启中...' : '重启 VM'}</span>
               </button>
+
+              <button
+                onClick={handleOpenSpecs}
+                disabled={isActionBusy}
+                className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-indigo-950/40 hover:bg-indigo-900/50 text-indigo-300 border border-indigo-700/50 text-sm font-medium transition disabled:opacity-50"
+                title="自定义配置 CPU / 动态内存配额 / 系统盘扩容"
+              >
+                <Settings className="w-3.5 h-3.5 text-indigo-400" />
+                <span>规格配置</span>
+              </button>
             </div>
           </div>
 
@@ -326,7 +380,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <RotateCw className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>直通目录或磁盘配置已变更，需重启 VM 生效</span>
+                <span>虚拟机硬件或直通配置已变更，需重启 VM 生效</span>
               </div>
               <button
                 onClick={() => handleVMAction('restart')}
@@ -339,20 +393,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           )}
 
-          {/* VM Specs Grid */}
+          {/* VM Specs Grid (Clickable to open Specs Config) */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800/60">
-              <span className="text-[11px] text-slate-400 font-medium">VM CPU 分配</span>
+            <div
+              onClick={handleOpenSpecs}
+              className="p-3 rounded-xl bg-slate-800/40 hover:bg-slate-800/80 border border-slate-800/60 hover:border-indigo-500/50 cursor-pointer transition group"
+              title="点击修改 CPU 核心数"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-400 font-medium">VM CPU 分配</span>
+                <span className="text-[10px] text-indigo-400 opacity-0 group-hover:opacity-100 transition">配置 →</span>
+              </div>
               <p className="text-base font-bold text-white mt-1">{vm?.cpus || 2} vCPU</p>
             </div>
-            <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800/60">
-              <span className="text-[11px] text-slate-400 font-medium">VM 内存分配</span>
+            <div
+              onClick={handleOpenSpecs}
+              className="p-3 rounded-xl bg-slate-800/40 hover:bg-slate-800/80 border border-slate-800/60 hover:border-indigo-500/50 cursor-pointer transition group"
+              title="点击调整动态内存配额"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-400 font-medium">VM 内存分配</span>
+                <span className="text-[10px] text-indigo-400 opacity-0 group-hover:opacity-100 transition">配置 →</span>
+              </div>
               <p className="text-base font-bold text-white mt-1">
                 {vm?.memory ? `${(vm.memory / 1024 / 1024 / 1024).toFixed(0)} GiB` : '4 GiB'}
               </p>
             </div>
-            <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800/60">
-              <span className="text-[11px] text-slate-400 font-medium">系统根盘</span>
+            <div
+              onClick={handleOpenSpecs}
+              className="p-3 rounded-xl bg-slate-800/40 hover:bg-slate-800/80 border border-slate-800/60 hover:border-indigo-500/50 cursor-pointer transition group"
+              title="点击在线扩容系统根盘"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-400 font-medium">系统根盘</span>
+                <span className="text-[10px] text-indigo-400 opacity-0 group-hover:opacity-100 transition">扩容 →</span>
+              </div>
               <p className="text-base font-bold text-white mt-1">
                 {vm?.disk ? `${(vm.disk / 1024 / 1024 / 1024).toFixed(0)} GiB` : '20 GiB'}
               </p>
@@ -476,6 +551,158 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         )}
       </div>
+      {/* VM Hardware Specs Configuration Modal */}
+      {showSpecsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                  <Sliders className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Lima Linux 虚拟机规格自定义</h3>
+                  <p className="text-xs text-slate-400">调整底层 Apple vz 驱动分配的硬件计算资源</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSpecsModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {specsLoading ? (
+              <div className="py-12 text-center text-xs text-slate-400">正在读取虚拟机硬件规格...</div>
+            ) : (
+              <form onSubmit={handleSaveSpecs} className="space-y-5">
+                {/* 1. CPU Cores */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-300">CPU 核心分配 (vCPU)</span>
+                    <span className="text-slate-400">宿主机总共: {specsInfo?.hostCpus || 10} 核</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[1, 2, 4, 6].map((cores) => (
+                      <button
+                        type="button"
+                        key={cores}
+                        onClick={() => setEditCPUs(cores)}
+                        className={`py-2 rounded-xl text-xs font-semibold border transition ${
+                          editCPUs === cores
+                            ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30'
+                            : 'bg-slate-800/60 hover:bg-slate-800 text-slate-300 border-slate-700/60'
+                        }`}
+                      >
+                        {cores} 核 {cores === 2 ? '(推荐)' : ''}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    建议保留 2~4 核给 Docker 与 Samba 容器，避免占用过高影响 Mac 宿主机日常办公。
+                  </p>
+                </div>
+
+                {/* 2. Memory (Dynamic Ballooning) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-300">内存分配上限 (GiB)</span>
+                    <span className="text-slate-400">宿主机物理内存: {specsInfo?.hostMemoryGB || 16} GB</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[2, 4, 6, 8].map((mem) => (
+                      <button
+                        type="button"
+                        key={mem}
+                        onClick={() => setEditMemory(mem)}
+                        className={`py-2 rounded-xl text-xs font-semibold border transition ${
+                          editMemory === mem
+                            ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-600/30'
+                            : 'bg-slate-800/60 hover:bg-slate-800 text-slate-300 border-slate-700/60'
+                        }`}
+                      >
+                        {mem} GiB {mem === 4 ? '(默认)' : ''}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Dynamic Memory Banner Callout */}
+                  <div className="p-3.5 rounded-xl bg-sky-950/40 border border-sky-800/40 text-[11px] text-sky-200/90 leading-relaxed space-y-1">
+                    <div className="font-semibold flex items-center space-x-1 text-sky-300">
+                      <Info className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span>Apple vz 原生动态气球内存机制说明：</span>
+                    </div>
+                    <p>
+                      此设定为虚拟机的<strong>最大内存配额上限</strong>。底层基于 Apple Virtualization.framework 原生 Virtio-Balloon 气球驱动，系统启动及闲置时仅按需占用水位（约 1~1.5 GB），随 Docker 容器并发按需分配；容器退出后由 macOS 自动回收物理内存给 Mac 宿主机，绝非死占锁死物理内存。
+                    </p>
+                  </div>
+                </div>
+
+                {/* 3. System Root Disk (Expansion only) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-300">系统根盘容量 (GiB)</span>
+                    <span className="text-slate-400 font-mono">当前配置: {specsInfo?.diskSize || 20} GiB</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="number"
+                      min={specsInfo?.diskSize || 20}
+                      max={120}
+                      value={editDisk}
+                      onChange={(e) => setEditDisk(parseInt(e.target.value) || specsInfo?.diskSize || 20)}
+                      className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono"
+                    />
+                    <div className="flex items-center space-x-1">
+                      {[30, 40, 60].map((size) => (
+                        <button
+                          type="button"
+                          key={size}
+                          disabled={size < (specsInfo?.diskSize || 20)}
+                          onClick={() => setEditDisk(size)}
+                          className="px-2.5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 transition"
+                        >
+                          +{size}G
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Disk Safety Rule Callout */}
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200/90 leading-relaxed space-y-1">
+                    <div className="font-semibold flex items-center space-x-1 text-amber-300">
+                      <Info className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>系统盘扩容原则：</span>
+                    </div>
+                    <p>
+                      系统根盘仅支持安全扩容（只增不减，以防止 Linux ext4 分区数据结构损坏）。系统盘仅存放系统底层与 Docker 运行时镜像；影视、文件与下载等存放在外接 SSD 或直通目录中，系统盘 20~40 GiB 已非常充裕。
+                    </p>
+                  </div>
+                </div>
+
+                {/* Footer Buttons */}
+                <div className="flex items-center justify-end space-x-2.5 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowSpecsModal(false)}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={specsSaving}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 transition disabled:opacity-50"
+                  >
+                    {specsSaving ? '保存中...' : '保存规格配置 (重启后生效)'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

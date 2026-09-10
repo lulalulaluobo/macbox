@@ -3,13 +3,78 @@ package system
 import (
 	"fmt"
 	"net"
+	"os/exec"
+	"regexp"
 	"runtime"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
 )
+
+var (
+	cpuRegex   = regexp.MustCompile(`CPU usage:\s*([0-9.]+)%\s*user,\s*([0-9.]+)%\s*sys,\s*([0-9.]+)%\s*idle`)
+	cpuMu      sync.RWMutex
+	cachedCPU  float64
+	cpuStarted sync.Once
+)
+
+// StartCPUMonitor initializes periodic background sampling of CPU usage
+func StartCPUMonitor() {
+	cpuStarted.Do(func() {
+		// Sample once synchronously so first read isn't zero
+		if val, err := sampleDarwinCPU(); err == nil {
+			cpuMu.Lock()
+			cachedCPU = val
+			cpuMu.Unlock()
+		}
+
+		go func() {
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				if runtime.GOOS == "darwin" {
+					if val, err := sampleDarwinCPU(); err == nil {
+						cpuMu.Lock()
+						cachedCPU = val
+						cpuMu.Unlock()
+					}
+				}
+			}
+		}()
+	})
+}
+
+func sampleDarwinCPU() (float64, error) {
+	cmd := exec.Command("top", "-l", "1", "-n", "0")
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "CPU usage:") {
+			m := cpuRegex.FindStringSubmatch(line)
+			if len(m) >= 4 {
+				user, _ := strconv.ParseFloat(m[1], 64)
+				sys, _ := strconv.ParseFloat(m[2], 64)
+				return user + sys, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("cpu line not found")
+}
+
+func GetCachedCPU() float64 {
+	StartCPUMonitor()
+	cpuMu.RLock()
+	defer cpuMu.RUnlock()
+	return cachedCPU
+}
 
 type SystemStats struct {
 	HostName     string    `json:"hostname"`
@@ -47,8 +112,12 @@ func GetSystemStats() (*SystemStats, error) {
 
 	// CPU
 	stats.CPUCores = runtime.NumCPU()
-	if percents, err := cpu.Percent(200*time.Millisecond, false); err == nil && len(percents) > 0 {
-		stats.CPUPercent = percents[0]
+	if runtime.GOOS == "darwin" {
+		stats.CPUPercent = GetCachedCPU()
+	} else {
+		if percents, err := cpu.Percent(100*time.Millisecond, false); err == nil && len(percents) > 0 {
+			stats.CPUPercent = percents[0]
+		}
 	}
 
 	// Memory

@@ -291,6 +291,38 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 	return nil
 }
 
+// UpdateSpecs updates CPU, Memory, and DiskSize in the configuration and syncs to lima.yaml
+func (m *Manager) UpdateSpecs(cpus, memory, diskSize int, projectRoot string) error {
+	if cpus < 1 {
+		cpus = 1
+	}
+	if memory < 2 {
+		memory = 2
+	}
+	if diskSize < 10 {
+		diskSize = 10
+	}
+
+	m.cfg.VM.CPUs = cpus
+	m.cfg.VM.Memory = memory
+	m.cfg.VM.DiskSize = diskSize
+
+	if err := config.SaveConfig(m.cfg); err != nil {
+		return fmt.Errorf("保存配置失败: %w", err)
+	}
+
+	cfgDir, _ := config.ConfigDir()
+	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
+	tmplPath := filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	if err := m.GenerateConfigFile(tmplPath, renderedYAML); err != nil {
+		return fmt.Errorf("重新生成虚拟机配置文件失败: %w", err)
+	}
+
+	m.SetConfigDirty(true)
+	m.InvalidateCache()
+	return nil
+}
+
 // Start launches the Lima VM
 func (m *Manager) Start(ctx context.Context, projectRoot string) error {
 	m.InvalidateCache()

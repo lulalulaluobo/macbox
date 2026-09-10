@@ -6,18 +6,21 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/luluen/mac-nas/pkg/apps"
 	"github.com/luluen/mac-nas/pkg/config"
 	"github.com/luluen/mac-nas/pkg/docker"
 	"github.com/luluen/mac-nas/pkg/samba"
 	"github.com/luluen/mac-nas/pkg/storage"
 	"github.com/luluen/mac-nas/pkg/system"
+	"github.com/luluen/mac-nas/pkg/terminal"
 	"github.com/luluen/mac-nas/pkg/vm"
 )
 
@@ -40,6 +43,7 @@ type Server struct {
 }
 
 func NewServer(cfg *config.Config, projectRoot string) *Server {
+	system.StartCPUMonitor()
 	vmMgr := vm.NewManager(cfg)
 	dockerClient := docker.NewClient(vmMgr)
 	appMgr := apps.NewManager(vmMgr, dockerClient, projectRoot)
@@ -86,10 +90,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/system/service/install", s.handleSystemServiceInstall)
 	s.mux.HandleFunc("POST /api/system/service/uninstall", s.handleSystemServiceUninstall)
 
-	// 2. VM lifecycle
+	// 2. VM lifecycle & Specs
 	s.mux.HandleFunc("POST /api/vm/start", s.handleVMStart)
 	s.mux.HandleFunc("POST /api/vm/stop", s.handleVMStop)
 	s.mux.HandleFunc("POST /api/vm/restart", s.handleVMRestart)
+	s.mux.HandleFunc("GET /api/vm/config", s.handleVMConfigGet)
+	s.mux.HandleFunc("POST /api/vm/config", s.handleVMConfigUpdate)
 
 	// 3. Storage
 	s.mux.HandleFunc("GET /api/storage/disks", s.handleStorageDisks)
@@ -124,6 +130,16 @@ func (s *Server) registerRoutes() {
 
 	// 7. WebSocket logs
 	s.mux.HandleFunc("GET /api/ws/logs", s.handleWSLogs)
+
+	// 8. Web Terminal & File System
+	s.mux.HandleFunc("GET /api/terminal/ws", s.handleTerminalWS)
+	s.mux.HandleFunc("GET /api/terminal/files", s.handleTerminalFilesList)
+	s.mux.HandleFunc("GET /api/terminal/files/read", s.handleTerminalFileRead)
+	s.mux.HandleFunc("POST /api/terminal/files/write", s.handleTerminalFileWrite)
+	s.mux.HandleFunc("POST /api/terminal/files/mkdir", s.handleTerminalFileMkdir)
+	s.mux.HandleFunc("POST /api/terminal/files/upload", s.handleTerminalFileUpload)
+	s.mux.HandleFunc("DELETE /api/terminal/files", s.handleTerminalFileDelete)
+	s.mux.HandleFunc("GET /api/terminal/files/download", s.handleTerminalFileDownload)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -714,4 +730,201 @@ func (s *Server) handleWSLogs(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// VM Hardware Specs Configuration Handlers
+func (s *Server) handleVMConfigGet(w http.ResponseWriter, r *http.Request) {
+	totalMemGB := 16
+	if vMem, err := mem.VirtualMemory(); err == nil && vMem.Total > 0 {
+		totalMemGB = int(vMem.Total / 1024 / 1024 / 1024)
+	}
+
+	vmStat, _ := s.vmMgr.GetStatus()
+
+	resp := map[string]interface{}{
+		"cpus":               s.cfg.VM.CPUs,
+		"memory":             s.cfg.VM.Memory,
+		"diskSize":           s.cfg.VM.DiskSize,
+		"hostCpus":           runtime.NumCPU(),
+		"hostMemoryGB":       totalMemGB,
+		"vmStatus":           vmStat.Status,
+		"isDynamicMemory":    true,
+		"balloonDescription": "基于 Apple Virtualization.framework (vz) 原生 Virtio-Balloon 气球驱动。配置的内存为 VM 最大使用配额，系统按需动态分水，闲置内存由 macOS 自动回收。",
+		"diskDescription":    "系统根盘用于存储 Ubuntu 核心系统与 Docker 运行层。支持安全在线/重启扩容（只增不减以保障分区文件完整性）。",
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleVMConfigUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CPUs     int `json:"cpus"`
+		Memory   int `json:"memory"`
+		DiskSize int `json:"diskSize"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求参数解析失败")
+		return
+	}
+
+	if req.CPUs < 1 || req.CPUs > runtime.NumCPU() {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("CPU 核心数必须在 1 到 %d 之间", runtime.NumCPU()))
+		return
+	}
+
+	if req.Memory < 2 || req.Memory > 64 {
+		writeError(w, http.StatusBadRequest, "内存分配必须在 2 GiB 到 64 GiB 之间")
+		return
+	}
+
+	if req.DiskSize < s.cfg.VM.DiskSize {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("系统盘容量只支持扩容（当前为 %d GiB，不能缩减）", s.cfg.VM.DiskSize))
+		return
+	}
+
+	if err := s.vmMgr.UpdateSpecs(req.CPUs, req.Memory, req.DiskSize, s.projectRoot); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"requiresRestart": true,
+		"message":         "虚拟机硬件规格已更新！请重启虚拟机以加载新配置生效。",
+		"cpus":            s.cfg.VM.CPUs,
+		"memory":          s.cfg.VM.Memory,
+		"diskSize":        s.cfg.VM.DiskSize,
+	})
+}
+
+// Web Terminal Handlers
+func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
+	terminal.HandleTerminalWS(w, r, s.cfg.VM.Name)
+}
+
+// File System Handlers
+func (s *Server) handleTerminalFilesList(w http.ResponseWriter, r *http.Request) {
+	targetPath := r.URL.Query().Get("path")
+	if targetPath == "" {
+		targetPath = "/data"
+	}
+
+	items, err := terminal.ListFiles(s.cfg.VM.Name, targetPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"path":   targetPath,
+		"items":  items,
+	})
+}
+
+func (s *Server) handleTerminalFileRead(w http.ResponseWriter, r *http.Request) {
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		writeError(w, http.StatusBadRequest, "缺少文件路径")
+		return
+	}
+
+	content, err := terminal.ReadFile(s.cfg.VM.Name, filePath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"path":    filePath,
+		"content": content,
+	})
+}
+
+func (s *Server) handleTerminalFileWrite(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数错误")
+		return
+	}
+
+	if req.Path == "" {
+		writeError(w, http.StatusBadRequest, "文件路径不能为空")
+		return
+	}
+
+	if err := terminal.WriteFile(s.cfg.VM.Name, req.Path, req.Content); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "文件保存成功"})
+}
+
+func (s *Server) handleTerminalFileMkdir(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数错误")
+		return
+	}
+
+	if req.Path == "" {
+		writeError(w, http.StatusBadRequest, "文件夹路径不能为空")
+		return
+	}
+
+	if err := terminal.CreateDir(s.cfg.VM.Name, req.Path); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "文件夹创建成功"})
+}
+
+func (s *Server) handleTerminalFileUpload(w http.ResponseWriter, r *http.Request) {
+	targetDir := r.FormValue("targetDir")
+	if targetDir == "" {
+		targetDir = "/data"
+	}
+
+	if err := terminal.UploadFile(w, r, s.cfg.VM.Name, targetDir); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "文件上传成功"})
+}
+
+func (s *Server) handleTerminalFileDelete(w http.ResponseWriter, r *http.Request) {
+	targetPath := r.URL.Query().Get("path")
+	if targetPath == "" {
+		writeError(w, http.StatusBadRequest, "缺少路径参数")
+		return
+	}
+
+	if err := terminal.DeletePath(s.cfg.VM.Name, targetPath); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "删除成功"})
+}
+
+func (s *Server) handleTerminalFileDownload(w http.ResponseWriter, r *http.Request) {
+	targetPath := r.URL.Query().Get("path")
+	if targetPath == "" {
+		writeError(w, http.StatusBadRequest, "缺少路径参数")
+		return
+	}
+
+	terminal.DownloadFile(w, r, s.cfg.VM.Name, targetPath)
 }
