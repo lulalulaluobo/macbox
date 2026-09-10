@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/luluen/mac-nas/pkg/config"
@@ -42,12 +43,14 @@ type DiskInfo struct {
 }
 
 type ManagedDisk struct {
-	Name      string `json:"name"`
-	Size      uint64 `json:"size"`
-	Format    string `json:"format"`
-	Dir       string `json:"dir"`
-	InUse     bool   `json:"inUse"`
-	Instance  string `json:"instance,omitempty"`
+	Name             string `json:"name"`
+	Size             uint64 `json:"size"`
+	ActualSize       uint64 `json:"actualSize"`
+	ActualSizeString string `json:"actualSizeString"`
+	Format           string `json:"format"`
+	Dir              string `json:"dir"`
+	InUse            bool   `json:"inUse"`
+	Instance         string `json:"instance,omitempty"`
 }
 
 type StorageOverview struct {
@@ -406,6 +409,22 @@ func ListManagedDisks() ([]ManagedDisk, error) {
 		}
 		var d ManagedDisk
 		if err := json.Unmarshal([]byte(line), &d); err == nil {
+			if d.Dir != "" {
+				diskFile := filepath.Join(d.Dir, "datadisk")
+				if realPath, err := filepath.EvalSymlinks(diskFile); err == nil {
+					diskFile = realPath
+				}
+				if fi, err := os.Stat(diskFile); err == nil {
+					if sys, ok := fi.Sys().(*syscall.Stat_t); ok {
+						actualBytes := uint64(sys.Blocks) * 512
+						d.ActualSize = actualBytes
+						d.ActualSizeString = formatBytes(actualBytes)
+					}
+				}
+			}
+			if d.ActualSizeString == "" {
+				d.ActualSizeString = formatBytes(d.ActualSize)
+			}
 			disks = append(disks, d)
 		}
 	}

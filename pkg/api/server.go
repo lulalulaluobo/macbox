@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -47,7 +48,7 @@ type Server struct {
 func NewServer(cfg *config.Config, projectRoot string) *Server {
 	system.StartCPUMonitor()
 	vmMgr := vm.NewManager(cfg)
-	dockerClient := docker.NewClient(vmMgr)
+	dockerClient := docker.NewClient(vmMgr, projectRoot)
 	appMgr := apps.NewManager(vmMgr, dockerClient, projectRoot)
 	sambaMgr := samba.NewManager(cfg, vmMgr)
 	powerMgr := system.GetPowerManager(cfg)
@@ -112,17 +113,45 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/storage/mounts/{id}/writable", s.handleStorageMountsWritable)
 	s.mux.HandleFunc("DELETE /api/storage/mounts/{id}", s.handleStorageMountsDelete)
 
-	// 4. Docker
+	// 4. Docker Overview & Containers
+	s.mux.HandleFunc("GET /api/docker/overview", s.handleDockerOverview)
 	s.mux.HandleFunc("GET /api/docker/containers", s.handleDockerContainers)
+	s.mux.HandleFunc("POST /api/docker/containers/{id}/action", s.handleDockerContainerAction)
 	s.mux.HandleFunc("POST /api/docker/containers/{id}/start", s.handleDockerStart)
 	s.mux.HandleFunc("POST /api/docker/containers/{id}/stop", s.handleDockerStop)
 	s.mux.HandleFunc("POST /api/docker/containers/{id}/restart", s.handleDockerRestart)
+	s.mux.HandleFunc("DELETE /api/docker/containers/{id}", s.handleDockerRemoveContainer)
 	s.mux.HandleFunc("GET /api/docker/containers/{id}/logs", s.handleDockerLogs)
+
+	// Docker Images
+	s.mux.HandleFunc("GET /api/docker/images", s.handleDockerImages)
+	s.mux.HandleFunc("POST /api/docker/images/pull", s.handleDockerPullImage)
+	s.mux.HandleFunc("POST /api/docker/images/pull/stream", s.handleDockerPullImageStream)
+	s.mux.HandleFunc("DELETE /api/docker/images/{id}", s.handleDockerRemoveImage)
+	s.mux.HandleFunc("POST /api/docker/images/prune", s.handleDockerPruneImages)
+
+	// Docker Compose
+	s.mux.HandleFunc("GET /api/docker/compose", s.handleDockerComposeList)
+	s.mux.HandleFunc("GET /api/docker/compose/{name}", s.handleDockerComposeGetYaml)
+	s.mux.HandleFunc("POST /api/docker/compose/deploy", s.handleDockerComposeDeploy)
+	s.mux.HandleFunc("POST /api/docker/compose/deploy/stream", s.handleDockerComposeDeployStream)
+	s.mux.HandleFunc("POST /api/docker/compose/{name}/action", s.handleDockerComposeAction)
+	s.mux.HandleFunc("DELETE /api/docker/compose/{name}", s.handleDockerComposeDelete)
+
+	// Docker Networks & Mirrors
+	s.mux.HandleFunc("GET /api/docker/networks", s.handleDockerNetworks)
+	s.mux.HandleFunc("GET /api/docker/mirrors", s.handleDockerGetMirrors)
+	s.mux.HandleFunc("POST /api/docker/mirrors", s.handleDockerSetMirrors)
 
 	// 5. Apps
 	s.mux.HandleFunc("GET /api/apps", s.handleAppsList)
+	s.mux.HandleFunc("GET /api/apps/{id}/config", s.handleAppGetConfig)
 	s.mux.HandleFunc("POST /api/apps/{id}/install", s.handleAppInstall)
 	s.mux.HandleFunc("GET /api/apps/{id}/install/stream", s.handleAppInstallStream)
+	s.mux.HandleFunc("POST /api/apps/{id}/install/custom", s.handleAppInstallCustomStream)
+	s.mux.HandleFunc("POST /api/apps/custom", s.handleAppCustomAdd)
+	s.mux.HandleFunc("DELETE /api/apps/custom/{id}", s.handleAppCustomDelete)
+	s.mux.HandleFunc("POST /api/apps/sync", s.handleAppStoreSync)
 	s.mux.HandleFunc("POST /api/apps/{id}/start", s.handleAppStart)
 	s.mux.HandleFunc("POST /api/apps/{id}/stop", s.handleAppStop)
 	s.mux.HandleFunc("POST /api/apps/{id}/restart", s.handleAppRestart)
@@ -622,6 +651,15 @@ func (s *Server) handleStorageMountsWritable(w http.ResponseWriter, r *http.Requ
 }
 
 // Docker Handlers
+func (s *Server) handleDockerOverview(w http.ResponseWriter, r *http.Request) {
+	overview, err := s.dockerClient.GetOverview(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, overview)
+}
+
 func (s *Server) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
 	containers, err := s.dockerClient.ListContainers(r.Context())
 	if err != nil {
@@ -629,6 +667,49 @@ func (s *Server) handleDockerContainers(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, containers)
+}
+
+func (s *Server) handleDockerContainerAction(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Action string `json:"action"` // start, stop, restart, remove
+		Force  bool   `json:"force"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	var err error
+	switch req.Action {
+	case "start":
+		err = s.dockerClient.StartContainer(r.Context(), id)
+	case "stop":
+		err = s.dockerClient.StopContainer(r.Context(), id)
+	case "restart":
+		err = s.dockerClient.RestartContainer(r.Context(), id)
+	case "remove":
+		err = s.dockerClient.RemoveContainer(r.Context(), id, req.Force)
+	default:
+		writeError(w, http.StatusBadRequest, "Unsupported container action")
+		return
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+func (s *Server) handleDockerRemoveContainer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	force := r.URL.Query().Get("force") == "true"
+	if err := s.dockerClient.RemoveContainer(r.Context(), id, force); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
 func (s *Server) handleDockerStart(w http.ResponseWriter, r *http.Request) {
@@ -671,6 +752,235 @@ func (s *Server) handleDockerLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"logs": logs})
+}
+
+// Docker Images Handlers
+func (s *Server) handleDockerImages(w http.ResponseWriter, r *http.Request) {
+	images, err := s.dockerClient.ListImages(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusOK, []docker.ImageInfo{})
+		return
+	}
+	writeJSON(w, http.StatusOK, images)
+}
+
+func (s *Server) handleDockerPullImage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Image string `json:"image"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Image) == "" {
+		writeError(w, http.StatusBadRequest, "镜像名称不能为空")
+		return
+	}
+
+	var buf bytes.Buffer
+	if err := s.dockerClient.PullImage(r.Context(), req.Image, &buf); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"logs":   buf.String(),
+	})
+}
+
+func (s *Server) handleDockerPullImageStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	var req struct {
+		Image string `json:"image"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Image) == "" {
+		http.Error(w, "镜像名称不能为空", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	flusher.Flush()
+
+	sw := &appSSEWriter{w: w, flusher: flusher}
+	err := s.dockerClient.PullImage(r.Context(), req.Image, sw)
+	if err != nil {
+		fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+	} else {
+		fmt.Fprintf(w, "event: done\ndata: {\"status\":\"success\",\"image\":\"%s\"}\n\n", req.Image)
+	}
+	flusher.Flush()
+}
+
+func (s *Server) handleDockerRemoveImage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	force := r.URL.Query().Get("force") == "true"
+	if err := s.dockerClient.RemoveImage(r.Context(), id, force); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+func (s *Server) handleDockerPruneImages(w http.ResponseWriter, r *http.Request) {
+	out, err := s.dockerClient.PruneImages(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "success",
+		"output": out,
+	})
+}
+
+// Docker Compose Handlers
+func (s *Server) handleDockerComposeList(w http.ResponseWriter, r *http.Request) {
+	projects, err := s.dockerClient.ListComposeProjects(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusOK, []docker.ComposeProject{})
+		return
+	}
+	writeJSON(w, http.StatusOK, projects)
+}
+
+func (s *Server) handleDockerComposeGetYaml(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	yamlContent, err := s.dockerClient.GetComposeYaml(r.Context(), name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"name": name,
+		"yaml": yamlContent,
+	})
+}
+
+func (s *Server) handleDockerComposeDeploy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+		YAML string `json:"yaml"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	var buf bytes.Buffer
+	if err := s.dockerClient.DeployCompose(r.Context(), req.Name, req.YAML, &buf); err != nil {
+		detail := buf.String()
+		if detail != "" {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("%v\n%s", err, detail))
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"logs":   buf.String(),
+	})
+}
+
+func (s *Server) handleDockerComposeDeployStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	var req struct {
+		Name string `json:"name"`
+		YAML string `json:"yaml"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	flusher.Flush()
+
+	sw := &appSSEWriter{w: w, flusher: flusher}
+	err := s.dockerClient.DeployCompose(r.Context(), req.Name, req.YAML, sw)
+	if err != nil {
+		fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+	} else {
+		fmt.Fprintf(w, "event: done\ndata: {\"status\":\"success\",\"name\":\"%s\"}\n\n", req.Name)
+	}
+	flusher.Flush()
+}
+
+func (s *Server) handleDockerComposeAction(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req struct {
+		Action string `json:"action"` // start, stop, restart, down, pull
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	var buf bytes.Buffer
+	if err := s.dockerClient.ComposeAction(r.Context(), name, req.Action, &buf); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "success",
+		"output": buf.String(),
+	})
+}
+
+func (s *Server) handleDockerComposeDelete(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	deleteVolumes := r.URL.Query().Get("volumes") == "true"
+	if err := s.dockerClient.DeleteComposeProject(r.Context(), name, deleteVolumes); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+// Docker Networks & Mirrors Handlers
+func (s *Server) handleDockerNetworks(w http.ResponseWriter, r *http.Request) {
+	networks, err := s.dockerClient.ListNetworks(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusOK, []docker.DockerNetwork{})
+		return
+	}
+	writeJSON(w, http.StatusOK, networks)
+}
+
+func (s *Server) handleDockerGetMirrors(w http.ResponseWriter, r *http.Request) {
+	mirrors, err := s.dockerClient.GetRegistryMirrors(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"mirrors": mirrors})
+}
+
+func (s *Server) handleDockerSetMirrors(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Mirrors []string `json:"mirrors"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if err := s.dockerClient.SetRegistryMirrors(r.Context(), req.Mirrors); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
 // Apps Handlers
@@ -745,6 +1055,85 @@ func (s *Server) handleAppInstallStream(w http.ResponseWriter, r *http.Request) 
 		fmt.Fprintf(w, "event: done\ndata: {\"status\":\"success\",\"id\":\"%s\"}\n\n", id)
 	}
 	flusher.Flush()
+}
+
+func (s *Server) handleAppGetConfig(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	meta, err := s.appMgr.GetAppConfig(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, meta)
+}
+
+func (s *Server) handleAppInstallCustomStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		return
+	}
+
+	id := r.PathValue("id")
+
+	var cfg apps.InstallCustomConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	flusher.Flush()
+
+	sw := &appSSEWriter{w: w, flusher: flusher}
+
+	ctx := r.Context()
+	err := s.appMgr.InstallStreamCustom(ctx, id, cfg, sw)
+	if err != nil {
+		fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+	} else {
+		fmt.Fprintf(w, "event: done\ndata: {\"status\":\"success\",\"id\":\"%s\"}\n\n", id)
+	}
+	flusher.Flush()
+}
+
+func (s *Server) handleAppCustomAdd(w http.ResponseWriter, r *http.Request) {
+	var req apps.CustomAppInput
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	meta, err := s.appMgr.AddCustomApp(req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, meta)
+}
+
+func (s *Server) handleAppCustomDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.appMgr.DeleteCustomApp(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+func (s *Server) handleAppStoreSync(w http.ResponseWriter, r *http.Request) {
+	count, err := s.appMgr.SyncCommunityStore(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+		"count":  count,
+	})
 }
 
 func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {

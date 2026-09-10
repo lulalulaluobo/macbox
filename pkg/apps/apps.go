@@ -2,11 +2,14 @@ package apps
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,60 +17,82 @@ import (
 	"github.com/luluen/mac-nas/pkg/vm"
 )
 
-type AppVolume struct {
-	Host      string `json:"host"`
-	Container string `json:"container"`
-}
-
-type AppMetadata struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	Version     string      `json:"version"`
-	Icon        string      `json:"icon"`
-	Category    string      `json:"category"`
-	Port        int         `json:"port"`
-	WebURL      string      `json:"webUrl"`
-	Volumes     []AppVolume `json:"volumes"`
-	Status      string      `json:"status"` // "not_installed", "running", "stopped", "error"
-	Installed   bool        `json:"installed"`
-}
-
 type Manager struct {
 	vmMgr        *vm.Manager
 	dockerClient *docker.Client
 	projectRoot  string
+	customMgr    *CustomAppManager
+	communityMgr *CommunityStoreManager
 }
 
-func NewManager(vmMgr *vm.Manager, dockerClient *docker.Client, projectRoot string) *Manager {
+func NewManager(vmMgr *vm.Manager, dockerClient *docker.Client, projectRoot string, dataDir ...string) *Manager {
+	dir := ""
+	if len(dataDir) > 0 {
+		dir = dataDir[0]
+	}
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, "Library", "Application Support", "MacNAS")
+	}
+
 	return &Manager{
 		vmMgr:        vmMgr,
 		dockerClient: dockerClient,
 		projectRoot:  projectRoot,
+		customMgr:    NewCustomAppManager(dir),
+		communityMgr: NewCommunityStoreManager(dir),
 	}
 }
 
-var presetAppIDs = []string{"jellyfin", "syncthing", "filebrowser", "qbittorrent", "alist"}
-
 func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, error) {
+	if hostIP == "" {
+		hostIP = "localhost"
+	}
+
 	containers, _ := m.dockerClient.ListContainers(ctx)
 	containerMap := make(map[string]docker.ContainerInfo)
 	for _, c := range containers {
 		containerMap[c.Names] = c
 	}
 
-	var results []AppMetadata
-	for _, id := range presetAppIDs {
-		appMeta, err := m.loadAppMetadata(id)
-		if err != nil {
-			continue
-		}
+	appMap := make(map[string]AppMetadata)
 
-		// Replace HostIP in WebURL
-		if hostIP == "" {
-			hostIP = "localhost"
+	// 1. Built-in Catalog
+	catalog := GetBuiltinCatalog()
+	for _, item := range catalog {
+		meta := item.Metadata
+		meta.ComposeTemplate = item.YAML
+		appMap[meta.ID] = meta
+	}
+
+	// 2. Community Store Cache
+	communityApps := m.communityMgr.GetApps()
+	for _, item := range communityApps {
+		meta := item.Metadata
+		meta.ComposeTemplate = item.YAML
+		if _, exists := appMap[meta.ID]; !exists {
+			meta.Source = "community"
+			appMap[meta.ID] = meta
 		}
-		appMeta.WebURL = strings.ReplaceAll(appMeta.WebURL, "{{.HostIP}}", hostIP)
+	}
+
+	// 3. Custom User Apps
+	customApps, _ := m.customMgr.List()
+	for _, item := range customApps {
+		meta := item.Metadata
+		meta.ComposeTemplate = item.YAML
+		meta.Source = "custom"
+		appMap[meta.ID] = meta
+	}
+
+	var results []AppMetadata
+	for id, appMeta := range appMap {
+		// Fill WebURL
+		if appMeta.Port > 0 && appMeta.WebURL == "" {
+			appMeta.WebURL = fmt.Sprintf("http://%s:%d", hostIP, appMeta.Port)
+		} else {
+			appMeta.WebURL = strings.ReplaceAll(appMeta.WebURL, "{{.HostIP}}", hostIP)
+		}
 
 		// Check if container exists
 		containerName := "macnas-" + id
@@ -77,6 +102,11 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 				appMeta.Status = "running"
 			} else {
 				appMeta.Status = "stopped"
+			}
+			// Update WebURL if actual port was found
+			if len(c.PortsMap) > 0 {
+				appMeta.Port = c.PortsMap[0].HostPort
+				appMeta.WebURL = fmt.Sprintf("http://%s:%d", hostIP, appMeta.Port)
 			}
 		} else {
 			// Check if compose file exists inside VM
@@ -91,108 +121,147 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 			}
 		}
 
-		results = append(results, *appMeta)
+		results = append(results, appMeta)
 	}
 
 	return results, nil
 }
 
-func (m *Manager) loadAppMetadata(id string) (*AppMetadata, error) {
+func (m *Manager) GetAppConfig(ctx context.Context, id string) (*AppMetadata, error) {
+	// 1. Check custom apps
+	if rec, err := m.customMgr.Get(id); err == nil {
+		meta := rec.Metadata
+		meta.ComposeTemplate = rec.YAML
+		return &meta, nil
+	}
+
+	// 2. Check built-in catalog
+	for _, item := range GetBuiltinCatalog() {
+		if item.Metadata.ID == id {
+			meta := item.Metadata
+			meta.ComposeTemplate = item.YAML
+			return &meta, nil
+		}
+	}
+
+	// 3. Check community store
+	for _, item := range m.communityMgr.GetApps() {
+		if item.Metadata.ID == id {
+			meta := item.Metadata
+			meta.ComposeTemplate = item.YAML
+			return &meta, nil
+		}
+	}
+
+	// 4. Fallback to local templates folder
 	metaPath := filepath.Join(m.projectRoot, "templates", "apps", id, "app.json")
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		return nil, err
+	if data, err := os.ReadFile(metaPath); err == nil {
+		var meta AppMetadata
+		if err := json.Unmarshal(data, &meta); err == nil {
+			yamlPath := filepath.Join(m.projectRoot, "templates", "apps", id, "compose.yaml")
+			if yData, err := os.ReadFile(yamlPath); err == nil {
+				meta.ComposeTemplate = string(yData)
+			}
+			return &meta, nil
+		}
 	}
 
-	var meta AppMetadata
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return nil, err
-	}
-	return &meta, nil
+	return nil, fmt.Errorf("未找到应用 %s 的模板定义", id)
 }
 
-func (m *Manager) Install(ctx context.Context, id string) error {
-	composePath := filepath.Join(m.projectRoot, "templates", "apps", id, "compose.yaml")
-	composeData, err := os.ReadFile(composePath)
+func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg InstallCustomConfig, out io.Writer) error {
+	fmt.Fprintf(out, "🚀 [MacNAS AppStore] 开始准备部署应用: %s\n", id)
+
+	meta, err := m.GetAppConfig(ctx, id)
 	if err != nil {
-		return fmt.Errorf("read template compose error: %w", err)
-	}
-
-	// 1. Create appdata dir in VM
-	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	mkdirCmd := fmt.Sprintf("mkdir -p %s /data/media /data/files", appDataDir)
-	if _, err := m.vmMgr.Exec(ctx, "bash", "-c", mkdirCmd); err != nil {
-		return fmt.Errorf("failed to create app directories: %w", err)
-	}
-
-	// 2. Write compose.yaml into VM
-	encodedYAML := strings.ReplaceAll(string(composeData), "'", "'\\''")
-	writeCmd := fmt.Sprintf("cat <<'EOF' > %s/compose.yaml\n%s\nEOF", appDataDir, encodedYAML)
-	if _, err := m.vmMgr.Exec(ctx, "bash", "-c", writeCmd); err != nil {
-		return fmt.Errorf("failed to write compose.yaml inside VM: %w", err)
-	}
-
-	// 3. Run docker compose up -d inside VM
-	upCmd := fmt.Sprintf("docker compose -f %s/compose.yaml up -d", appDataDir)
-	out, err := m.vmMgr.Exec(ctx, "bash", "-c", upCmd)
-	if err != nil {
-		return fmt.Errorf("docker compose up failed: %s (%w)", out, err)
-	}
-
-	return nil
-}
-
-func (m *Manager) InstallStream(ctx context.Context, id string, portOverride int, out io.Writer) error {
-	fmt.Fprintf(out, "🚀 [MacNAS AppStore] 开始部署应用: %s\n", id)
-
-	meta, err := m.loadAppMetadata(id)
-	if err != nil {
-		fmt.Fprintf(out, "❌ 无法加载应用元数据: %v\n", err)
+		fmt.Fprintf(out, "❌ 加载应用配置失败: %v\n", err)
 		return err
 	}
 
-	composePath := filepath.Join(m.projectRoot, "templates", "apps", id, "compose.yaml")
-	composeData, err := os.ReadFile(composePath)
-	if err != nil {
-		fmt.Fprintf(out, "❌ 读取 compose 模板失败: %v\n", err)
-		return fmt.Errorf("read template compose error: %w", err)
+	var finalYAML string
+	if strings.TrimSpace(cfg.CustomYaml) != "" {
+		finalYAML = cfg.CustomYaml
+		fmt.Fprintln(out, "📝 使用用户自定义的高级 Compose YAML 配置")
+	} else {
+		finalYAML = meta.ComposeTemplate
+		if finalYAML == "" {
+			fmt.Fprintf(out, "❌ 无法获取应用的 Compose YAML 模板\n")
+			return fmt.Errorf("empty compose template")
+		}
+
+		// 1. Apply port customizations
+		for cPortStr, hPort := range cfg.PortsMap {
+			cPort, _ := strconv.Atoi(cPortStr)
+			if cPort > 0 && hPort > 0 {
+				oldPortPatt := regexp.MustCompile(fmt.Sprintf(`["']?\d+:%d(?:/\w+)?["']?`, cPort))
+				newPortStr := fmt.Sprintf(`"%d:%d"`, hPort, cPort)
+				finalYAML = oldPortPatt.ReplaceAllString(finalYAML, newPortStr)
+				fmt.Fprintf(out, "⚙️ 定制端口映射: %d -> %d\n", hPort, cPort)
+			}
+		}
+
+		// 2. Apply volume customizations
+		for cPath, hPath := range cfg.VolumesMap {
+			if cPath != "" && hPath != "" {
+				// Replace host directory mapping to cPath
+				volPatt := regexp.MustCompile(fmt.Sprintf(`["']?[^:"'\s]+:%s(?:[:][a-z,]+)?["']?`, regexp.QuoteMeta(cPath)))
+				newVolStr := fmt.Sprintf(`"%s:%s"`, hPath, cPath)
+				finalYAML = volPatt.ReplaceAllString(finalYAML, newVolStr)
+				fmt.Fprintf(out, "📁 定制数据目录挂载: %s -> %s\n", hPath, cPath)
+			}
+		}
+
+		// 3. Apply environment customizations
+		for k, v := range cfg.EnvMap {
+			envPatt := regexp.MustCompile(fmt.Sprintf(`(?m)^\s*-\s*%s=.*$`, regexp.QuoteMeta(k)))
+			newEnvLine := fmt.Sprintf("      - %s=%s", k, v)
+			if envPatt.MatchString(finalYAML) {
+				finalYAML = envPatt.ReplaceAllString(finalYAML, newEnvLine)
+				fmt.Fprintf(out, "🔧 定制环境变量: %s=%s\n", k, v)
+			}
+		}
 	}
 
-	content := string(composeData)
-	if portOverride > 0 && meta.Port > 0 {
-		oldPortStr := fmt.Sprintf("\"%d:", meta.Port)
-		newPortStr := fmt.Sprintf("\"%d:", portOverride)
-		content = strings.Replace(content, oldPortStr, newPortStr, 1)
-		fmt.Fprintf(out, "⚙️ 自定义 Web 端口: %d -> %d\n", meta.Port, portOverride)
-	}
-
-	// 1. Create directories
+	// 1. Create all needed directories inside VM
 	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	fmt.Fprintf(out, "📁 [1/3] 正在创建持久化存储目录 %s ...\n", appDataDir)
-	mkdirCmd := fmt.Sprintf("mkdir -p %s /data/media /data/files /data/downloads", appDataDir)
-	if _, err := m.vmMgr.Exec(ctx, "bash", "-c", mkdirCmd); err != nil {
-		fmt.Fprintf(out, "❌ 创建目录失败: %v\n", err)
-		return fmt.Errorf("failed to create app directories: %w", err)
+	dirsToCreate := []string{appDataDir, "/data/media", "/data/files", "/data/downloads"}
+
+	for _, hPath := range cfg.VolumesMap {
+		if strings.HasPrefix(hPath, "/") {
+			// If it's a file with extension like .db or .json, get dirname
+			if strings.Contains(filepath.Base(hPath), ".") {
+				dirsToCreate = append(dirsToCreate, filepath.Dir(hPath))
+			} else {
+				dirsToCreate = append(dirsToCreate, hPath)
+			}
+		}
 	}
 
-	// 2. Write compose.yaml
-	encodedYAML := strings.ReplaceAll(content, "'", "'\\''")
-	writeCmd := fmt.Sprintf("cat <<'EOF' > %s/compose.yaml\n%s\nEOF", appDataDir, encodedYAML)
+	fmt.Fprintf(out, "📁 [1/3] 正在检查并创建宿主机持久化目录...\n")
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", strings.Join(dirsToCreate, " "))
+	if _, err := m.vmMgr.Exec(ctx, "bash", "-c", mkdirCmd); err != nil {
+		fmt.Fprintf(out, "⚠️ 创建宿主机目录提示: %v\n", err)
+	}
+
+	// 2. Safely write compose.yaml via base64
+	fmt.Fprintf(out, "📝 [2/3] 写入项目配置文件: %s/compose.yaml ...\n", appDataDir)
+	encoded := base64.StdEncoding.EncodeToString([]byte(finalYAML))
+	writeCmd := fmt.Sprintf("echo '%s' | base64 -d > %s/compose.yaml", encoded, appDataDir)
 	if _, err := m.vmMgr.Exec(ctx, "bash", "-c", writeCmd); err != nil {
-		fmt.Fprintf(out, "❌ 写入 compose 配置失败: %v\n", err)
-		return fmt.Errorf("failed to write compose.yaml inside VM: %w", err)
+		fmt.Fprintf(out, "❌ 写入 compose.yaml 失败: %v\n", err)
+		return fmt.Errorf("write compose.yaml failed: %w", err)
 	}
 
 	// 3. Pull image with stream
-	fmt.Fprintf(out, "📦 [2/3] 正在拉取 Docker 镜像 (实时进度流):\n")
-	pullCmd := fmt.Sprintf("docker compose -f %s/compose.yaml pull", appDataDir)
+	fmt.Fprintf(out, "📦 正在拉取 Docker 镜像 (实时进度流):\n")
+	pullCmd := fmt.Sprintf("cd %s && docker compose pull", appDataDir)
 	if err := m.vmMgr.ExecStream(ctx, out, "bash", "-c", pullCmd); err != nil {
-		fmt.Fprintf(out, "\n⚠️ 提示: compose pull 返回提示，正在直接尝试启动...\n")
+		fmt.Fprintf(out, "\n⚠️ pull 提示已跳过，正在尝试直接启动容器...\n")
 	}
 
 	// 4. Start container
 	fmt.Fprintf(out, "\n⚡ [3/3] 启动 Docker 容器...\n")
-	upCmd := fmt.Sprintf("docker compose -f %s/compose.yaml up -d", appDataDir)
+	upCmd := fmt.Sprintf("cd %s && docker compose up -d --remove-orphans", appDataDir)
 	if err := m.vmMgr.ExecStream(ctx, out, "bash", "-c", upCmd); err != nil {
 		fmt.Fprintf(out, "❌ 启动容器失败: %v\n", err)
 		return fmt.Errorf("docker compose up failed: %w", err)
@@ -209,9 +278,27 @@ func (m *Manager) InstallStream(ctx context.Context, id string, portOverride int
 	return nil
 }
 
+// Backward-compatible InstallStream
+func (m *Manager) InstallStream(ctx context.Context, id string, portOverride int, out io.Writer) error {
+	cfg := InstallCustomConfig{}
+	if portOverride > 0 {
+		meta, err := m.GetAppConfig(ctx, id)
+		if err == nil && meta.Port > 0 {
+			cfg.PortsMap = map[string]int{
+				strconv.Itoa(meta.Port): portOverride,
+			}
+		}
+	}
+	return m.InstallStreamCustom(ctx, id, cfg, out)
+}
+
+func (m *Manager) Install(ctx context.Context, id string) error {
+	return m.InstallStreamCustom(ctx, id, InstallCustomConfig{}, io.Discard)
+}
+
 func (m *Manager) Start(ctx context.Context, id string) error {
 	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	upCmd := fmt.Sprintf("docker compose -f %s/compose.yaml start", appDataDir)
+	upCmd := fmt.Sprintf("cd %s && docker compose start", appDataDir)
 	out, err := m.vmMgr.Exec(ctx, "bash", "-c", upCmd)
 	if err != nil {
 		return fmt.Errorf("docker compose start failed: %s (%w)", out, err)
@@ -221,7 +308,7 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 
 func (m *Manager) Stop(ctx context.Context, id string) error {
 	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	upCmd := fmt.Sprintf("docker compose -f %s/compose.yaml stop", appDataDir)
+	upCmd := fmt.Sprintf("cd %s && docker compose stop", appDataDir)
 	out, err := m.vmMgr.Exec(ctx, "bash", "-c", upCmd)
 	if err != nil {
 		return fmt.Errorf("docker compose stop failed: %s (%w)", out, err)
@@ -231,7 +318,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 
 func (m *Manager) Restart(ctx context.Context, id string) error {
 	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	upCmd := fmt.Sprintf("docker compose -f %s/compose.yaml restart", appDataDir)
+	upCmd := fmt.Sprintf("cd %s && docker compose restart", appDataDir)
 	out, err := m.vmMgr.Exec(ctx, "bash", "-c", upCmd)
 	if err != nil {
 		return fmt.Errorf("docker compose restart failed: %s (%w)", out, err)
@@ -241,7 +328,7 @@ func (m *Manager) Restart(ctx context.Context, id string) error {
 
 func (m *Manager) Uninstall(ctx context.Context, id string) error {
 	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	downCmd := fmt.Sprintf("docker compose -f %s/compose.yaml down -v", appDataDir)
+	downCmd := fmt.Sprintf("cd %s && docker compose down -v", appDataDir)
 	out, err := m.vmMgr.Exec(ctx, "bash", "-c", downCmd)
 	if err != nil {
 		return fmt.Errorf("docker compose down failed: %s (%w)", out, err)
@@ -254,6 +341,18 @@ func (m *Manager) GetLogs(ctx context.Context, id string, tail int) (string, err
 		tail = 100
 	}
 	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	logsCmd := fmt.Sprintf("docker compose -f %s/compose.yaml logs --tail=%d", appDataDir, tail)
+	logsCmd := fmt.Sprintf("cd %s && docker compose logs --tail=%d", appDataDir, tail)
 	return m.vmMgr.Exec(ctx, "bash", "-c", logsCmd)
+}
+
+func (m *Manager) AddCustomApp(input CustomAppInput) (*AppMetadata, error) {
+	return m.customMgr.Save(input)
+}
+
+func (m *Manager) DeleteCustomApp(id string) error {
+	return m.customMgr.Delete(id)
+}
+
+func (m *Manager) SyncCommunityStore(ctx context.Context) (int, error) {
+	return m.communityMgr.Sync(ctx)
 }

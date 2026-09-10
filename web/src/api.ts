@@ -1,4 +1,4 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, AppMetadata, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem } from './types';
+import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem } from './types';
 
 const BASE_URL = '/api';
 
@@ -125,16 +125,69 @@ export const api = {
     method: 'POST',
   }),
 
-  // Docker
+  // Docker Overview & Containers
+  getDockerOverview: () => fetchJSON<DockerOverview>(`${BASE_URL}/docker/overview`),
   getContainers: () => fetchJSON<ContainerInfo[]>(`${BASE_URL}/docker/containers`),
+  containerAction: (id: string, action: 'start' | 'stop' | 'restart' | 'remove', force = false) =>
+    fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action, force }),
+    }),
   startContainer: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}/start`, { method: 'POST' }),
   stopContainer: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}/stop`, { method: 'POST' }),
   restartContainer: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}/restart`, { method: 'POST' }),
+  removeContainer: (id: string, force = false) =>
+    fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}?force=${force}`, { method: 'DELETE' }),
   getContainerLogs: (id: string, tail = 100) => fetchJSON<{ logs: string }>(`${BASE_URL}/docker/containers/${id}/logs?tail=${tail}`),
+
+  // Docker Images
+  getImages: () => fetchJSON<ImageInfo[]>(`${BASE_URL}/docker/images`),
+  pullImage: (image: string) => fetchJSON<{ status: string; logs: string }>(`${BASE_URL}/docker/images/pull`, {
+    method: 'POST',
+    body: JSON.stringify({ image }),
+  }),
+  removeImage: (id: string, force = false) =>
+    fetchJSON<{ status: string }>(`${BASE_URL}/docker/images/${id}?force=${force}`, { method: 'DELETE' }),
+  pruneImages: () => fetchJSON<{ status: string; output: string }>(`${BASE_URL}/docker/images/prune`, { method: 'POST' }),
+
+  // Docker Compose
+  getComposeProjects: () => fetchJSON<ComposeProject[]>(`${BASE_URL}/docker/compose`),
+  getComposeYaml: (name: string) => fetchJSON<{ name: string; yaml: string }>(`${BASE_URL}/docker/compose/${name}`),
+  deployCompose: (name: string, yaml: string) =>
+    fetchJSON<{ status: string; logs: string }>(`${BASE_URL}/docker/compose/deploy`, {
+      method: 'POST',
+      body: JSON.stringify({ name, yaml }),
+    }),
+  composeAction: (name: string, action: 'start' | 'stop' | 'restart' | 'down' | 'pull') =>
+    fetchJSON<{ status: string; output: string }>(`${BASE_URL}/docker/compose/${name}/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
+  deleteComposeProject: (name: string, deleteVolumes = false) =>
+    fetchJSON<{ status: string }>(`${BASE_URL}/docker/compose/${name}?volumes=${deleteVolumes}`, { method: 'DELETE' }),
+
+  // Docker Networks & Mirrors
+  getDockerNetworks: () => fetchJSON<DockerNetwork[]>(`${BASE_URL}/docker/networks`),
+  getRegistryMirrors: () => fetchJSON<{ mirrors: string[] }>(`${BASE_URL}/docker/mirrors`),
+  setRegistryMirrors: (mirrors: string[]) =>
+    fetchJSON<{ status: string }>(`${BASE_URL}/docker/mirrors`, {
+      method: 'POST',
+      body: JSON.stringify({ mirrors }),
+    }),
 
   // Apps
   getApps: () => fetchJSON<AppMetadata[]>(`${BASE_URL}/apps`),
+  getAppConfig: (id: string) => fetchJSON<AppMetadata>(`${BASE_URL}/apps/${id}/config`),
   installApp: (id: string) => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/apps/${id}/install`, { method: 'POST' }),
+  addCustomApp: (input: CustomAppInput) =>
+    fetchJSON<AppMetadata>(`${BASE_URL}/apps/custom`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  deleteCustomApp: (id: string) =>
+    fetchJSON<{ status: string }>(`${BASE_URL}/apps/custom/${id}`, { method: 'DELETE' }),
+  syncAppStore: () =>
+    fetchJSON<{ status: string; count: number }>(`${BASE_URL}/apps/sync`, { method: 'POST' }),
   startApp: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/apps/${id}/start`, { method: 'POST' }),
   stopApp: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/apps/${id}/stop`, { method: 'POST' }),
   restartApp: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/apps/${id}/restart`, { method: 'POST' }),

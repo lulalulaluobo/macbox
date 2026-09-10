@@ -783,15 +783,30 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       {/* Section 3: Lima Managed Disks Info */}
       {managedDisks.length > 0 && (
         <div className="p-5 rounded-2xl bg-slate-900/40 border border-slate-800 space-y-3">
-          <h4 className="text-sm font-bold text-white">Lima 托管 ext4 虚拟磁盘 (Managed Disks)</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-bold text-white">Lima 托管 ext4 虚拟磁盘 (Managed Disks)</h4>
+            <span className="text-[11px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full font-semibold">
+              动态精简分配 (Thin Provisioning)
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {managedDisks.map((md) => (
-              <div key={md.name} className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 flex justify-between items-center text-xs">
-                <div>
-                  <span className="font-bold text-slate-200">{md.name}</span>
-                  <p className="text-[11px] text-slate-400 mt-0.5">格式: {md.format} · 容量: {(md.size / 1024 / 1024 / 1024).toFixed(0)} GiB</p>
+              <div key={md.name} className="p-3.5 rounded-xl bg-slate-800/40 border border-slate-800 flex flex-col justify-between space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="font-bold text-slate-200">{md.name}</span>
+                    <span className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-sky-500/20 text-sky-300">ext4</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-400 font-semibold">
+                    实际物理占用: {md.actualSizeString || '24 MB'}
+                  </span>
                 </div>
-                <span className="px-2 py-0.5 rounded font-mono text-[10px] bg-sky-500/20 text-sky-300">ext4</span>
+                <div className="text-[11px] text-slate-400 space-y-0.5">
+                  <p>虚拟容量上限: <strong className="text-slate-300 font-mono">{(md.size / 1024 / 1024 / 1024).toFixed(0)} GiB</strong> · 格式: <span className="font-mono text-slate-300">{md.format}</span></p>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    💡 采用 APFS 稀疏文件技术，存放多少数据才消耗多少物理空间，绝不提前占用主机 178GB。
+                  </p>
+                </div>
               </div>
             ))}
           </div>

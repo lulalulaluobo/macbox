@@ -57,6 +57,8 @@ export interface DiskInfo {
 export interface ManagedDisk {
   name: string;
   size: number;
+  actualSize?: number;
+  actualSizeString?: string;
   format: string;
   dir: string;
   inUse: boolean;
@@ -79,6 +81,13 @@ export interface LocalMountsResponse {
   recommended: LocalMount[];
 }
 
+export interface PortMapping {
+  hostIp: string;
+  hostPort: number;
+  containerPort: number;
+  protocol: string;
+}
+
 export interface ContainerInfo {
   id: string;
   name: string;
@@ -86,7 +95,87 @@ export interface ContainerInfo {
   state: 'running' | 'exited' | 'created' | string;
   status: string;
   ports: string;
+  portsMap?: PortMapping[];
   createdAt: string;
+  cpuPerc?: string;
+  memUsage?: string;
+  memPerc?: string;
+  netIo?: string;
+  blockIo?: string;
+  project?: string;
+}
+
+export interface ImageInfo {
+  id: string;
+  repository: string;
+  tag: string;
+  size: string;
+  sizeBytes: number;
+  createdAt: string;
+  createdSince: string;
+  containers: number;
+  inUse: boolean;
+}
+
+export interface ComposeProject {
+  name: string;
+  status: 'running' | 'partially_running' | 'stopped' | string;
+  configFiles: string;
+  workingDir: string;
+  servicesCount: number;
+  containers: string[];
+  isSystemApp: boolean;
+}
+
+export interface DockerOverview {
+  healthy: boolean;
+  healthMessage: string;
+  dockerReady: boolean;
+  dockerVersion: string;
+  storageLocation: string;
+  autoStart: boolean;
+  containersTotal: number;
+  containersRunning: number;
+  containersStopped: number;
+  imagesTotal: number;
+  imagesInUse: number;
+  projectsTotal: number;
+  projectsRunning: number;
+  cpuPerc: number;
+  memUsageMb: number;
+  memTotalMb: number;
+  memPerc: number;
+  netRxKb: number;
+  netTxKb: number;
+}
+
+export interface DockerNetwork {
+  id: string;
+  name: string;
+  driver: string;
+  scope: string;
+  ipv4: string;
+  internal: boolean;
+  createdAt: string;
+}
+
+export interface AppPort {
+  hostPort: number;
+  containerPort: number;
+  protocol: string;
+  description?: string;
+}
+
+export interface AppVolume {
+  host: string;
+  container: string;
+  description?: string;
+}
+
+export interface AppEnv {
+  key: string;
+  value: string;
+  description?: string;
 }
 
 export interface AppMetadata {
@@ -98,9 +187,30 @@ export interface AppMetadata {
   category: string;
   port: number;
   webUrl: string;
-  volumes: { host: string; container: string }[];
-  status: 'not_installed' | 'running' | 'stopped' | 'error';
+  ports?: AppPort[];
+  volumes: AppVolume[];
+  env?: AppEnv[];
+  status: 'not_installed' | 'running' | 'stopped' | 'error' | string;
   installed: boolean;
+  source?: 'builtin' | 'community' | 'custom' | string;
+  composeTemplate?: string;
+}
+
+export interface InstallCustomConfig {
+  portsMap?: Record<string, number>;
+  volumesMap?: Record<string, string>;
+  envMap?: Record<string, string>;
+  customYaml?: string;
+}
+
+export interface CustomAppInput {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon: string;
+  port?: number;
+  composeYaml: string;
 }
 
 export interface SambaStatus {
