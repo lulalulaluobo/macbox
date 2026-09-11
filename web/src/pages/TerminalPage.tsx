@@ -360,7 +360,7 @@ export const TerminalPage: React.FC = () => {
   };
 
   return (
-    <div className={`terminal-page flex min-h-0 flex-col gap-4 ${showSidebar ? 'overflow-y-auto overscroll-contain' : 'overflow-hidden'} ${fullscreen ? 'fixed inset-0 z-[70] bg-[#090d16] p-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]' : 'h-full w-full'}`}>
+    <div className={`terminal-page flex min-h-0 flex-col gap-4 ${showSidebar ? 'overflow-y-auto overscroll-contain lg:overflow-hidden' : 'overflow-hidden'} ${fullscreen ? 'fixed inset-0 z-[70] bg-[#090d16] p-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]' : 'h-full w-full'}`}>
       {/* Alert Banner */}
       {alertMsg && (
         <div className={`p-3.5 rounded-xl text-sm flex items-center justify-between shadow ${
@@ -374,10 +374,10 @@ export const TerminalPage: React.FC = () => {
       )}
 
       {/* Terminal first; file system is loaded and shown only when requested. */}
-      <div className={`flex min-h-0 flex-col gap-4 ${showSidebar ? 'h-full flex-none overflow-visible' : 'flex-1'}`}>
-        {/* Left Side: Integrated File System Explorer */}
+      <div className={`flex min-h-0 flex-col gap-4 ${showSidebar ? 'flex-none lg:flex-row lg:flex-1 lg:overflow-hidden' : 'flex-1'}`}>
+        {/* Left Side: Integrated File System Explorer (mobile: stacked below; desktop: left sidebar) */}
         {showSidebar && (
-          <div className="order-2 flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/80">
+          <div className="order-2 flex min-h-[420px] w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/80 lg:order-1 lg:min-h-0 lg:w-[320px] lg:shrink-0">
             {/* Header & Quick Shortcuts */}
             <div className="p-4 border-b border-slate-800/80 space-y-3">
               <div className="flex items-center justify-between">
@@ -473,7 +473,7 @@ export const TerminalPage: React.FC = () => {
 
             {/* File List Table / Area */}
             <div
-              className={`flex-1 overflow-y-auto max-h-[460px] p-2 space-y-1 relative ${
+              className={`flex-1 overflow-y-auto max-h-[460px] lg:max-h-none p-2 space-y-1 relative ${
                 isDragging ? 'border-2 border-dashed border-sky-500 bg-sky-500/5' : ''
               }`}
               onDragOver={(e) => {
@@ -582,7 +582,7 @@ export const TerminalPage: React.FC = () => {
         )}
 
         {/* Right Side: Interactive Web Terminal */}
-        <div className={`terminal-dark-preserve order-1 flex w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'h-full min-h-[520px] flex-none' : 'min-h-0 flex-1'}`}>
+        <div className={`terminal-dark-preserve order-1 flex w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'min-h-[520px] flex-none lg:order-2 lg:min-h-0 lg:w-auto lg:flex-1' : 'min-h-0 flex-1'}`}>
           {/* Terminal Top Toolbar */}
           <div className="flex flex-col gap-2.5 border-b border-slate-800/80 bg-[#0d121f] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-3.5">
             <div className="flex min-w-0 items-center gap-2">
