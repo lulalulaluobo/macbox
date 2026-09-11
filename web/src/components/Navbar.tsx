@@ -58,6 +58,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const vmRunning = vmStatus?.status === 'Running';
+  // 高亮归属：「更多」只代表存储设置/SMB/终端三个入口；settings 在桌面端由
+  // 「设置」按钮独自高亮。移动端没有独立设置按钮，settings 时仍由「更多」承担，
+  // 因此该场景的高亮用 md: 前缀在桌面端取消。
+  const moreItemsActive = activeTab === 'storage_settings' || activeTab === 'smb_sharing' || activeTab === 'terminal';
 
   return (
     <>
@@ -132,12 +136,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           );
         })}
-        <button type="button" onClick={() => navigate('settings')} className={`hidden min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold transition md:flex md:flex-row md:gap-2 md:text-xs ${(activeTab === 'settings' || activeTab === 'storage_settings' || activeTab === 'smb_sharing' || activeTab === 'terminal') ? 'bg-[#fff0f4] text-[#bd5e78] dark:bg-rose-500/15 dark:text-rose-300' : 'text-[#8b9aaa] hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
+        <button type="button" onClick={() => navigate('settings')} className={`hidden min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold transition md:flex md:flex-row md:gap-2 md:text-xs ${activeTab === 'settings' ? 'bg-[#fff0f4] text-[#bd5e78] dark:bg-rose-500/15 dark:text-rose-300' : 'text-[#8b9aaa] hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
           <Settings className="h-[18px] w-[18px]" />
           <span>设置</span>
         </button>
         <div className="relative flex">
-          <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold transition sm:flex-row sm:gap-2 sm:text-xs ${(activeTab === 'settings' || activeTab === 'storage_settings' || activeTab === 'smb_sharing' || activeTab === 'terminal') ? 'bg-[#fff0f4] text-[#bd5e78] dark:bg-rose-500/15 dark:text-rose-300' : 'text-[#8b9aaa] hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
+          <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold transition sm:flex-row sm:gap-2 sm:text-xs ${moreItemsActive ? 'bg-[#fff0f4] text-[#bd5e78] dark:bg-rose-500/15 dark:text-rose-300' : activeTab === 'settings' ? 'bg-[#fff0f4] text-[#bd5e78] dark:bg-rose-500/15 dark:text-rose-300 md:bg-transparent md:text-[#8b9aaa] md:dark:bg-transparent md:dark:text-slate-400' : 'text-[#8b9aaa] hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
             <MoreHorizontal className="h-[19px] w-[19px]" />
             <span>更多</span>
           </button>
