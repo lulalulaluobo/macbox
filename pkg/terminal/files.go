@@ -61,6 +61,14 @@ func ListFiles(instanceName, targetPath string) ([]FileInfo, error) {
 
 // ListFilesContext is the request-aware variant used by HTTP handlers.
 func ListFilesContext(ctx context.Context, instanceName, targetPath string) ([]FileInfo, error) {
+	items, _, err := ListFilesPageContext(ctx, instanceName, targetPath, 0, 10000)
+	return items, err
+}
+
+// ListFilesPageContext bounds command output and memory use for very large
+// directories. The VM still sorts one directory snapshot for deterministic
+// paging, but only the requested window crosses the process boundary.
+func ListFilesPageContext(ctx context.Context, instanceName, targetPath string, offset, limit int) ([]FileInfo, bool, error) {
 	if instanceName == "" {
 		instanceName = "macnas"
 	}
@@ -70,15 +78,35 @@ func ListFilesContext(ctx context.Context, instanceName, targetPath string) ([]F
 	var err error
 	targetPath, err = resolveAllowedPathContext(ctx, instanceName, targetPath)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if limit < 1 || limit > 500 {
+		limit = 300
 	}
 
 	pyScript := fmt.Sprintf(`
 import os, json, sys, time
-p = sys.argv[1] if len(sys.argv) > 1 else "/data"
+p = os.path.realpath(sys.argv[1] if len(sys.argv) > 1 else "/data")
+root = os.path.realpath('/data')
+if os.path.commonpath((root, p)) != root:
+    raise RuntimeError('路径超出 /data 存储范围')
+relative = os.path.relpath(p, root)
+fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    if relative != '.':
+        for component in relative.split(os.sep):
+            next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+except Exception:
+    os.close(fd)
+    raise
 items = []
 try:
-    with os.scandir(p) as it:
+    with os.scandir(fd) as it:
         for entry in it:
             try:
                 st = entry.stat(follow_symlinks=False)
@@ -95,31 +123,38 @@ try:
 except Exception as e:
     print(f"读取目录失败: {e}", file=sys.stderr)
     raise
+finally:
+    os.close(fd)
 items.sort(key=lambda x: (not x["isDir"], x["name"].lower()))
-print(json.dumps(items))
+offset = int(sys.argv[2])
+limit = int(sys.argv[3])
+print(json.dumps({"items": items[offset:offset + limit], "hasMore": offset + limit < len(items)}))
 `)
 
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "python3", "-c", pyScript, targetPath)
+	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "python3", "-c", pyScript, targetPath, strconv.Itoa(offset), strconv.Itoa(limit))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("读取目录失败: %s (%w)", strings.TrimSpace(string(out)), err)
+		return nil, false, fmt.Errorf("读取目录失败: %s (%w)", strings.TrimSpace(string(out)), err)
 	}
 
-	var rawItems []struct {
-		Name      string `json:"name"`
-		IsDir     bool   `json:"isDir"`
-		IsSymlink bool   `json:"isSymlink"`
-		Size      int64  `json:"size"`
-		Mode      string `json:"mode"`
-		Mtime     int64  `json:"mtime"`
+	var pageResult struct {
+		Items []struct {
+			Name      string `json:"name"`
+			IsDir     bool   `json:"isDir"`
+			IsSymlink bool   `json:"isSymlink"`
+			Size      int64  `json:"size"`
+			Mode      string `json:"mode"`
+			Mtime     int64  `json:"mtime"`
+		} `json:"items"`
+		HasMore bool `json:"hasMore"`
 	}
 
-	if err := json.Unmarshal(out, &rawItems); err != nil {
-		return nil, fmt.Errorf("解析目录数据失败: %w", err)
+	if err := json.Unmarshal(out, &pageResult); err != nil {
+		return nil, false, fmt.Errorf("解析目录数据失败: %w", err)
 	}
 
 	var items []FileInfo
-	for _, raw := range rawItems {
+	for _, raw := range pageResult.Items {
 		fullPath := path.Join(targetPath, raw.Name)
 		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(raw.Name), "."))
 		mtimeStr := time.Unix(raw.Mtime, 0).Format("2006-01-02 15:04")
@@ -142,7 +177,51 @@ print(json.dumps(items))
 		})
 	}
 
-	return items, nil
+	return items, pageResult.HasMore, nil
+}
+
+const safeReadScript = `import os, shutil, sys
+raw = sys.argv[1]
+mode = sys.argv[2]
+root = os.path.realpath('/data')
+candidate = os.path.realpath(raw)
+if os.path.commonpath((root, candidate)) != root or candidate == root:
+    raise RuntimeError('文件路径超出 /data 存储范围')
+parts = os.path.relpath(candidate, root).split(os.sep)
+parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    for component in parts[:-1]:
+        next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        os.close(parent)
+        parent = next_fd
+    fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
+    try:
+        info = os.fstat(fd)
+        if mode == 'stat':
+            print(info.st_size)
+        else:
+            start = int(sys.argv[3])
+            length = int(sys.argv[4])
+            os.lseek(fd, start, os.SEEK_SET)
+            with os.fdopen(fd, 'rb', closefd=False) as source:
+                if length < 0:
+                    shutil.copyfileobj(source, sys.stdout.buffer)
+                else:
+                    remaining = length
+                    while remaining > 0:
+                        chunk = source.read(min(1024 * 1024, remaining))
+                        if not chunk: break
+                        sys.stdout.buffer.write(chunk)
+                        remaining -= len(chunk)
+    finally:
+        os.close(fd)
+finally:
+    os.close(parent)
+`
+
+func safeReadCommand(ctx context.Context, instanceName, filePath, mode string, start, length int64) *exec.Cmd {
+	return exec.CommandContext(ctx, "limactl", "shell", instanceName, "python3", "-c", safeReadScript,
+		filePath, mode, strconv.FormatInt(start, 10), strconv.FormatInt(length, 10))
 }
 
 // ReadFile reads up to 512KB text from file inside the VM
@@ -160,7 +239,7 @@ func ReadFileContext(ctx context.Context, instanceName, filePath string) (string
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "head", "-c", "524288", filePath)
+	cmd := safeReadCommand(ctx, instanceName, filePath, "read", 0, 524288)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("读取文件失败: %w", err)
@@ -183,14 +262,9 @@ func WriteFileContext(ctx context.Context, instanceName, filePath, content strin
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "tee", filePath)
-	cmd.Stdin = strings.NewReader(content)
-	cmd.Stdout = io.Discard
-	var errBuf bytes.Buffer
-	cmd.Stderr = &errBuf
-	err = cmd.Run()
+	err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "write", "path": filePath}, strings.NewReader(content))
 	if err != nil {
-		return fmt.Errorf("写入文件失败: %s (%w)", strings.TrimSpace(errBuf.String()), err)
+		return fmt.Errorf("写入文件失败: %w", err)
 	}
 	return nil
 }
@@ -210,10 +284,8 @@ func CreateDirContext(ctx context.Context, instanceName, dirPath string) error {
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "mkdir", "-p", dirPath)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("创建文件夹失败: %s (%w)", string(out), err)
+	if err := runSafeMutation(ctx, instanceName, map[string]string{"operation": "mkdir", "path": dirPath}, nil); err != nil {
+		return fmt.Errorf("创建文件夹失败: %w", err)
 	}
 	return nil
 }
@@ -267,6 +339,128 @@ if not allowed:
     raise SystemExit(2)
 print(candidate)
 `
+
+const safeMutationScript = `import base64, json, os, shutil, stat, sys, time
+
+request = json.loads(base64.b64decode(sys.argv[1]).decode('utf-8'))
+root_path = os.path.realpath('/data')
+root_fd = os.open(root_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
+def parts_for(raw, allow_root=False):
+    clean = os.path.normpath(raw)
+    candidate = os.path.realpath(clean)
+    if os.path.commonpath((root_path, candidate)) != root_path:
+        raise RuntimeError('路径超出 /data 存储范围')
+    relative = os.path.relpath(candidate, root_path)
+    if relative == '.':
+        if allow_root:
+            return []
+        raise RuntimeError('禁止操作存储根目录')
+    parts = relative.split(os.sep)
+    if any(part in ('', '.', '..') for part in parts):
+        raise RuntimeError('路径格式无效')
+    return parts
+
+def open_dir(parts, create=False):
+    fd = os.dup(root_fd)
+    try:
+        for part in parts:
+            if create:
+                try:
+                    os.mkdir(part, 0o755, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+def open_parent(raw):
+    parts = parts_for(raw)
+    return open_dir(parts[:-1]), parts[-1]
+
+operation = request['operation']
+if operation == 'delete':
+    parent_fd, name = open_parent(request['path'])
+    try:
+        info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        if stat.S_ISDIR(info.st_mode):
+            shutil.rmtree(name, dir_fd=parent_fd)
+        else:
+            os.unlink(name, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+elif operation in ('rename', 'move'):
+    source_fd, source_name = open_parent(request['source'])
+    if operation == 'move':
+        destination_fd = open_dir(parts_for(request['destination'], allow_root=True))
+        destination_name = source_name
+    else:
+        destination_fd, destination_name = open_parent(request['destination'])
+    try:
+        os.rename(source_name, destination_name, src_dir_fd=source_fd, dst_dir_fd=destination_fd)
+    finally:
+        os.close(source_fd)
+        os.close(destination_fd)
+elif operation == 'mkdir':
+    directory_fd = open_dir(parts_for(request['path']), create=True)
+    os.close(directory_fd)
+elif operation == 'write':
+    parent_fd, name = open_parent(request['path'])
+    temp_name = '.macnas-write-' + str(os.getpid()) + '-' + str(time.time_ns())
+    try:
+        fd = os.open(temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent_fd)
+        try:
+            with os.fdopen(fd, 'wb', closefd=True) as output:
+                shutil.copyfileobj(sys.stdin.buffer, output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temp_name, name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        except Exception:
+            try: os.unlink(temp_name, dir_fd=parent_fd)
+            except FileNotFoundError: pass
+            raise
+    finally:
+        os.close(parent_fd)
+elif operation == 'copy':
+    source_fd, source_name = open_parent(request['source'])
+    destination_fd = open_dir(parts_for(request['destination'], allow_root=True))
+    source_path = f'/proc/self/fd/{source_fd}/{source_name}'
+    destination_path = f'/proc/self/fd/{destination_fd}/{source_name}'
+    try:
+        info = os.stat(source_name, dir_fd=source_fd, follow_symlinks=False)
+        if stat.S_ISLNK(info.st_mode):
+            raise RuntimeError('不允许复制符号链接')
+        if stat.S_ISDIR(info.st_mode):
+            shutil.copytree(source_path, destination_path, symlinks=True)
+        else:
+            shutil.copy2(source_path, destination_path, follow_symlinks=False)
+    finally:
+        os.close(source_fd)
+        os.close(destination_fd)
+else:
+    raise RuntimeError('不支持的文件操作')
+`
+
+func runSafeMutation(ctx context.Context, instanceName string, request map[string]string, input io.Reader) error {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	encoded := base64.StdEncoding.EncodeToString(payload)
+	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "python3", "-c", safeMutationScript, encoded)
+	cmd.Stdin = input
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s (%w)", strings.TrimSpace(output.String()), err)
+	}
+	return nil
+}
 
 // resolveAllowedPath validates the canonical path inside the VM. Checking the
 // canonical parent also blocks ../ traversal and symlinks that point outside
@@ -350,10 +544,9 @@ func DeletePathContext(ctx context.Context, instanceName, targetPath string) err
 		return fmt.Errorf("移动回收站备份失败: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "rm", "-rf", targetPath)
-	out, err := cmd.CombinedOutput()
+	err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "delete", "path": targetPath}, nil)
 	if err != nil {
-		errMsg := string(out)
+		errMsg := err.Error()
 		if strings.Contains(errMsg, "Read-only file system") {
 			return fmt.Errorf("当前目录处于只读保护模式 (Read-only)，禁止删除。请前往【存储设置】将该直通目录切换为【允许读写】")
 		}
@@ -376,7 +569,7 @@ func DownloadFile(w http.ResponseWriter, r *http.Request, instanceName, filePath
 	}
 	fileName := path.Base(filePath)
 
-	cmd := exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "cat", filePath)
+	cmd := safeReadCommand(r.Context(), instanceName, filePath, "read", 0, -1)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Printf("[MacNAS Files] create download stream failed: %v", err)
@@ -459,26 +652,18 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		cleanupCmd := exec.CommandContext(cleanupCtx, "limactl", "shell", instanceName, "sudo", "rm", "-f", tempPath)
-		if cleanupErr := cleanupCmd.Run(); cleanupErr != nil {
+		if cleanupErr := runSafeMutation(cleanupCtx, instanceName, map[string]string{"operation": "delete", "path": tempPath}, nil); cleanupErr != nil {
 			log.Printf("[MacNAS Files] cleanup interrupted upload failed: %v", cleanupErr)
 		}
 	}
 	defer cleanup()
 
-	cmd := exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "sudo", "tee", tempPath)
 	stream := &uploadPartReader{reader: file}
-	cmd.Stdin = stream
-	cmd.Stdout = io.Discard
-
-	var errBuf bytes.Buffer
-	cmd.Stderr = &errBuf
-
-	if err := cmd.Run(); err != nil {
+	if err := runSafeMutation(r.Context(), instanceName, map[string]string{"operation": "write", "path": tempPath}, stream); err != nil {
 		if stream.err != nil {
 			return uploadStreamError(stream.err)
 		}
-		errMsg := errBuf.String()
+		errMsg := err.Error()
 		if strings.Contains(errMsg, "Read-only file system") {
 			return fmt.Errorf("当前目录处于只读保护模式 (Read-only)，禁止上传文件")
 		}
@@ -498,9 +683,8 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 	} else if extra != nil {
 		return fmt.Errorf("上传请求只能包含一个文件")
 	}
-	moveCmd := exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "sudo", "mv", "-f", tempPath, destPath)
-	if output, err := moveCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("提交上传文件失败: %s (%w)", strings.TrimSpace(string(output)), err)
+	if err := runSafeMutation(r.Context(), instanceName, map[string]string{"operation": "rename", "source": tempPath, "destination": destPath}, nil); err != nil {
+		return fmt.Errorf("提交上传文件失败: %w", err)
 	}
 	committed = true
 	return nil
@@ -556,10 +740,9 @@ func RenamePathContext(ctx context.Context, instanceName, oldPath, newPath strin
 		return fmt.Errorf("无效的目标路径")
 	}
 
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "mv", oldPath, newPath)
-	out, err := cmd.CombinedOutput()
+	err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "rename", "source": oldPath, "destination": newPath}, nil)
 	if err != nil {
-		errMsg := string(out)
+		errMsg := err.Error()
 		if strings.Contains(errMsg, "Read-only file system") {
 			return fmt.Errorf("当前目录处于只读保护模式 (Read-only)，禁止修改名称。请前往【存储设置】将该直通目录切换为【允许读写】")
 		}
@@ -590,10 +773,9 @@ func CopyPathsContext(ctx context.Context, instanceName string, srcPaths []strin
 		if path.Clean(src) == "/data" {
 			return fmt.Errorf("禁止复制存储根目录")
 		}
-		cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "cp", "-r", src, destDir+"/")
-		out, err := cmd.CombinedOutput()
+		err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "copy", "source": src, "destination": destDir}, nil)
 		if err != nil {
-			errMsg := string(out)
+			errMsg := err.Error()
 			if strings.Contains(errMsg, "Read-only file system") {
 				return fmt.Errorf("目标目录处于只读保护模式，无法复制写入")
 			}
@@ -625,10 +807,9 @@ func MovePathsContext(ctx context.Context, instanceName string, srcPaths []strin
 		if isSystemProtectedDir(src) {
 			return fmt.Errorf("禁止移动系统核心目录: %s", src)
 		}
-		cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "mv", src, destDir+"/")
-		out, err := cmd.CombinedOutput()
+		err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "move", "source": src, "destination": destDir}, nil)
 		if err != nil {
-			errMsg := string(out)
+			errMsg := err.Error()
 			if strings.Contains(errMsg, "Read-only file system") {
 				return fmt.Errorf("当前或目标目录处于只读保护模式，无法移动")
 			}
@@ -1072,9 +1253,9 @@ func deleteAndSendToMacTrashContext(ctx context.Context, instanceName string, it
 		return fmt.Errorf("移动回收站备份失败: %w", err)
 	}
 
-	// Always clean up from VM
-	rmCmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "rm", "-rf", trashPath)
-	if err := rmCmd.Run(); err != nil {
+	// Remove through an anchored directory descriptor so a concurrent symlink
+	// replacement cannot redirect deletion outside the trash directory.
+	if err := runSafeMutation(ctx, instanceName, map[string]string{"operation": "delete", "path": trashPath}, nil); err != nil {
 		return fmt.Errorf("清理回收站项目失败: %w", err)
 	}
 	return nil
@@ -1208,8 +1389,7 @@ func EmptyTrashContext(ctx context.Context, instanceName string) (int, error) {
 		count++
 	}
 
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "rm", "-rf", "/data/.trash")
-	if err := cmd.Run(); err != nil {
+	if err := runSafeMutation(ctx, instanceName, map[string]string{"operation": "delete", "path": "/data/.trash"}, nil); err != nil {
 		return count, fmt.Errorf("清空回收站失败: %w", err)
 	}
 
@@ -1266,7 +1446,7 @@ func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, fileP
 	ext := strings.TrimPrefix(filepath.Ext(fileName), ".")
 
 	// Get file size
-	sizeCmd := exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "stat", "-c", "%s", filePath)
+	sizeCmd := safeReadCommand(r.Context(), instanceName, filePath, "stat", 0, 0)
 	sizeOut, err := sizeCmd.Output()
 	if err != nil {
 		log.Printf("[MacNAS Files] read media size failed: %v", err)
@@ -1289,7 +1469,7 @@ func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, fileP
 		w.Header().Set("Content-Type", mime)
 		w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
 
-		cmd := exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "cat", filePath)
+		cmd := safeReadCommand(r.Context(), instanceName, filePath, "read", 0, -1)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			log.Printf("[MacNAS Files] create media stream failed: %v", err)
@@ -1326,15 +1506,7 @@ func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, fileP
 	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
 	w.WriteHeader(http.StatusPartialContent)
 
-	pyScript := `import sys
-file_path = sys.argv[1]
-start = int(sys.argv[2])
-length = int(sys.argv[3])
-with open(file_path, 'rb') as f:
-    f.seek(start)
-    sys.stdout.buffer.write(f.read(length))`
-	cmd := exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "python3", "-c", pyScript,
-		filePath, strconv.FormatInt(start, 10), strconv.FormatInt(length, 10))
+	cmd := safeReadCommand(r.Context(), instanceName, filePath, "read", start, length)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Printf("[MacNAS Files] create ranged media stream failed: %v", err)

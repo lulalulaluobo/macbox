@@ -357,13 +357,6 @@ html.light .sora-navbar {
   padding-top: env(safe-area-inset-top);
 }
 
-html.light div.sora-login-mark,
-html.light .sora-login-mark svg,
-.sora-login-mark,
-.sora-login-mark svg {
-  color: #fff !important;
-}
-
 .sora-metric-card {
   border-color: #dcecf2;
 }

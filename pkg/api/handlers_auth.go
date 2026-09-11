@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, rememberMe bool) {
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, rememberMe bool) {
 	maxAge := int((24 * time.Hour) / time.Second)
 	if rememberMe {
 		maxAge = int((30 * 24 * time.Hour) / time.Second)
@@ -21,12 +21,12 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, reme
 		MaxAge:   maxAge,
 		Expires:  time.Now().Add(time.Duration(maxAge) * time.Second),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   s.requestIsHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -34,7 +34,7 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		Expires:  time.Unix(1, 0),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   s.requestIsHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 }
@@ -54,7 +54,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, user, err := s.authMgr.LoginFrom(req.Username, req.Password, req.RememberMe, requestIP(r))
+	token, user, err := s.authMgr.LoginFrom(req.Username, req.Password, req.RememberMe, s.requestIP(r))
 	if err != nil {
 		if errors.Is(err, auth.ErrTooManyLoginAttempts) {
 			w.Header().Set("Retry-After", "60")
@@ -65,7 +65,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, r, token, req.RememberMe)
+	s.setSessionCookie(w, r, token, req.RememberMe)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"user": user,
 	})
@@ -80,7 +80,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRequest(r) {
+	if !s.isLoopbackRequest(r) {
 		writeError(w, http.StatusForbidden, "首次管理员初始化仅允许在 MacNAS 主机本机执行")
 		return
 	}
@@ -116,7 +116,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if token != "" && s.authMgr != nil {
 		s.authMgr.Logout(token)
 	}
-	clearSessionCookie(w, r)
+	s.clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

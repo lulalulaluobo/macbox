@@ -8,9 +8,9 @@
 
 | 检查 | 结果 |
 |---|---|
-| `go vet ./pkg/... ./cmd/... ./web/...` | 通过（仅依赖 go-m1cpu 的已知编译器警告） |
+| `go vet ./...` | 通过 |
 | `go test ./...`（根模块，references 已隔离） | 全部通过 |
-| `go test -race ./pkg/... ./cmd/...` | 全部通过，无真实环境副作用 |
+| `go test -race -count=1 ./...` | 全部通过，无竞态报告 |
 | `npm run build`（web/） | 通过 |
 | `rg "bash -c\|sh -c" pkg/ cmd/` | 无残留 |
 
@@ -31,7 +31,7 @@
 
 ### 3. 文件系统根目录隔离 — ✅ 完成
 
-- `pkg/terminal/files.go` `resolveAllowedPathContext`：所有文件 API（列表/读/写/上传/下载/媒体流/复制/移动/重命名/删除/回收站）强制经过；VM 内 `realpath` + `commonpath` 校验限制在 `/data`，返回规范化路径消除 TOCTOU 窗口。
+- `pkg/terminal/files.go`：所有文件 API 先限制到 `/data`；列表、读取、预览、下载、写入、上传提交、复制、移动、重命名和删除进一步使用 `O_NOFOLLOW` + 目录文件描述符逐段遍历，在执行时锚定父目录，消除校验与操作分离的符号链接竞态。
 - `isSystemProtectedDir` 保护系统目录与 `/data/.trash`。
 - 词法校验本次抽取为 `normalizeRequestedPath` 纯函数并补单测（`pkg/terminal/files_test.go`），测试明确固定「词法层不做范围判定、拦截在 VM 侧」的分层契约。
 
@@ -39,6 +39,7 @@
 
 - 移除默认 `admin/admin123`：改为首次初始化流程（`auth.Manager.NeedsSetup` + `CreateInitialAdmin`），`POST /api/auth/setup` 仅接受 loopback 请求（有测试覆盖）。
 - CORS 默认同源；跨域必须显式配置 `MACNAS_ALLOWED_ORIGINS`；WebSocket（日志与终端）统一 Origin 校验。
+- 反向代理头默认不可信；仅 `MACNAS_TRUSTED_PROXIES` 中显式声明的 IP/CIDR 可以提供 `X-Forwarded-For` 与 `X-Forwarded-Proto`。初始化 loopback 判断、登录限速 IP、Secure Cookie 与 HSTS 均使用同一可信代理解析结果。
 - 管理端默认监听 `127.0.0.1`（`config.NormalizeListenAddress`），局域网开放需显式配置。
 - 登录限速：账号 + IP 双维度、5 次失败后指数退避锁定（`auth.Manager.LoginFrom`）。
 - Lima 模板端口转发改为白名单端口列表 + `HostBindAddress`，不再整段透传。
@@ -66,6 +67,7 @@
 ### 8. GET 隐藏副作用 — ✅ 完成
 
 - `ListApps` 不再删除 Compose 文件；容器删除不再按前缀连带删除应用配置；Samba 状态读取无延迟 ApplyConfig。
+- Compose YAML 读取改为管理员接口；读取内置模板直接返回本地内容，不再自动在 VM 中创建目录或写入配置。模板同步只允许发生在明确的启动、停止等状态变更操作中。
 
 ### 9. 上传下载与长任务 — ✅ 完成
 
@@ -85,10 +87,12 @@
 ### 11. 后台操作并发与生命周期 — ✅ 完成
 
 - VM 动作互斥（`BeginVMAction`，并发返回 409，有测试）、存储/Docker 操作级互斥（409，有测试）；后台任务纳入 `backgroundWG` + 服务器根 context，关闭时等待/取消。
+- VM 启动、停止、重启返回 `jobId`；管理员可查询任务列表/详情并取消运行中的任务。任务状态、错误和时间戳以 `0600` 原子文件持久化，服务重启时将未完成任务明确标记为失败。
 
 ### 12. Docker/Lima 查询成本 — ✅ 完成
 
 - 容器列表缓存与失效机制（`InvalidateContainerCaches`）、配置快照（`config.Snapshot`）复用。
+- Docker 页面不可见时暂停轮询；目录列表每页最多 500 项（默认 300），API 返回 `hasMore/nextOffset`，文件页按需加载下一页，避免超大 JSON 和一次性渲染阻塞。
 
 ### 13. API Server 拆分 — ✅ 完成（2026-09-11 第二轮）
 
@@ -100,7 +104,7 @@
 
 ### 14. HTTP/WS 防护与错误响应 — ✅ 完成
 
-- 安全响应头（nosniff、DENY、no-referrer、Permissions-Policy、HSTS）；`writeError` 对 5xx 脱敏（详情进日志、客户端只收稳定文案，有测试）。
+- 安全响应头（CSP、nosniff、DENY、no-referrer、Permissions-Policy、HSTS）；`writeError` 对 5xx 脱敏（详情进日志、客户端只收稳定文案，有测试）。
 - WebSocket Origin 策略统一：终端 upgrader 接收 server 传入的 allowlist，与 server 侧同源默认一致。
 
 ## P3 整改结果
@@ -109,7 +113,7 @@
 
 - ✅ `go mod tidy` 完成依赖修正。
 - ✅（本次）`references/dockge` 增加 stub `go.mod` 将其隔离出根模块；因 `references/` 被 .gitignore，该文件不入库，重新克隆参考项目后需再次放置（根因是参考项目位于模块树内，长期方案是移出仓库）。
-- ✅（本次）废弃路由删除：经前端调用逐一确认后，移除无消费者的 `POST /api/docker/images/pull/stream`、`POST /api/docker/compose/deploy/stream`、`GET /api/apps/{id}/install/stream`、`GET /api/ws/logs` 四条路由及 handler，连带清理 `websocketUpgrader` 与 `apps.InstallStream` 死代码。容器 `action` 与独立 `start/stop/restart` 路由、`storage/select` 经确认均有前端消费者，予以保留。
+- ✅ 废弃路由删除：除上一轮移除的四条流式/WS 路由外，本轮确认前端统一使用容器 `action` 后，删除重复的独立 `start/stop/restart` 路由；删除无消费者的 `storage/select` 路由与客户端方法。
 
 ## 本次会话变更清单
 
@@ -119,9 +123,9 @@
 4. `go.mod` / `go.sum`：`go mod tidy` 修正直接依赖标记。
 5. `references/dockge/go.mod`（新增，本地）：模块边界隔离。
 
-## 剩余工作（建议顺序）
+## 剩余非阻断性结构工作
 
-1. 参考项目移出模块树或纳入独立 workspace（根因修复）。
-2. JobManager 化的长任务状态查询（报告 P2-11 的增强项，当前互斥已足够安全）。
+1. 参考项目最终移出主仓库模块树；当前本地 stub `go.mod` 已隔离构建，但该文件因 `references/` 整体忽略而不随版本库分发。
+2. 若后续长任务种类明显增加，可把当前 `pkg/api/jobs.go` 下沉为独立领域包；现阶段 VM 任务已具备查询、取消与重启恢复语义。
 
-至此，审查报告 P0–P3 共 15 项中，除上述 2 项低优先级增强外全部完成。
+至此，审查报告 P0–P3 共 15 项的发布阻断项均已完成。

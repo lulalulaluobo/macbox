@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/luluen/mac-nas/pkg/terminal"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -28,16 +29,20 @@ func (s *Server) handleTerminalFilesList(w http.ResponseWriter, r *http.Request)
 		targetPath = "/data"
 	}
 
-	items, err := terminal.ListFilesContext(r.Context(), s.vmMgr.InstanceName(), targetPath)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	items, hasMore, err := terminal.ListFilesPageContext(r.Context(), s.vmMgr.InstanceName(), targetPath, offset, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status": "success",
-		"path":   targetPath,
-		"items":  items,
+		"status":     "success",
+		"path":       targetPath,
+		"items":      items,
+		"hasMore":    hasMore,
+		"nextOffset": offset + len(items),
 	})
 }
 

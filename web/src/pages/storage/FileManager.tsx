@@ -23,6 +23,8 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const [currentPath, setCurrentPath] = useState<string>(initialPath);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreFiles, setHasMoreFiles] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'mtime'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -112,11 +114,13 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
   });
 
-  const loadFiles = async (targetPath: string) => {
-    setLoading(true);
+  const loadFiles = async (targetPath: string, append = false) => {
+    append ? setLoadingMore(true) : setLoading(true);
     try {
-      const res = await api.listFiles(targetPath);
-      setFiles(res.items || []);
+      const offset = append ? files.length : 0;
+      const res = await api.listFiles(targetPath, offset);
+      setFiles((current) => append ? [...current, ...(res.items || [])] : (res.items || []));
+      setHasMoreFiles(Boolean(res.hasMore));
       setCurrentPath(res.path);
       if (res.path === '/data') {
         const discovered = (res.items || [])
@@ -127,7 +131,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `读取文件夹失败: ${err.message}` });
     } finally {
-      setLoading(false);
+      append ? setLoadingMore(false) : setLoading(false);
     }
   };
 
@@ -836,6 +840,16 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                 setActionItem(item);
               }}
             />
+          )}
+          {!viewingTrash && !viewingFavorites && hasMoreFiles && !loading && (
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => loadFiles(currentPath, true)}
+              className="mx-auto mt-3 flex min-h-10 items-center justify-center rounded-xl bg-slate-100 px-5 text-xs font-semibold text-slate-600 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-300"
+            >
+              {loadingMore ? '正在加载…' : '加载更多'}
+            </button>
           )}
         </div>
 

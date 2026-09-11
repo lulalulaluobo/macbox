@@ -15,10 +15,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/vm/restart", s.adminOnly(s.handleVMRestart))
 	s.mux.HandleFunc("GET /api/vm/config", s.handleVMConfigGet)
 	s.mux.HandleFunc("POST /api/vm/config", s.adminOnly(s.handleVMConfigUpdate))
+	s.mux.HandleFunc("GET /api/jobs", s.adminOnly(s.handleJobsList))
+	s.mux.HandleFunc("GET /api/jobs/{id}", s.adminOnly(s.handleJobGet))
+	s.mux.HandleFunc("POST /api/jobs/{id}/cancel", s.adminOnly(s.handleJobCancel))
 
 	// 3. Storage
 	s.mux.HandleFunc("GET /api/storage/disks", s.handleStorageDisks)
-	s.mux.HandleFunc("POST /api/storage/select", s.adminOnly(s.handleStorageSelect))
 	s.mux.HandleFunc("POST /api/storage/bind", s.adminOnly(s.handleStorageBind))
 	s.mux.HandleFunc("POST /api/storage/unbind", s.adminOnly(s.handleStorageUnbind))
 	s.mux.HandleFunc("POST /api/storage/bind-secondary", s.adminOnly(s.handleStorageBindSecondary))
@@ -33,9 +35,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/docker/overview", s.handleDockerOverview)
 	s.mux.HandleFunc("GET /api/docker/containers", s.handleDockerContainers)
 	s.mux.HandleFunc("POST /api/docker/containers/{id}/action", s.adminOnly(s.handleDockerContainerAction))
-	s.mux.HandleFunc("POST /api/docker/containers/{id}/start", s.adminOnly(s.handleDockerStart))
-	s.mux.HandleFunc("POST /api/docker/containers/{id}/stop", s.adminOnly(s.handleDockerStop))
-	s.mux.HandleFunc("POST /api/docker/containers/{id}/restart", s.adminOnly(s.handleDockerRestart))
 	s.mux.HandleFunc("DELETE /api/docker/containers/{id}", s.adminOnly(s.handleDockerRemoveContainer))
 	s.mux.HandleFunc("GET /api/docker/containers/{id}/logs", s.adminOnly(s.handleDockerLogs))
 
@@ -47,7 +46,7 @@ func (s *Server) registerRoutes() {
 
 	// Docker Compose
 	s.mux.HandleFunc("GET /api/docker/compose", s.handleDockerComposeList)
-	s.mux.HandleFunc("GET /api/docker/compose/{name}", s.handleDockerComposeGetYaml)
+	s.mux.HandleFunc("GET /api/docker/compose/{name}", s.adminOnly(s.handleDockerComposeGetYaml))
 	s.mux.HandleFunc("POST /api/docker/compose/deploy", s.adminOnly(s.handleDockerComposeDeploy))
 	s.mux.HandleFunc("POST /api/docker/compose/{name}/action", s.adminOnly(s.handleDockerComposeAction))
 	s.mux.HandleFunc("DELETE /api/docker/compose/{name}", s.adminOnly(s.handleDockerComposeDelete))

@@ -25,8 +25,13 @@ export const DockerOverview: React.FC<DockerOverviewProps> = ({ onNavigateTab })
 
   useEffect(() => {
     fetchOverview();
-    const timer = window.setInterval(fetchOverview, 5000);
-    return () => window.clearInterval(timer);
+    const poll = () => { if (!document.hidden) fetchOverview(); };
+    const timer = window.setInterval(poll, 5000);
+    document.addEventListener('visibilitychange', poll);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', poll);
+    };
   }, []);
 
   const ready = Boolean(data?.dockerReady);

@@ -23,12 +23,14 @@ func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
 		return
 	}
+	ctx, cancel := s.operationContext(10 * time.Minute)
+	job := s.jobs.add("vm.start", "虚拟机启动中", cancel)
 	go func() {
 		defer s.endBackgroundWork()
 		defer s.vmMgr.EndVMAction()
-		ctx, cancel := s.operationContext(10 * time.Minute)
 		defer cancel()
-		if err := s.vmMgr.Start(ctx, s.projectRoot); err != nil {
+		err := s.vmMgr.Start(ctx, s.projectRoot)
+		if err != nil {
 			log.Printf("[MacNAS] VM Start error: %v", err)
 		} else {
 			s.vmMgr.SetConfigDirty(false)
@@ -36,8 +38,9 @@ func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[MacNAS] ensure Samba password after VM start failed: %v", err)
 			}
 		}
+		s.jobs.finish(job.ID, err)
 	}()
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting", "message": "虚拟机启动中..."})
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting", "message": "虚拟机启动中...", "jobId": job.ID})
 }
 
 func (s *Server) handleVMStop(w http.ResponseWriter, r *http.Request) {
@@ -50,16 +53,19 @@ func (s *Server) handleVMStop(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
 		return
 	}
+	ctx, cancel := s.operationContext(2 * time.Minute)
+	job := s.jobs.add("vm.stop", "虚拟机停止中", cancel)
 	go func() {
 		defer s.endBackgroundWork()
 		defer s.vmMgr.EndVMAction()
-		ctx, cancel := s.operationContext(2 * time.Minute)
 		defer cancel()
-		if err := s.vmMgr.Stop(ctx); err != nil {
+		err := s.vmMgr.Stop(ctx)
+		if err != nil {
 			log.Printf("[MacNAS] VM Stop error: %v", err)
 		}
+		s.jobs.finish(job.ID, err)
 	}()
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping", "message": "虚拟机停止中..."})
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping", "message": "虚拟机停止中...", "jobId": job.ID})
 }
 
 func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
@@ -72,12 +78,14 @@ func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
 		return
 	}
+	ctx, cancel := s.operationContext(10 * time.Minute)
+	job := s.jobs.add("vm.restart", "虚拟机重启中", cancel)
 	go func() {
 		defer s.endBackgroundWork()
 		defer s.vmMgr.EndVMAction()
-		ctx, cancel := s.operationContext(10 * time.Minute)
 		defer cancel()
-		if err := s.vmMgr.Restart(ctx, s.projectRoot); err != nil {
+		err := s.vmMgr.Restart(ctx, s.projectRoot)
+		if err != nil {
 			log.Printf("[MacNAS] VM Restart error: %v", err)
 		} else {
 			s.vmMgr.SetConfigDirty(false)
@@ -85,8 +93,9 @@ func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[MacNAS] ensure Samba password after VM restart failed: %v", err)
 			}
 		}
+		s.jobs.finish(job.ID, err)
 	}()
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting", "message": "虚拟机重启中..."})
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting", "message": "虚拟机重启中...", "jobId": job.ID})
 }
 
 // Storage Handlers

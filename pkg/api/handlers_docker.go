@@ -81,45 +81,6 @@ func (s *Server) handleDockerRemoveContainer(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (s *Server) handleDockerStart(w http.ResponseWriter, r *http.Request) {
-	if !s.beginDockerOperation(w) {
-		return
-	}
-	defer s.endDockerOperation()
-	id := r.PathValue("id")
-	if err := s.dockerClient.StartContainer(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
-}
-
-func (s *Server) handleDockerStop(w http.ResponseWriter, r *http.Request) {
-	if !s.beginDockerOperation(w) {
-		return
-	}
-	defer s.endDockerOperation()
-	id := r.PathValue("id")
-	if err := s.dockerClient.StopContainer(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
-}
-
-func (s *Server) handleDockerRestart(w http.ResponseWriter, r *http.Request) {
-	if !s.beginDockerOperation(w) {
-		return
-	}
-	defer s.endDockerOperation()
-	id := r.PathValue("id")
-	if err := s.dockerClient.RestartContainer(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
-}
-
 func (s *Server) handleDockerLogs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	tailStr := r.URL.Query().Get("tail")

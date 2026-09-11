@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Key, User, ArrowRight, Sun, Moon, AlertCircle, Eye, EyeOff, Heart } from 'lucide-react';
+import { Key, User, ArrowRight, Sun, Moon, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { api } from '../api';
 import { NASUser } from '../types';
 import { useTheme } from '../theme';
@@ -54,7 +54,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     <div className="sora-login-page relative flex min-h-[100dvh] flex-col items-center justify-center overflow-hidden bg-[#f8fbfd] px-4 py-8 text-slate-900 transition-colors duration-300 dark:bg-[#0b1624] dark:text-slate-100 sm:py-10">
       {/* Quiet sky shapes keep the page airy without competing with the form. */}
       <div className="pointer-events-none absolute -right-20 -top-20 h-80 w-80 rounded-full bg-[#e5f7ff] dark:bg-sky-500/10 sm:-right-10 sm:-top-16" />
-      <div className="pointer-events-none absolute -right-2 top-14 h-36 w-36 rounded-full bg-[#ffe9ef] dark:bg-rose-500/10" />
+      <div className="pointer-events-none absolute -right-2 top-14 h-36 w-36 rounded-full bg-[#fff1df] dark:bg-orange-500/10" />
       <div className="pointer-events-none absolute -left-24 bottom-[-4rem] h-72 w-72 rounded-full bg-[#eef9f1] dark:bg-emerald-500/10" />
       <div className="sora-cloud pointer-events-none absolute left-[9%] top-[18%] h-8 w-28 rounded-full bg-white/80 dark:bg-white/5" />
 
@@ -84,15 +84,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         <div className="rounded-[28px] border border-[#e8edf3] bg-white/95 p-6 shadow-[0_16px_42px_-24px_rgba(36,50,74,0.4)] backdrop-blur-xl transition-all dark:border-slate-700 dark:bg-slate-900/90 dark:shadow-black/40 sm:p-10">
           {/* Logo & Brand */}
           <div className="flex flex-col items-center text-center mb-8">
-            <div className="sora-login-mark mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#ff7d9a] text-white shadow-lg shadow-[#ff7d9a]/25 transition-transform hover:-rotate-6">
-              <Heart className="h-8 w-8 fill-current" strokeWidth={1.5} />
+            <div
+              className="sora-login-mark mb-4 flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-[1.65rem] border-2 border-[#f4b35f] bg-[#fff1df] text-[2.65rem] shadow-[0_10px_22px_-14px_rgba(234,138,30,0.7)] transition-transform hover:-rotate-6"
+              aria-hidden="true"
+            >
+              🥕
             </div>
             <h1 className="text-2xl font-black tracking-tight text-[#24324a] dark:text-white">
               MacNAS 控制台
             </h1>
-            <p className="mt-1.5 text-xs font-medium text-[#718195] dark:text-slate-400">
-              Mac mini 家庭服务器控制中心 · 安全认证
-            </p>
           </div>
 
           {/* Error Message */}
@@ -172,7 +172,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             <button
               type="submit"
               disabled={loading}
-              className="mt-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#ff7d9a] text-sm font-bold text-white shadow-md shadow-[#ff7d9a]/25 transition hover:bg-[#f36f8d] disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#ee8b2b] text-sm font-bold text-white shadow-md shadow-[#ee8b2b]/25 transition hover:bg-[#d97706] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? (
                 <span>正在验证登录...</span>
@@ -187,10 +187,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
         </div>
 
-        {/* Footer info */}
-        <p className="text-center text-xs text-slate-400 mt-6">
-          MacNAS · 磁盘 → Linux VM → Docker → NAS共享
-        </p>
       </div>
     </div>
   );

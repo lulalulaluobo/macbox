@@ -54,8 +54,13 @@ export const DockerContainers: React.FC = () => {
 
   useEffect(() => {
     loadContainers();
-    const interval = setInterval(loadContainers, 5000);
-    return () => clearInterval(interval);
+    const poll = () => { if (!document.hidden) loadContainers(); };
+    const interval = setInterval(poll, 5000);
+    document.addEventListener('visibilitychange', poll);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', poll);
+    };
   }, []);
 
   const handleContainerAction = async (id: string, action: 'start' | 'stop' | 'restart') => {

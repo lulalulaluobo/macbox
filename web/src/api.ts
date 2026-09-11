@@ -43,10 +43,6 @@ export const api = {
     dataPath?: string;
     mountPoint?: string;
   }>(`${BASE_URL}/storage/disks`),
-  selectDisk: (identifier: string) => fetchJSON<{ status: string; selectedDisk: string }>(`${BASE_URL}/storage/select`, {
-    method: 'POST',
-    body: JSON.stringify({ identifier }),
-  }),
   bindStorage: (identifier: string, mountPoint: string, sizeGB: number) => fetchJSON<{
     status: string;
     message: string;
@@ -141,9 +137,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ action, force }),
     }),
-  startContainer: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}/start`, { method: 'POST' }),
-  stopContainer: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}/stop`, { method: 'POST' }),
-  restartContainer: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}/restart`, { method: 'POST' }),
   removeContainer: (id: string, force = false) =>
     fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}?force=${force}`, { method: 'DELETE' }),
   getContainerLogs: (id: string, tail = 100) => fetchJSON<{ logs: string }>(`${BASE_URL}/docker/containers/${id}/logs?tail=${tail}`),
@@ -244,8 +237,8 @@ export const api = {
   }),
 
   // Web Terminal & File System
-  listFiles: (path?: string) => fetchJSON<{ status: string; path: string; items: FileItem[] }>(
-    `${BASE_URL}/terminal/files${path ? `?path=${encodeURIComponent(path)}` : ''}`
+  listFiles: (path?: string, offset = 0, limit = 300) => fetchJSON<{ status: string; path: string; items: FileItem[]; hasMore: boolean; nextOffset: number }>(
+    `${BASE_URL}/terminal/files?${new URLSearchParams({ ...(path ? { path } : {}), offset: String(offset), limit: String(limit) })}`
   ),
   readFile: (path: string) => fetchJSON<{ status: string; path: string; content: string }>(
     `${BASE_URL}/terminal/files/read?path=${encodeURIComponent(path)}`

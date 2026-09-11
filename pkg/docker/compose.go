@@ -126,7 +126,7 @@ func (c *Client) listComposeProjects(ctx context.Context, containers []Container
 	return results, nil
 }
 
-func (c *Client) resolveComposeFile(ctx context.Context, name string) (string, error) {
+func (c *Client) resolveExistingComposeFile(ctx context.Context, name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if !validProjectName.MatchString(name) {
 		return "", fmt.Errorf("项目名称只能包含英文字母、数字、下划线或连字符")
@@ -149,7 +149,23 @@ func (c *Client) resolveComposeFile(ctx context.Context, name string) (string, e
 		return sysPath, nil
 	}
 
-	// Check if this is a built-in app template from projectRoot
+	return "", fmt.Errorf("找不到项目 %s 的 compose 配置文件", name)
+}
+
+// ensureComposeFile may materialize a bundled template for state-changing
+// Compose operations. Read-only requests must use GetComposeYaml, which never
+// writes to the VM.
+func (c *Client) ensureComposeFile(ctx context.Context, name string) (string, error) {
+	filePath, err := c.resolveExistingComposeFile(ctx, name)
+	if err == nil {
+		return filePath, nil
+	}
+	name = strings.TrimSpace(name)
+	if !validProjectName.MatchString(name) {
+		return "", fmt.Errorf("项目名称只能包含英文字母、数字、下划线或连字符")
+	}
+
+	// Check if this is a built-in app template from projectRoot.
 	if c.projectRoot != "" {
 		tmplPath := filepath.Join(c.projectRoot, "templates", "apps", name, "compose.yaml")
 		if data, err := os.ReadFile(tmplPath); err == nil {
@@ -158,10 +174,11 @@ func (c *Client) resolveComposeFile(ctx context.Context, name string) (string, e
 			}
 			// Auto sync template compose file into VM /data/appdata/<name>/compose.yaml
 			appDir := path.Join("/data/appdata", name)
+			sysPath := path.Join(appDir, "compose.yaml")
 			if _, mkdirErr := c.vmMgr.Exec(ctx, "mkdir", "-p", appDir); mkdirErr != nil {
 				return "", fmt.Errorf("同步项目目录失败: %w", mkdirErr)
 			}
-			if _, err := c.vmMgr.ExecWithInput(ctx, strings.NewReader(string(data)), "sudo", "tee", path.Join(appDir, "compose.yaml")); err != nil {
+			if _, err := c.vmMgr.ExecWithInput(ctx, strings.NewReader(string(data)), "sudo", "tee", sysPath); err != nil {
 				return "", fmt.Errorf("同步项目配置失败: %w", err)
 			}
 			return sysPath, nil
@@ -172,16 +189,30 @@ func (c *Client) resolveComposeFile(ctx context.Context, name string) (string, e
 }
 
 func (c *Client) GetComposeYaml(ctx context.Context, name string) (string, error) {
-	filePath, err := c.resolveComposeFile(ctx, name)
-	if err != nil {
-		return "", err
+	filePath, err := c.resolveExistingComposeFile(ctx, name)
+	if err == nil {
+		out, readErr := c.vmMgr.Exec(ctx, "cat", filePath)
+		if readErr != nil {
+			return "", fmt.Errorf("读取 compose 文件失败: %w", readErr)
+		}
+		return out, nil
 	}
 
-	out, err := c.vmMgr.Exec(ctx, "cat", filePath)
-	if err != nil {
-		return "", fmt.Errorf("读取 compose 文件失败: %w", err)
+	name = strings.TrimSpace(name)
+	if !validProjectName.MatchString(name) {
+		return "", fmt.Errorf("项目名称只能包含英文字母、数字、下划线或连字符")
 	}
-	return out, nil
+	if c.projectRoot != "" {
+		tmplPath := filepath.Join(c.projectRoot, "templates", "apps", name, "compose.yaml")
+		data, readErr := os.ReadFile(tmplPath)
+		if readErr == nil {
+			if len(data) > maxComposeYAMLBytes {
+				return "", fmt.Errorf("Compose 模板超过 8 MB 限制")
+			}
+			return string(data), nil
+		}
+	}
+	return "", err
 }
 
 func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent string, out io.Writer) error {
@@ -227,7 +258,7 @@ func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent str
 }
 
 func (c *Client) ComposeAction(ctx context.Context, name string, action string, out io.Writer) error {
-	filePath, err := c.resolveComposeFile(ctx, name)
+	filePath, err := c.ensureComposeFile(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -261,7 +292,7 @@ func (c *Client) ComposeAction(ctx context.Context, name string, action string, 
 }
 
 func (c *Client) DeleteComposeProject(ctx context.Context, name string, deleteVolumes bool) error {
-	filePath, err := c.resolveComposeFile(ctx, name)
+	filePath, err := c.ensureComposeFile(ctx, name)
 	if err != nil {
 		return err
 	}

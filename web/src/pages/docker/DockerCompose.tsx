@@ -45,8 +45,13 @@ export const DockerCompose: React.FC = () => {
 
   useEffect(() => {
     loadProjects();
-    const interval = setInterval(loadProjects, 6000);
-    return () => clearInterval(interval);
+    const poll = () => { if (!document.hidden) loadProjects(); };
+    const interval = setInterval(poll, 6000);
+    document.addEventListener('visibilitychange', poll);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', poll);
+    };
   }, []);
 
   const handleAction = async (name: string, action: 'start' | 'stop' | 'restart' | 'down' | 'pull') => {

@@ -44,40 +44,6 @@ func (s *Server) handleStorageDisks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleStorageSelect(w http.ResponseWriter, r *http.Request) {
-	if !s.beginStorageOperation(w) {
-		return
-	}
-	defer s.endStorageOperation()
-
-	var body struct {
-		Identifier string `json:"identifier"` // e.g. "disk4" or "/dev/disk4"
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	identifier, err := storage.NormalizeDiskIdentifier(body.Identifier)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if err := config.Update(s.cfg, func(updated *config.Config) error {
-		updated.Storage.SelectedDisk = identifier
-		return nil
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	storage.InvalidateDisksCache()
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":       "success",
-		"selectedDisk": identifier,
-	})
-}
-
 func (s *Server) handleStorageBind(w http.ResponseWriter, r *http.Request) {
 	if !s.beginStorageOperation(w) {
 		return

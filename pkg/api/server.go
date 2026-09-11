@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type Server struct {
 	authInitErr     error
 	projectRoot     string
 	allowedOrigins  map[string]struct{}
+	trustedProxies  []*net.IPNet
 	uploadSlots     chan struct{}
 	mux             *http.ServeMux
 	serverCtx       context.Context
@@ -49,6 +51,7 @@ type Server struct {
 	storageOpActive bool
 	dockerOpMu      sync.Mutex
 	dockerOpActive  bool
+	jobs            *jobManager
 }
 
 type contextKey string
@@ -84,24 +87,89 @@ func (s *Server) originAllowed(r *http.Request, origin string) bool {
 	return ok
 }
 
-func requestIP(r *http.Request) string {
+func directRequestIP(r *http.Request) net.IP {
 	host := r.RemoteAddr
 	if parsedHost, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		host = parsedHost
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return ip.String()
+		return ip
 	}
-	return "unknown"
+	return nil
 }
 
-func isLoopbackRequest(r *http.Request) bool {
-	host := r.RemoteAddr
-	if parsedHost, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		host = parsedHost
+func configuredProxies(raw string) []*net.IPNet {
+	var networks []*net.IPNet
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if ip := net.ParseIP(entry); ip != nil {
+			bits := 128
+			if ip.To4() != nil {
+				bits = 32
+			}
+			networks = append(networks, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+			continue
+		}
+		if _, network, err := net.ParseCIDR(entry); err == nil {
+			networks = append(networks, network)
+		} else {
+			log.Printf("[MacNAS API] ignoring invalid MACNAS_TRUSTED_PROXIES entry %q", entry)
+		}
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return networks
+}
+
+func (s *Server) proxyTrusted(ip net.IP) bool {
+	for _, network := range s.trustedProxies {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) requestIP(r *http.Request) string {
+	direct := directRequestIP(r)
+	if direct == nil {
+		return "unknown"
+	}
+	if !s.proxyTrusted(direct) {
+		return direct.String()
+	}
+	var candidate net.IP
+	parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		ip := net.ParseIP(strings.TrimSpace(parts[i]))
+		if ip == nil {
+			continue
+		}
+		candidate = ip
+		if !s.proxyTrusted(ip) {
+			break
+		}
+	}
+	if candidate == nil {
+		return "unknown"
+	}
+	return candidate.String()
+}
+
+func (s *Server) isLoopbackRequest(r *http.Request) bool {
+	return net.ParseIP(s.requestIP(r)).IsLoopback()
+}
+
+func (s *Server) requestIsHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if !s.proxyTrusted(directRequestIP(r)) {
+		return false
+	}
+	proto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
+	return strings.EqualFold(proto, "https")
 }
 
 func (s *Server) authenticateRequest(r *http.Request) (*auth.User, error) {
@@ -199,6 +267,10 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 	if authInitErr != nil {
 		log.Printf("[Auth] failed to init auth manager: %v", authInitErr)
 	}
+	jobsPath := ""
+	if cfgDirErr == nil {
+		jobsPath = filepath.Join(cfgDir, "jobs.json")
+	}
 
 	s := &Server{
 		cfg:             cfg,
@@ -215,10 +287,12 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 		authInitErr:     authInitErr,
 		projectRoot:     projectRoot,
 		allowedOrigins:  configuredOrigins(os.Getenv("MACNAS_ALLOWED_ORIGINS")),
+		trustedProxies:  configuredProxies(os.Getenv("MACNAS_TRUSTED_PROXIES")),
 		uploadSlots:     make(chan struct{}, 2),
 		mux:             http.NewServeMux(),
 		serverCtx:       serverCtx,
 		serverCancel:    serverCancel,
+		jobs:            newJobManager(jobsPath),
 	}
 
 	s.registerRoutes()
@@ -364,7 +438,8 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		if r.TLS != nil {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'")
+		if s.requestIsHTTPS(r) {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		}
 		if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {

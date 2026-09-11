@@ -1,0 +1,202 @@
+package api
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"sync"
+	"time"
+)
+
+type backgroundJob struct {
+	ID        string             `json:"id"`
+	Kind      string             `json:"kind"`
+	Status    string             `json:"status"`
+	Message   string             `json:"message,omitempty"`
+	Error     string             `json:"error,omitempty"`
+	CreatedAt time.Time          `json:"createdAt"`
+	UpdatedAt time.Time          `json:"updatedAt"`
+	cancel    context.CancelFunc `json:"-"`
+}
+
+type jobManager struct {
+	mu   sync.RWMutex
+	jobs map[string]*backgroundJob
+	path string
+}
+
+func newJobManager(storagePath string) *jobManager {
+	m := &jobManager{jobs: make(map[string]*backgroundJob), path: storagePath}
+	data, err := os.ReadFile(storagePath)
+	if err == nil {
+		var saved []*backgroundJob
+		if json.Unmarshal(data, &saved) == nil {
+			now := time.Now().UTC()
+			for _, job := range saved {
+				if job == nil || job.ID == "" {
+					continue
+				}
+				if job.Status == "running" {
+					job.Status = "failed"
+					job.Error = "服务重启，任务执行状态已中断"
+					job.UpdatedAt = now
+				}
+				m.jobs[job.ID] = job
+			}
+		}
+	}
+	m.saveLocked()
+	return m
+}
+
+func (m *jobManager) saveLocked() {
+	if m.path == "" {
+		return
+	}
+	items := make([]*backgroundJob, 0, len(m.jobs))
+	for _, job := range m.jobs {
+		items = append(items, job)
+	}
+	data, err := json.Marshal(items)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(m.path), 0700); err != nil {
+		log.Printf("[MacNAS Jobs] create state directory: %v", err)
+		return
+	}
+	temp := m.path + ".tmp"
+	if err := os.WriteFile(temp, data, 0600); err != nil {
+		log.Printf("[MacNAS Jobs] write state: %v", err)
+		return
+	}
+	if err := os.Chmod(temp, 0600); err != nil {
+		_ = os.Remove(temp)
+		return
+	}
+	if err := os.Rename(temp, m.path); err != nil {
+		_ = os.Remove(temp)
+		log.Printf("[MacNAS Jobs] commit state: %v", err)
+	}
+}
+
+func newJobID() string {
+	var value [12]byte
+	if _, err := rand.Read(value[:]); err == nil {
+		return hex.EncodeToString(value[:])
+	}
+	return hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
+}
+
+func (m *jobManager) add(kind, message string, cancel context.CancelFunc) *backgroundJob {
+	now := time.Now().UTC()
+	job := &backgroundJob{ID: newJobID(), Kind: kind, Status: "running", Message: message, CreatedAt: now, UpdatedAt: now, cancel: cancel}
+	m.mu.Lock()
+	if len(m.jobs) >= 100 {
+		var oldest *backgroundJob
+		for _, candidate := range m.jobs {
+			if candidate.Status != "running" && (oldest == nil || candidate.UpdatedAt.Before(oldest.UpdatedAt)) {
+				oldest = candidate
+			}
+		}
+		if oldest != nil {
+			delete(m.jobs, oldest.ID)
+		}
+	}
+	m.jobs[job.ID] = job
+	m.saveLocked()
+	m.mu.Unlock()
+	return job
+}
+
+func (m *jobManager) finish(id string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job := m.jobs[id]
+	if job == nil {
+		return
+	}
+	job.UpdatedAt = time.Now().UTC()
+	job.cancel = nil
+	if job.Status == "cancelled" {
+		m.saveLocked()
+		return
+	}
+	if err != nil {
+		job.Status = "failed"
+		job.Error = err.Error()
+		m.saveLocked()
+		return
+	}
+	job.Status = "succeeded"
+	m.saveLocked()
+}
+
+func (m *jobManager) cancelJob(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job := m.jobs[id]
+	if job == nil || job.Status != "running" {
+		return false
+	}
+	job.Status = "cancelled"
+	job.UpdatedAt = time.Now().UTC()
+	if job.cancel != nil {
+		job.cancel()
+		job.cancel = nil
+	}
+	m.saveLocked()
+	return true
+}
+
+func (m *jobManager) snapshot(id string) (*backgroundJob, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	job, ok := m.jobs[id]
+	if !ok {
+		return nil, false
+	}
+	copy := *job
+	copy.cancel = nil
+	return &copy, true
+}
+
+func (m *jobManager) list() []*backgroundJob {
+	m.mu.RLock()
+	result := make([]*backgroundJob, 0, len(m.jobs))
+	for _, job := range m.jobs {
+		copy := *job
+		copy.cancel = nil
+		result = append(result, &copy)
+	}
+	m.mu.RUnlock()
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result
+}
+
+func (s *Server) handleJobsList(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{"jobs": s.jobs.list()})
+}
+
+func (s *Server) handleJobGet(w http.ResponseWriter, r *http.Request) {
+	job, ok := s.jobs.snapshot(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "任务不存在")
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) {
+	if !s.jobs.cancelJob(r.PathValue("id")) {
+		writeError(w, http.StatusConflict, "任务不存在或已结束")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+}

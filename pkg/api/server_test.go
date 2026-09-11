@@ -117,6 +117,9 @@ func TestHandlerSetsSecurityHeaders(t *testing.T) {
 			t.Errorf("%s = %q, want %q", header, got, want)
 		}
 	}
+	if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Fatalf("missing restrictive CSP: %q", csp)
+	}
 }
 
 func TestStorageOperationLockRejectsConcurrentMutation(t *testing.T) {
@@ -176,7 +179,7 @@ func TestPrivilegedRoutesRejectRegularUsers(t *testing.T) {
 
 	paths := []string{
 		"/api/vm/start",
-		"/api/docker/containers/example/start",
+		"/api/docker/compose/example",
 		"/api/terminal/files/mkdir",
 		"/api/system/root/password",
 		"/api/system/ssh",
@@ -190,7 +193,7 @@ func TestPrivilegedRoutesRejectRegularUsers(t *testing.T) {
 				Role:    "user",
 				Enabled: true,
 			})
-			if path == "/api/system/ssh" || path == "/api/apps/example/config" {
+			if path == "/api/system/ssh" || path == "/api/apps/example/config" || path == "/api/docker/compose/example" {
 				request.Method = http.MethodGet
 			}
 			request.URL.Path = path
@@ -256,6 +259,49 @@ func TestAuthSetupRejectsNonLoopbackRequest(t *testing.T) {
 
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("remote setup status = %d, want 403", response.Code)
+	}
+}
+
+func TestUntrustedProxyHeadersAreIgnored(t *testing.T) {
+	server := &Server{}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "192.0.2.10:1234"
+	request.Header.Set("X-Forwarded-For", "127.0.0.1")
+	request.Header.Set("X-Forwarded-Proto", "https")
+	if got := server.requestIP(request); got != "192.0.2.10" {
+		t.Fatalf("request IP = %q, want direct peer", got)
+	}
+	if server.requestIsHTTPS(request) {
+		t.Fatal("untrusted proxy must not make request HTTPS")
+	}
+}
+
+func TestTrustedProxyResolvesExternalClient(t *testing.T) {
+	server := &Server{trustedProxies: configuredProxies("127.0.0.1/32")}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "127.0.0.1:1234"
+	request.Header.Set("X-Forwarded-For", "198.51.100.20")
+	request.Header.Set("X-Forwarded-Proto", "https")
+	if got := server.requestIP(request); got != "198.51.100.20" {
+		t.Fatalf("request IP = %q, want forwarded client", got)
+	}
+	if server.isLoopbackRequest(request) {
+		t.Fatal("external forwarded client must not pass loopback check")
+	}
+	if !server.requestIsHTTPS(request) {
+		t.Fatal("trusted proxy HTTPS signal should be honored")
+	}
+}
+
+func TestTrustedProxyWithoutForwardedClientFailsClosed(t *testing.T) {
+	server := &Server{trustedProxies: configuredProxies("127.0.0.1/32")}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "127.0.0.1:1234"
+	if got := server.requestIP(request); got != "unknown" {
+		t.Fatalf("request IP = %q, want unknown without forwarded client", got)
+	}
+	if server.isLoopbackRequest(request) {
+		t.Fatal("missing forwarded client must not pass loopback check")
 	}
 }
 
