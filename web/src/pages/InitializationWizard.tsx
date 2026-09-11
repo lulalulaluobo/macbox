@@ -9,6 +9,7 @@ import {
   HardDrive,
   KeyRound,
   Loader2,
+  Clock3,
   RefreshCw,
   ServerCog,
   ShieldCheck,
@@ -44,6 +45,8 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   const [installCommandCopied, setInstallCommandCopied] = useState(false);
   const [limaInstallJobId, setLimaInstallJobId] = useState<string | null>(null);
   const [limaInstallJob, setLimaInstallJob] = useState<BackgroundJob | null>(null);
+  const [startStartedAt, setStartStartedAt] = useState<number | null>(null);
+  const [startElapsedSeconds, setStartElapsedSeconds] = useState(0);
   const finalizingRef = useRef(false);
 
   const cpuMax = useMemo(() => Math.max(1, Math.min(16, vmConfig?.hostCpus || 16)), [vmConfig]);
@@ -157,6 +160,8 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
         await api.updateVMConfig({ cpus, memory, diskSize });
       }
       const result = await api.startVM();
+      setStartStartedAt(Date.now());
+      setStartElapsedSeconds(0);
       setJob({
         id: result.jobId,
         kind: 'vm.start',
@@ -180,6 +185,8 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
     setError(null);
     finalizingRef.current = false;
     setSSHReady(false);
+    setStartStartedAt(null);
+    setStartElapsedSeconds(0);
     setStep(prerequisites?.ready ? 'config' : 'check');
   };
 
@@ -215,6 +222,26 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   const isStarting = Boolean(jobId) || job?.status === 'running';
   const isInstallingLima = Boolean(limaInstallJobId) || limaInstallJob?.status === 'running';
   const isComplete = job?.status === 'succeeded' && sshReady && !error;
+  const vmIsRunning = overview?.vm.status === 'Running';
+  const elapsedLabel = `${Math.floor(startElapsedSeconds / 60)}分${String(startElapsedSeconds % 60).padStart(2, '0')}秒`;
+  const startProgressDetail = job?.error || (
+    isStarting
+      ? vmIsRunning
+        ? 'Lima 虚拟机已启动，正在等待 SSH 和 MacNAS 服务就绪。请保持 MacNAS 运行。'
+        : '正在启动虚拟机，可能正在下载 Ubuntu、Docker 和 Samba，首次启动通常需要 1–5 分钟。'
+      : job?.message
+  );
+
+  useEffect(() => {
+    if (step !== 'start' || startStartedAt === null || isComplete) return;
+
+    const updateElapsed = () => {
+      setStartElapsedSeconds(Math.max(0, Math.floor((Date.now() - startStartedAt) / 1000)));
+    };
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [isComplete, startStartedAt, step]);
 
   const stepItems: Array<{ key: WizardStep; label: string }> = [
     { key: 'check', label: '环境检查' },
@@ -377,11 +404,24 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
             <div className="space-y-5">
               <div>
                 <h2 className="text-lg font-black text-slate-950 dark:text-white">正在完成初始化</h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">首次启动可能需要几分钟，请保持 MacNAS 运行。</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">MacNAS 正在依次启动虚拟机、配置 SSH 并检查服务，请不要关闭窗口。</p>
               </div>
 
+              {!isComplete && (
+                <div className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800 dark:border-sky-900/70 dark:bg-sky-950/25 dark:text-sky-200" role="status">
+                  <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-sky-500" />
+                  <div className="min-w-0">
+                    <p className="font-bold">后台仍在运行 · 已等待 {elapsedLabel}</p>
+                    <p className="mt-1 leading-5">
+                      {vmIsRunning ? '虚拟机已经启动，正在完成 SSH 和服务探测。' : '虚拟机正在启动，首次安装可能需要下载系统和服务组件。'}
+                      {' '}如果超过 10 分钟仍未完成，再点击“返回并重试”。
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/30">
-                <ProgressRow label="启动 Lima 虚拟机" status={job?.status === 'failed' || job?.status === 'cancelled' ? 'error' : isStarting ? 'running' : job?.status === 'succeeded' ? 'done' : 'waiting'} detail={job?.error || job?.message} />
+                <ProgressRow label="启动 Lima 虚拟机" status={job?.status === 'failed' || job?.status === 'cancelled' ? 'error' : isStarting ? 'running' : job?.status === 'succeeded' ? 'done' : 'waiting'} detail={startProgressDetail} />
                 <ProgressRow label="配置 root 密钥登录" status={isComplete ? 'done' : job?.status === 'succeeded' ? 'running' : 'waiting'} detail={isComplete ? '密码认证已关闭' : undefined} />
                 <ProgressRow label="进入 MacNAS 控制台" status={isComplete ? 'done' : 'waiting'} />
               </div>
