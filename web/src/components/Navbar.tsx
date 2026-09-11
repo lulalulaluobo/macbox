@@ -121,7 +121,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>}
 
-      <nav className="mobile-bottom-nav fixed inset-x-0 bottom-0 z-50 grid grid-cols-5 gap-1 border-t border-slate-200/90 bg-white/96 px-2 pb-[calc(6px+env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-10px_30px_-22px_rgba(36,50,74,0.55)] backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/96 sm:px-[max(1rem,calc((100vw-720px)/2))]" aria-label="主导航">
+      <nav className="mobile-bottom-nav fixed inset-x-0 bottom-0 z-50 grid grid-cols-5 gap-1 border-t border-slate-200/90 bg-white/96 px-2 pb-[calc(6px+env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-10px_30px_-22px_rgba(36,50,74,0.55)] backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/96 sm:px-[max(1rem,calc((100vw-720px)/2))] md:flex md:justify-center" aria-label="主导航">
         {primaryNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -136,10 +136,35 @@ export const Navbar: React.FC<NavbarProps> = ({
           <Settings className="h-[18px] w-[18px]" />
           <span>设置</span>
         </button>
-        <button type="button" onClick={() => setShowMore(true)} className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold transition md:hidden ${(activeTab === 'settings' || activeTab === 'storage_settings' || activeTab === 'smb_sharing' || activeTab === 'terminal') ? 'bg-[#fff0f4] text-[#bd5e78]' : 'text-[#8b9aaa]'}`}>
-          <MoreHorizontal className="h-[19px] w-[19px]" />
-          <span>更多</span>
-        </button>
+        <div className="relative flex">
+          <button type="button" onClick={() => setShowMore(!showMore)} aria-expanded={showMore} className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold transition sm:flex-row sm:gap-2 sm:text-xs ${(activeTab === 'settings' || activeTab === 'storage_settings' || activeTab === 'smb_sharing' || activeTab === 'terminal') ? 'bg-[#fff0f4] text-[#bd5e78] dark:bg-rose-500/15 dark:text-rose-300' : 'text-[#8b9aaa] hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
+            <MoreHorizontal className="h-[19px] w-[19px]" />
+            <span>更多</span>
+          </button>
+          {showMore && (
+            <>
+              <button type="button" className="fixed inset-0 z-[60] hidden cursor-default md:block" onClick={() => setShowMore(false)} aria-label="关闭更多功能" />
+              <div className="absolute bottom-[calc(100%+12px)] right-0 z-[70] hidden w-64 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl md:block dark:border-slate-800 dark:bg-slate-900">
+                {[
+                  { id: 'storage_settings' as const, label: '存储设置', detail: '磁盘、容量与目录直通', icon: HardDrive },
+                  { id: 'smb_sharing' as const, label: 'SMB 共享', detail: '局域网文件共享', icon: Share2 },
+                  { id: 'terminal' as const, label: 'Web 终端', detail: '管理 Linux 虚拟机', icon: Terminal },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button type="button" key={item.id} onClick={() => navigate(item.id)} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-500 dark:bg-sky-500/10"><Icon className="h-[18px] w-[18px]" /></span>
+                      <span className="min-w-0">
+                        <span className="block text-xs font-bold text-slate-900 dark:text-white">{item.label}</span>
+                        <span className="block text-[11px] text-slate-500">{item.detail}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
       </nav>
 
       {showMore && (
