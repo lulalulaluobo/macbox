@@ -57,7 +57,7 @@ export const App: React.FC = () => {
 
   const needsInitialization = overview?.initializationRequired === true || overview?.vm.status === 'NotCreated';
   const navigate = (tab: typeof activeTab) => {
-    if (needsInitialization && tab !== 'dashboard') return;
+    if (needsInitialization && tab !== 'dashboard' && tab !== 'storage_settings') return;
     setActiveTab(tab);
   };
 
@@ -118,6 +118,15 @@ export const App: React.FC = () => {
       document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [currentUser]);
+
+  // The desktop sidecar can take a moment to become reachable after the
+  // window opens. Keep the UI in a connection state until the first complete
+  // overview arrives instead of rendering a misleading empty dashboard.
+  useEffect(() => {
+    if (!currentUser || overview) return;
+    const retryTimer = window.setInterval(() => void refreshData(), 2000);
+    return () => window.clearInterval(retryTimer);
+  }, [currentUser, overview]);
 
   const handleLoginSuccess = (user: NASUser) => {
     setCurrentUser(user);
@@ -209,18 +218,22 @@ export const App: React.FC = () => {
             ? 'pb-[calc(76px+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pt-4'
             : 'pb-32 pt-5 sm:px-6 sm:pb-32 sm:pt-8'
         }`}>
-        {error && (
+        {error && overview && (
           <div className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-300 text-sm flex items-center justify-between">
             <span>警告: {error}</span>
             <button onClick={refreshData} className="underline text-xs hover:text-slate-900 dark:hover:text-white">重新连接</button>
           </div>
         )}
 
-        {activeTab === 'dashboard' && needsInitialization && (
-          <InitializationWizard overview={overview} onRefresh={refreshData} />
+        {activeTab === 'dashboard' && !overview && (
+          <ConnectionState error={error} onRetry={refreshData} />
         )}
 
-        {activeTab === 'dashboard' && !needsInitialization && (
+        {activeTab === 'dashboard' && overview && needsInitialization && (
+          <InitializationWizard overview={overview} onRefresh={refreshData} onOpenStorageSettings={() => setActiveTab('storage_settings')} />
+        )}
+
+        {activeTab === 'dashboard' && overview && !needsInitialization && (
           <Dashboard overview={overview} onRefresh={refreshData} onNavigateTab={navigate} />
         )}
 
@@ -342,3 +355,22 @@ export const App: React.FC = () => {
     </div>
   );
 };
+
+interface ConnectionStateProps {
+  error: string | null;
+  onRetry: () => Promise<void> | void;
+}
+
+const ConnectionState: React.FC<ConnectionStateProps> = ({ error, onRetry }) => (
+  <div className="mx-auto flex min-h-[calc(100dvh-180px)] w-full max-w-2xl items-center justify-center px-2 py-8">
+    <section className="w-full rounded-[28px] border border-sky-100 bg-white p-6 text-center shadow-[0_20px_60px_-42px_rgba(15,118,170,0.45)] dark:border-slate-800 dark:bg-slate-900 sm:p-10">
+      <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${error ? 'bg-rose-50 text-rose-500 dark:bg-rose-500/10 dark:text-rose-300' : 'bg-sky-50 text-sky-500 dark:bg-sky-500/10 dark:text-sky-300'}`}>
+        {error ? <AlertCircle className="h-6 w-6" /> : <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />}
+      </div>
+      <h1 className="mt-5 text-lg font-black text-slate-950 dark:text-white">{error ? '正在等待 MacNAS 后台' : '正在连接 MacNAS'}</h1>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">{error ? '后台服务暂时没有返回状态，系统会自动重试。请确认 MacNAS 后台仍在运行。' : '正在读取虚拟机和本机环境状态…'}</p>
+      {error && <p className="mt-3 break-words text-xs text-rose-600 dark:text-rose-300">{error}</p>}
+      <button type="button" onClick={() => void onRetry()} className="mt-6 inline-flex min-h-11 items-center justify-center rounded-2xl bg-sky-500 px-5 text-sm font-bold text-white shadow-sm shadow-sky-500/20 transition hover:bg-sky-600">重新连接</button>
+    </section>
+  </div>
+);

@@ -21,9 +21,14 @@ func (s *Server) handleVMPrerequisites(w http.ResponseWriter, r *http.Request) {
 	result := map[string]interface{}{
 		"limaInstalled": err == nil,
 		"ready":         err == nil,
+		"storageReady":  true,
 	}
 	if err != nil {
-		result["message"] = "未找到 limactl，请先安装 Lima"
+		result["message"] = "未找到 limactl，请先安装 Lima。安装后点击重新检查。"
+		if runtime.GOOS == "darwin" {
+			result["installCommand"] = "brew install lima"
+			result["installHint"] = "打开终端执行命令；如果尚未安装 Homebrew，请先安装 Homebrew。"
+		}
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
@@ -31,6 +36,13 @@ func (s *Server) handleVMPrerequisites(w http.ResponseWriter, r *http.Request) {
 	result["limaPath"] = path
 	if versionOut, versionErr := exec.CommandContext(r.Context(), path, "--version").Output(); versionErr == nil {
 		result["version"] = strings.TrimSpace(string(versionOut))
+	}
+	if vmStatus, statusErr := s.vmMgr.GetStatusContext(r.Context()); statusErr == nil && vmStatus != nil && vmStatus.Status != "NotCreated" {
+		if diskErr := s.vmMgr.ValidateDataDiskContext(r.Context()); diskErr != nil {
+			result["storageReady"] = false
+			result["storageMessage"] = diskErr.Error()
+			result["ready"] = false
+		}
 	}
 	writeJSON(w, http.StatusOK, result)
 }

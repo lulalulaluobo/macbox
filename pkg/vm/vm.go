@@ -364,6 +364,72 @@ func (m *Manager) EnsureDataDiskContext(ctx context.Context, size string) error 
 	return storage.CreateManagedDiskContext(ctx, diskName, size)
 }
 
+// ValidateDataDiskContext checks the host-side Lima data disk before an
+// existing VM is started. A managed disk can become unusable when an
+// external image is unmounted or moved; letting limactl report that failure
+// later produces a long, opaque initialization error in the UI.
+func (m *Manager) ValidateDataDiskContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return fmt.Errorf("读取虚拟机配置失败: %w", err)
+	}
+	diskName, err := config.NormalizeDataDiskName(cfgSnapshot.VM.DataDiskName)
+	if err != nil {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("读取用户目录失败: %w", err)
+	}
+
+	instanceDir := filepath.Join(home, ".lima", m.instanceName)
+	if _, err := os.Stat(instanceDir); os.IsNotExist(err) {
+		// A first-run VM does not have a managed disk yet; Start will create it.
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("检查 Lima 实例目录失败: %w", err)
+	}
+
+	diskPath := filepath.Join(home, ".lima", "_disks", diskName, "datadisk")
+	info, err := os.Lstat(diskPath)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("Lima 数据盘 %q 不存在，请在存储设置中重新绑定数据盘后再试", diskName)
+	}
+	if err != nil {
+		return fmt.Errorf("检查 Lima 数据盘失败: %w", err)
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, readErr := os.Readlink(diskPath)
+		if readErr != nil {
+			return fmt.Errorf("读取 Lima 数据盘链接失败: %w", readErr)
+		}
+		targetInfo, statErr := os.Stat(diskPath)
+		if os.IsNotExist(statErr) {
+			backupPath := filepath.Join(filepath.Dir(diskPath), "datadisk.internal.bak")
+			backupHint := ""
+			if _, backupErr := os.Stat(backupPath); backupErr == nil {
+				backupHint = "检测到本机仍有内部数据盘备份，可在存储设置中解除外接盘绑定后恢复。"
+			}
+			return fmt.Errorf("外接数据盘镜像不存在: %s。请重新挂载原存储位置后重试；%s", target, backupHint)
+		}
+		if statErr != nil {
+			return fmt.Errorf("检查外接数据盘镜像失败: %w", statErr)
+		}
+		if !targetInfo.Mode().IsRegular() {
+			return fmt.Errorf("Lima 数据盘链接目标不是普通镜像文件: %s", target)
+		}
+		return nil
+	}
+	if info.IsDir() || !info.Mode().IsRegular() {
+		return fmt.Errorf("Lima 数据盘不是可用的普通文件: %s", diskPath)
+	}
+	return nil
+}
+
 // GenerateConfig renders templates/vm/macnas.yaml.tmpl into ~/.macnas/macnas.yaml
 func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 	tmplData, err := os.ReadFile(tmplPath)
@@ -622,6 +688,9 @@ func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 	}
 
 	if instanceExists || status.Status != "NotCreated" {
+		if err := m.ValidateDataDiskContext(ctx); err != nil {
+			return err
+		}
 		out, err := runHostCommand(ctx, "limactl", "start", m.instanceName, "--tty=false")
 		if err != nil {
 			return fmt.Errorf("limactl start failed: %s (%w)", out, err)

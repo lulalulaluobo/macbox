@@ -305,6 +305,10 @@ export interface VMPrerequisites {
   version?: string;
   ready: boolean;
   message?: string;
+  installCommand?: string;
+  installHint?: string;
+  storageReady?: boolean;
+  storageMessage?: string;
 }
 
 export interface BackgroundJob {

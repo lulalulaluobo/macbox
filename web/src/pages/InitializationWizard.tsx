@@ -20,6 +20,7 @@ import { BackgroundJob, SystemOverview, VMConfigInfo, VMPrerequisites } from '..
 interface InitializationWizardProps {
   overview?: SystemOverview;
   onRefresh: () => Promise<void> | void;
+  onOpenStorageSettings?: () => void;
 }
 
 type WizardStep = 'check' | 'config' | 'start';
@@ -27,7 +28,7 @@ type WizardStep = 'check' | 'config' | 'start';
 const INITIAL_USERNAME = 'admin';
 const INITIAL_PASSWORD = 'admin123';
 
-export const InitializationWizard: React.FC<InitializationWizardProps> = ({ overview, onRefresh }) => {
+export const InitializationWizard: React.FC<InitializationWizardProps> = ({ overview, onRefresh, onOpenStorageSettings }) => {
   const [step, setStep] = useState<WizardStep>('check');
   const [prerequisites, setPrerequisites] = useState<VMPrerequisites | null>(null);
   const [vmConfig, setVMConfig] = useState<VMConfigInfo | null>(null);
@@ -40,11 +41,14 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   const [job, setJob] = useState<BackgroundJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sshReady, setSSHReady] = useState(false);
+  const [installCommandCopied, setInstallCommandCopied] = useState(false);
   const finalizingRef = useRef(false);
 
   const cpuMax = useMemo(() => Math.max(1, Math.min(16, vmConfig?.hostCpus || 16)), [vmConfig]);
   const diskMin = Math.max(20, vmConfig?.diskSize || 20);
   const selectedDisk = overview?.storage.selectedDisk?.name || 'Mac 默认存储';
+  const storageReady = prerequisites?.storageReady !== false;
+  const installCommand = prerequisites?.installCommand || 'brew install lima';
 
   const loadRequirements = async () => {
     setLoading(true);
@@ -148,6 +152,16 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
     setStep(prerequisites?.ready ? 'config' : 'check');
   };
 
+  const copyInstallCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(installCommand);
+      setInstallCommandCopied(true);
+      window.setTimeout(() => setInstallCommandCopied(false), 1800);
+    } catch {
+      setError(`无法自动复制，请手动执行：${installCommand}`);
+    }
+  };
+
   const isStarting = Boolean(jobId) || job?.status === 'running';
   const isComplete = job?.status === 'succeeded' && sshReady && !error;
 
@@ -214,9 +228,9 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
                 <StatusCard
                   icon={HardDrive}
                   title="Mac 数据盘"
-                  value={selectedDisk}
-                  detail="初始化后可在更多 → 存储管理中调整"
-                  ok
+                  value={loading ? '检查中…' : storageReady ? selectedDisk : '需要修复'}
+                  detail={prerequisites?.storageMessage || '初始化后可在更多 → 存储管理中调整'}
+                  ok={!loading && storageReady}
                 />
                 <StatusCard
                   icon={KeyRound}
@@ -233,6 +247,31 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
                   ok
                 />
               </div>
+
+              {!loading && prerequisites && !prerequisites.limaInstalled && (
+                <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200">
+                  <p className="font-black">需要先安装 Lima</p>
+                  <p className="leading-6">{prerequisites.message || '请在 Mac 终端安装 Lima，安装完成后返回这里重新检查。'} {prerequisites.installHint}</p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <code className="min-w-0 flex-1 break-all rounded-xl bg-white/80 px-3 py-2 font-mono text-xs dark:bg-slate-900/60">{installCommand}</code>
+                    <button type="button" onClick={() => void copyInstallCommand()} className="min-h-10 shrink-0 rounded-xl border border-amber-300 px-3 text-xs font-bold transition hover:bg-amber-100 dark:border-amber-800 dark:hover:bg-amber-900/40">
+                      {installCommandCopied ? '已复制' : '复制命令'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!loading && prerequisites && prerequisites.storageReady === false && (
+                <div className="space-y-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-800 dark:border-rose-900/70 dark:bg-rose-950/25 dark:text-rose-200" role="alert">
+                  <p className="font-black">数据盘当前无法访问</p>
+                  <p className="break-words leading-6">{prerequisites.storageMessage}</p>
+                  <p className="leading-6">请重新挂载原数据盘，或解除外接盘绑定并恢复本机内部备份；修复前不会启动虚拟机。</p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    {onOpenStorageSettings && <button type="button" onClick={onOpenStorageSettings} className="min-h-10 rounded-xl bg-white px-3 text-xs font-bold text-rose-700 shadow-sm transition hover:bg-rose-100 dark:bg-slate-900 dark:text-rose-200 dark:hover:bg-rose-900/40">打开存储设置</button>}
+                    <button type="button" onClick={() => void loadRequirements()} className="min-h-10 rounded-xl border border-rose-300 px-3 text-xs font-bold transition hover:bg-rose-100 dark:border-rose-800 dark:hover:bg-rose-900/40">重新检查</button>
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <button type="button" onClick={() => void loadRequirements()} disabled={loading} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">

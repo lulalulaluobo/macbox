@@ -85,6 +85,44 @@ func TestGenerateConfigRejectsUnsafeTemplateValues(t *testing.T) {
 	}
 }
 
+func TestValidateDataDiskContext(t *testing.T) {
+	testHome := t.TempDir()
+	t.Setenv("HOME", testHome)
+	mgr := NewManager(config.DefaultConfig())
+
+	// A brand-new instance is allowed to have no data disk yet; Start creates it.
+	if err := mgr.ValidateDataDiskContext(nil); err != nil {
+		t.Fatalf("new instance should not require a data disk: %v", err)
+	}
+
+	instanceDir := filepath.Join(testHome, ".lima", "macnas")
+	diskDir := filepath.Join(testHome, ".lima", "_disks", "macnas-data")
+	if err := os.MkdirAll(diskDir, 0700); err != nil {
+		t.Fatalf("create fake Lima directories: %v", err)
+	}
+	if err := os.MkdirAll(instanceDir, 0700); err != nil {
+		t.Fatalf("create fake instance directory: %v", err)
+	}
+
+	diskPath := filepath.Join(diskDir, "datadisk")
+	if err := os.Symlink(filepath.Join(testHome, "missing.img"), diskPath); err != nil {
+		t.Fatalf("create broken data disk link: %v", err)
+	}
+	if err := mgr.ValidateDataDiskContext(nil); err == nil || !strings.Contains(err.Error(), "外接数据盘镜像不存在") {
+		t.Fatalf("broken data disk should return an actionable error, got: %v", err)
+	}
+
+	if err := os.Remove(diskPath); err != nil {
+		t.Fatalf("remove broken data disk link: %v", err)
+	}
+	if err := os.WriteFile(diskPath, []byte("test"), 0600); err != nil {
+		t.Fatalf("create regular data disk: %v", err)
+	}
+	if err := mgr.ValidateDataDiskContext(nil); err != nil {
+		t.Fatalf("regular data disk should be accepted: %v", err)
+	}
+}
+
 func TestVMActionsAreSerialized(t *testing.T) {
 	mgr := NewManager(config.DefaultConfig())
 	if !mgr.BeginVMAction("starting") {
