@@ -38,6 +38,21 @@ fn config_port() -> u16 {
         .unwrap_or(DEFAULT_PORT)
 }
 
+fn desktop_command_path() -> String {
+    let mut paths = vec![
+        "/opt/homebrew/bin".to_string(),
+        "/usr/local/bin".to_string(),
+        "/usr/bin".to_string(),
+        "/bin".to_string(),
+        "/usr/sbin".to_string(),
+        "/sbin".to_string(),
+    ];
+    if let Some(path) = env::var_os("PATH") {
+        paths.push(path.to_string_lossy().into_owned());
+    }
+    paths.join(":")
+}
+
 fn backend_ready(port: u16) -> bool {
     let mut stream = match TcpStream::connect_timeout(
         &([127, 0, 0, 1], port).into(),
@@ -88,6 +103,7 @@ fn main() {
                     .sidecar("macnas")
                     .map_err(|error| format!("无法定位 MacNAS 后端: {error}"))?
                     .args(["--host", "127.0.0.1"])
+                    .env("PATH", desktop_command_path())
                     .spawn()
                     .map_err(|error| format!("无法启动 MacNAS 后端: {error}"))?;
                 child = Some(spawned);

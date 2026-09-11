@@ -8,10 +8,13 @@ interface LoginPageProps {
   onLoginSuccess: (user: NASUser) => void;
 }
 
+const INITIAL_ADMIN_USERNAME = 'admin';
+const INITIAL_ADMIN_PASSWORD = 'admin123';
+
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const { isDark, toggleTheme } = useTheme();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState(INITIAL_ADMIN_USERNAME);
+  const [password, setPassword] = useState(INITIAL_ADMIN_PASSWORD);
   const [rememberMe, setRememberMe] = useState(false);
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -20,7 +23,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
   useEffect(() => {
     api.getAuthStatus()
-      .then((res) => setSetupRequired(res.setupRequired))
+      .then((res) => {
+        setSetupRequired(res.setupRequired);
+        if (res.setupRequired) {
+          setUsername(INITIAL_ADMIN_USERNAME);
+          setPassword(INITIAL_ADMIN_PASSWORD);
+        }
+      })
       .catch(() => setSetupRequired(false));
   }, []);
 
@@ -35,13 +44,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setError(null);
     try {
       if (setupRequired) {
-        if (password.length < 12) {
-          throw new Error('首次初始化管理员密码至少需要 12 个字符');
-        }
-        await api.setupAdmin(username.trim(), password);
+        await api.setupAdmin(INITIAL_ADMIN_USERNAME, INITIAL_ADMIN_PASSWORD);
         setSetupRequired(false);
       }
-      const res = await api.login(username.trim(), password, rememberMe);
+      const loginUsername = setupRequired ? INITIAL_ADMIN_USERNAME : username.trim();
+      const loginPassword = setupRequired ? INITIAL_ADMIN_PASSWORD : password;
+      const res = await api.login(loginUsername, loginPassword, rememberMe);
       onLoginSuccess(res.user);
     } catch (err: any) {
       setError(err.message || '登录失败，请检查用户名或密码');
@@ -105,7 +113,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
           {setupRequired && (
             <div className="mb-6 rounded-xl border border-sky-200 bg-sky-50 p-3.5 text-xs text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-              首次使用请创建管理员账号。为安全起见，初始化只允许在运行 MacNAS 的 Mac 本机完成。
+              首次使用将初始化唯一的管理员账号：admin，初始密码：admin123。初始化只允许在运行 MacNAS 的 Mac 本机完成，进入后可在设置中修改控制台密码。
             </div>
           )}
 
@@ -113,7 +121,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                账号名称
+                {setupRequired ? '初始管理员账号' : '账号名称'}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -123,8 +131,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="请输入用户名 (如 admin)"
-                  className="min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-400 transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-800/60 dark:text-white"
+                  placeholder="请输入用户名"
+                  readOnly={Boolean(setupRequired)}
+                  className={`min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-400 transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-800/60 dark:text-white ${setupRequired ? 'cursor-default opacity-80' : ''}`}
                   autoFocus
                   required
                 />
@@ -133,7 +142,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                登录密码
+                {setupRequired ? '初始管理员密码' : '登录密码'}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -144,7 +153,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="请输入密码"
-                  className="min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pl-10 pr-10 text-sm text-slate-900 placeholder-slate-400 transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-800/60 dark:text-white"
+                  readOnly={Boolean(setupRequired)}
+                  className={`min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pl-10 pr-10 text-sm text-slate-900 placeholder-slate-400 transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-800/60 dark:text-white ${setupRequired ? 'cursor-default opacity-80' : ''}`}
                   required
                 />
                 <button
@@ -175,10 +185,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               className="mt-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#ee8b2b] text-sm font-bold text-white shadow-md shadow-[#ee8b2b]/25 transition hover:bg-[#d97706] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? (
-                <span>正在验证登录...</span>
+                <span>{setupRequired ? '正在初始化…' : '正在验证登录…'}</span>
               ) : (
                 <>
-                  <span>{setupRequired ? '创建管理员并进入' : '进入管理控制台'}</span>
+                  <span>{setupRequired ? '初始化并进入控制台' : '进入管理控制台'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}

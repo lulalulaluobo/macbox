@@ -7,6 +7,7 @@ import { Apps } from './pages/Apps';
 import { TerminalPage } from './pages/TerminalPage';
 import { Settings } from './pages/Settings';
 import { StorageSettings } from './pages/storage/StorageSettings';
+import { InitializationWizard } from './pages/InitializationWizard';
 import { LoginPage } from './pages/LoginPage';
 import { SystemOverview, NASUser } from './types';
 import { api } from './api';
@@ -53,6 +54,18 @@ export const App: React.FC = () => {
       setError(err.message || '无法连接到 MacNAS 后端服务');
     }
   };
+
+  const needsInitialization = overview?.vm.status === 'NotCreated';
+  const navigate = (tab: typeof activeTab) => {
+    if (needsInitialization && tab !== 'dashboard') return;
+    setActiveTab(tab);
+  };
+
+  useEffect(() => {
+    if (needsInitialization && activeTab !== 'dashboard') {
+      setActiveTab('dashboard');
+    }
+  }, [needsInitialization, activeTab]);
 
   useEffect(() => {
     checkAuth();
@@ -173,7 +186,7 @@ export const App: React.FC = () => {
     <div className={`sora-app-shell flex flex-col bg-slate-50 dark:bg-[#090d16] text-slate-900 dark:text-slate-100 transition-colors duration-200 ${activeTab === 'terminal' ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'}`}>
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={navigate}
         vmStatus={overview?.vm}
         dockerReady={overview?.docker.ready}
         primaryIP={overview?.system.primaryIP}
@@ -203,12 +216,12 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'dashboard' && (
-          <Dashboard
-            overview={overview}
-            onRefresh={refreshData}
-            onNavigateTab={setActiveTab}
-          />
+        {activeTab === 'dashboard' && needsInitialization && (
+          <InitializationWizard overview={overview} onRefresh={refreshData} />
+        )}
+
+        {activeTab === 'dashboard' && !needsInitialization && (
+          <Dashboard overview={overview} onRefresh={refreshData} onNavigateTab={navigate} />
         )}
 
         {activeTab === 'storage' && (

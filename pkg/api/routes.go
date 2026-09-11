@@ -10,6 +10,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/system/service/uninstall", s.adminOnly(s.handleSystemServiceUninstall))
 
 	// 2. VM lifecycle & Specs
+	s.mux.HandleFunc("GET /api/vm/prerequisites", s.adminOnly(s.handleVMPrerequisites))
 	s.mux.HandleFunc("POST /api/vm/start", s.adminOnly(s.handleVMStart))
 	s.mux.HandleFunc("POST /api/vm/stop", s.adminOnly(s.handleVMStop))
 	s.mux.HandleFunc("POST /api/vm/restart", s.adminOnly(s.handleVMRestart))
@@ -107,6 +108,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/system/root/password", s.adminOnly(s.handleUpdateRootPassword))
 	s.mux.HandleFunc("GET /api/system/ssh", s.adminOnly(s.handleGetSSHConfig))
 	s.mux.HandleFunc("POST /api/system/ssh", s.adminOnly(s.handleUpdateSSHConfig))
+	s.mux.HandleFunc("POST /api/system/ssh/bootstrap", s.adminOnly(s.handleBootstrapSSH))
 	s.mux.HandleFunc("POST /api/system/ssh/toggle", s.adminOnly(s.handleToggleSSH))
 	s.mux.HandleFunc("POST /api/system/ssh/keys/generate", s.adminOnly(s.handleGenerateSSHRootKey))
 	s.mux.HandleFunc("GET /api/system/ssh/keys", s.adminOnly(s.handleGetSSHAuthorizedKeys))

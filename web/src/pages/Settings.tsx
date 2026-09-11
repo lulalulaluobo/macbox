@@ -90,7 +90,7 @@ export const Settings: React.FC<SettingsProps> = ({
     status: 'running',
     port: 22,
     permitRootLogin: false,
-    passwordAuthentication: true,
+    passwordAuthentication: false,
   });
   const [sshLoading, setSSHLoading] = useState(false);
   const [sshSaving, setSSHSaving] = useState(false);
@@ -332,7 +332,11 @@ export const Settings: React.FC<SettingsProps> = ({
   const handleSaveSSHConfig = async () => {
     setSSHSaving(true);
     try {
-      await api.updateSSHConfig(sshConfig);
+      // MacNAS keeps SSH password authentication disabled. The console/root
+      // passwords are local VM credentials and are never used for SSH.
+      const safeSSHConfig = { ...sshConfig, passwordAuthentication: false };
+      await api.updateSSHConfig(safeSSHConfig);
+      setSSHConfig(safeSSHConfig);
       setAlertMsg({ type: 'success', text: 'SSH 配置已成功保存并即时生效！' });
       await loadData();
     } catch (err: any) {
@@ -832,7 +836,7 @@ export const Settings: React.FC<SettingsProps> = ({
             <div>
               <h3 className="text-lg font-bold text-white">Root 超级管理员密码重置</h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                设置 Linux 虚拟机的 root 账号独立登录密码。设置后，您可以在终端中直接通过 <code>su -</code> 切换，或在开启 SSH Root 登录后直接使用 root 账号远程登录 NAS。
+                设置 Linux 虚拟机内部的 root 账号密码，可用于终端中的 <code>su -</code> 切换。SSH 始终关闭密码认证，远程连接只能使用 Root SSH 密钥。
               </p>
             </div>
           </div>
@@ -971,30 +975,18 @@ export const Settings: React.FC<SettingsProps> = ({
                 </button>
               </div>
 
-              {/* 2. Password Authentication toggle */}
+              {/* 2. Password Authentication is intentionally immutable */}
               <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-4">
                 <div>
                   <div className="flex items-center space-x-2">
-                    <span className="text-sm font-bold text-white">允许密码认证登录</span>
+                    <span className="text-sm font-bold text-white">SSH 密码认证</span>
                     <span className="text-[10px] font-mono text-slate-400">(PasswordAuthentication)</span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                    允许通过用户名和密码验证登录 SSH；如关闭则仅允许 SSH 公钥密钥对免密认证。
+                    MacNAS 固定关闭 SSH 密码认证，仅使用 SSH 公钥登录 root；控制台和 root 密码不作为 SSH 凭据。
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSSHConfig({ ...sshConfig, passwordAuthentication: !sshConfig.passwordAuthentication })}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    sshConfig.passwordAuthentication ? 'bg-sky-500' : 'bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                      sshConfig.passwordAuthentication ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
+                <span className="shrink-0 rounded-full bg-emerald-500/15 px-3 py-1.5 text-xs font-bold text-emerald-300">已关闭</span>
               </div>
 
               {/* 3. Port */}
@@ -1057,45 +1049,10 @@ export const Settings: React.FC<SettingsProps> = ({
                   </div>
                 )}
 
-                {/* Root Password Connect Command */}
-                {sshConfig.permitRootLogin && (
-                  <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-2">
-                    <div className="flex justify-between items-center text-amber-400 font-sans text-xs font-semibold">
-                      <span>👑 Root 密码远程连接:</span>
-                      <button
-                        onClick={() => handleCopySSHCommand(`ssh -p ${sshConfig.port} root@${primaryIP}`)}
-                        className="p-1 rounded hover:bg-amber-500/20 text-amber-300"
-                        title="复制命令"
-                      >
-                        {copiedSSH ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                    <code className="text-white block bg-black/60 p-2.5 rounded-xl break-all">
-                      ssh -p {sshConfig.port} root@{primaryIP}
-                    </code>
-                  </div>
-                )}
-
-                {/* Normal User Connect Command */}
-                <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/20 space-y-2">
-                  <div className="flex justify-between items-center text-sky-400 font-sans text-xs font-semibold">
-                    <span>👤 普通用户远程连接 (推荐):</span>
-                    <button
-                      onClick={() => handleCopySSHCommand(`ssh -p ${sshConfig.port} luluen@${primaryIP}`)}
-                      className="p-1 rounded hover:bg-sky-500/20 text-sky-300"
-                      title="复制命令"
-                    >
-                      {copiedSSH ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                  <code className="text-white block bg-black/60 p-2.5 rounded-xl break-all">
-                    ssh -p {sshConfig.port} luluen@{primaryIP}
-                  </code>
-                </div>
               </div>
 
               <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
-                提示: 在 Mac 终端、Windows PowerShell 或第三方 SSH 工具中运行上述命令即可直接接入 MacNAS Linux 虚拟机。
+                提示: 先生成或导入 Root SSH 公钥，再使用上面的密钥命令连接 MacNAS Linux 虚拟机。
               </p>
             </div>
           </div>

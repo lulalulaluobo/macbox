@@ -279,6 +279,17 @@ func (s *Server) handleGetSSHConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cfg)
 }
 
+func (s *Server) handleBootstrapSSH(w http.ResponseWriter, r *http.Request) {
+	if err := s.sshMgr.BootstrapRootKeyOnly(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("初始化 SSH 失败: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "SSH 已配置为 root 密钥登录，密码认证已关闭",
+	})
+}
+
 func (s *Server) handleUpdateSSHConfig(w http.ResponseWriter, r *http.Request) {
 	var req system.SSHConfig
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

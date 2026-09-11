@@ -298,6 +298,24 @@ export interface VMConfigInfo {
   diskDescription: string;
 }
 
+export interface VMPrerequisites {
+  limaInstalled: boolean;
+  limaPath?: string;
+  version?: string;
+  ready: boolean;
+  message?: string;
+}
+
+export interface BackgroundJob {
+  id: string;
+  kind: string;
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled' | string;
+  message?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FileItem {
   name: string;
   path: string;
@@ -388,4 +406,3 @@ export interface UpdateNASUserRequest {
   enabled?: boolean;
   newPassword?: string;
 }
-

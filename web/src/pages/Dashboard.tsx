@@ -52,16 +52,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     window.setTimeout(() => setMessage(null), 3200);
   };
 
+  const waitForJob = async (jobId: string) => {
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      const job = await api.getJob(jobId);
+      if (job.status === 'succeeded') return;
+      if (job.status === 'failed' || job.status === 'cancelled') {
+        throw new Error(job.error || (job.status === 'cancelled' ? '操作已取消' : '虚拟机操作失败'));
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    throw new Error('虚拟机操作超时，请查看任务状态或稍后重试');
+  };
+
   const handleVMAction = async (action: 'start' | 'stop' | 'restart') => {
     setActionLoading(action);
     try {
-      if (action === 'start') await api.startVM();
-      if (action === 'stop') await api.stopVM();
-      if (action === 'restart') await api.restartVM();
+      let result: { message: string; jobId: string };
+      if (action === 'start') result = await api.startVM();
+      else if (action === 'stop') result = await api.stopVM();
+      else result = await api.restartVM();
       notify(action === 'start' ? '正在启动服务' : action === 'stop' ? '正在停止服务' : '正在重启虚拟机');
-      window.setTimeout(onRefresh, 900);
+      await waitForJob(result.jobId);
+      notify(action === 'start' ? '服务已启动' : action === 'stop' ? '服务已停止' : '虚拟机已重启');
+      await onRefresh();
     } catch (err: any) {
       notify(`操作失败：${err.message}`);
+      await onRefresh();
     } finally {
       setActionLoading(null);
     }

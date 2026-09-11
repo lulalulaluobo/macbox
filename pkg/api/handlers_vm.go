@@ -3,16 +3,38 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/shirou/gopsutil/v3/mem"
 	"log"
 	"net/http"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
+
+	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 // VM Handlers
+func (s *Server) handleVMPrerequisites(w http.ResponseWriter, r *http.Request) {
+	path, err := exec.LookPath("limactl")
+	result := map[string]interface{}{
+		"limaInstalled": err == nil,
+		"ready":         err == nil,
+	}
+	if err != nil {
+		result["message"] = "未找到 limactl，请先安装 Lima"
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+
+	result["limaPath"] = path
+	if versionOut, versionErr := exec.CommandContext(r.Context(), path, "--version").Output(); versionErr == nil {
+		result["version"] = strings.TrimSpace(string(versionOut))
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 	if !s.vmMgr.BeginVMAction("starting") {
 		writeError(w, http.StatusConflict, "已有虚拟机操作正在进行")

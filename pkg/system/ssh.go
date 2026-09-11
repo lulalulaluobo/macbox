@@ -71,7 +71,7 @@ func (sm *SSHManager) GetConfig(ctx context.Context) (*SSHConfig, error) {
 		Port:                   22,
 		SSHLocalPort:           0,
 		PermitRootLogin:        false,
-		PasswordAuthentication: true,
+		PasswordAuthentication: false,
 		PubkeyAuthentication:   true,
 		AuthorizedKeyCount:     0,
 	}
@@ -113,7 +113,7 @@ func (sm *SSHManager) GetConfig(ctx context.Context) (*SSHConfig, error) {
 						cfg.Port = p
 					}
 				case "permitrootlogin":
-					cfg.PermitRootLogin = (val == "yes")
+					cfg.PermitRootLogin = (val == "yes" || val == "prohibit-password" || val == "without-password")
 				case "passwordauthentication":
 					cfg.PasswordAuthentication = (val == "yes")
 				case "pubkeyauthentication":
@@ -131,7 +131,7 @@ func (sm *SSHManager) GetConfig(ctx context.Context) (*SSHConfig, error) {
 				val := strings.ToLower(parts[1])
 				switch key {
 				case "permitrootlogin":
-					cfg.PermitRootLogin = (val == "yes")
+					cfg.PermitRootLogin = (val == "yes" || val == "prohibit-password" || val == "without-password")
 				case "passwordauthentication":
 					cfg.PasswordAuthentication = (val == "yes")
 				case "pubkeyauthentication":
@@ -167,13 +167,14 @@ func (sm *SSHManager) UpdateConfig(ctx context.Context, newCfg SSHConfig) error 
 
 	permitRoot := "no"
 	if newCfg.PermitRootLogin {
-		permitRoot = "yes"
+		// Root access is deliberately key-only. Keeping password login disabled
+		// avoids turning the fixed bootstrap account into a network credential.
+		permitRoot = "prohibit-password"
 	}
 
+	// MacNAS never enables SSH password authentication. The console account
+	// password is not an SSH credential; remote administration is key-only.
 	passwordAuth := "no"
-	if newCfg.PasswordAuthentication {
-		passwordAuth = "yes"
-	}
 
 	pubkeyAuth := "no"
 	if newCfg.PubkeyAuthentication {
@@ -200,6 +201,19 @@ AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2
 	}
 
 	return nil
+}
+
+// BootstrapRootKeyOnly applies the first-run SSH policy: root may connect with
+// an authorized key, while password authentication remains disabled. It does
+// not add a key; the operator can generate or import one from Settings.
+func (sm *SSHManager) BootstrapRootKeyOnly(ctx context.Context) error {
+	return sm.UpdateConfig(ctx, SSHConfig{
+		Enabled:                true,
+		Port:                   22,
+		PermitRootLogin:        true,
+		PasswordAuthentication: false,
+		PubkeyAuthentication:   true,
+	})
 }
 
 // ToggleService starts or stops the SSH service

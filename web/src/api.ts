@@ -1,4 +1,4 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult, NASUser, AuthResponse, CreateNASUserRequest, UpdateNASUserRequest } from './types';
+import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, VMPrerequisites, BackgroundJob, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult, NASUser, AuthResponse, CreateNASUserRequest, UpdateNASUserRequest } from './types';
 
 const BASE_URL = '/api';
 
@@ -30,9 +30,10 @@ export const api = {
   getOverview: () => fetchJSON<SystemOverview>(`${BASE_URL}/system/status`),
 
   // VM Controls
-  startVM: () => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/vm/start`, { method: 'POST' }),
-  stopVM: () => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/vm/stop`, { method: 'POST' }),
-  restartVM: () => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/vm/restart`, { method: 'POST' }),
+  getVMPrerequisites: () => fetchJSON<VMPrerequisites>(`${BASE_URL}/vm/prerequisites`),
+  startVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/start`, { method: 'POST' }),
+  stopVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/stop`, { method: 'POST' }),
+  restartVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/restart`, { method: 'POST' }),
 
   // Storage
   getDisks: () => fetchJSON<{
@@ -235,6 +236,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(cfg),
   }),
+  getJob: (id: string) => fetchJSON<BackgroundJob>(`${BASE_URL}/jobs/${encodeURIComponent(id)}`),
 
   // Web Terminal & File System
   listFiles: (path?: string, offset = 0, limit = 300) => fetchJSON<{ status: string; path: string; items: FileItem[]; hasMore: boolean; nextOffset: number }>(
@@ -354,6 +356,9 @@ export const api = {
 
   // SSH Management
   getSSHConfig: () => fetchJSON<SSHConfig>(`${BASE_URL}/system/ssh`),
+  bootstrapSSH: () => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/ssh/bootstrap`, {
+    method: 'POST',
+  }),
   updateSSHConfig: (cfg: SSHConfig) =>
     fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/ssh`, {
       method: 'POST',

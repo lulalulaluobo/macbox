@@ -16,13 +16,13 @@ func TestFreshManagerRequiresExplicitSetup(t *testing.T) {
 	if !mgr.NeedsSetup() {
 		t.Fatal("fresh manager should require setup")
 	}
-	if _, _, err := mgr.Login("admin", "admin123", false); err == nil {
-		t.Fatal("known default credentials must not work on a fresh manager")
+	if _, _, err := mgr.Login(InitialAdminUsername, InitialAdminPassword, false); err == nil {
+		t.Fatal("bootstrap credentials must not work before setup")
 	}
 
 	user, err := mgr.CreateInitialAdmin(CreateUserRequest{
-		Username: "admin",
-		Password: "a-strong-password-123",
+		Username: InitialAdminUsername,
+		Password: InitialAdminPassword,
 		Role:     "user",
 	})
 	if err != nil {
@@ -30,6 +30,9 @@ func TestFreshManagerRequiresExplicitSetup(t *testing.T) {
 	}
 	if user.Role != "admin" || mgr.NeedsSetup() {
 		t.Fatalf("initial user = %#v, setupRequired = %v", user, mgr.NeedsSetup())
+	}
+	if _, _, err := mgr.Login(InitialAdminUsername, InitialAdminPassword, false); err != nil {
+		t.Fatalf("bootstrap credentials should login after setup: %v", err)
 	}
 	if _, err := mgr.CreateInitialAdmin(CreateUserRequest{
 		Username: "second",
@@ -39,14 +42,32 @@ func TestFreshManagerRequiresExplicitSetup(t *testing.T) {
 	}
 }
 
+func TestInitialAdminCredentialsAreFixed(t *testing.T) {
+	for _, req := range []CreateUserRequest{
+		{Username: "operator", Password: InitialAdminPassword},
+		{Username: InitialAdminUsername, Password: "another-password"},
+	} {
+		mgr, err := NewManager(t.TempDir())
+		if err != nil {
+			t.Fatalf("NewManager() error = %v", err)
+		}
+		if _, err := mgr.CreateInitialAdmin(req); err == nil {
+			t.Fatalf("CreateInitialAdmin accepted non-fixed credentials: %#v", req)
+		}
+		if !mgr.NeedsSetup() {
+			t.Fatalf("failed setup changed manager state for %#v", req)
+		}
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	mgr, err := NewManager(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	if _, err := mgr.CreateInitialAdmin(CreateUserRequest{
-		Username: "admin",
-		Password: "a-strong-password-123",
+		Username: InitialAdminUsername,
+		Password: InitialAdminPassword,
 	}); err != nil {
 		t.Fatalf("CreateInitialAdmin() error = %v", err)
 	}
@@ -56,7 +77,7 @@ func TestLoginRateLimit(t *testing.T) {
 			t.Fatal("wrong password should fail")
 		}
 	}
-	if _, _, err := mgr.LoginFrom("admin", "a-strong-password-123", false, "127.0.0.1"); !errors.Is(err, ErrTooManyLoginAttempts) {
+	if _, _, err := mgr.LoginFrom(InitialAdminUsername, InitialAdminPassword, false, "127.0.0.1"); !errors.Is(err, ErrTooManyLoginAttempts) {
 		t.Fatalf("expected rate limit error, got %v", err)
 	}
 }
@@ -93,8 +114,8 @@ func TestNewPasswordsUseBcryptAndPasswordChangeRevokesSessions(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	user, err := mgr.CreateInitialAdmin(CreateUserRequest{
-		Username: "admin",
-		Password: "a-strong-password-123",
+		Username: InitialAdminUsername,
+		Password: InitialAdminPassword,
 	})
 	if err != nil {
 		t.Fatalf("CreateInitialAdmin() error = %v", err)
@@ -103,11 +124,11 @@ func TestNewPasswordsUseBcryptAndPasswordChangeRevokesSessions(t *testing.T) {
 	if !strings.HasPrefix(mgr.users[user.ID].PasswordHash, "$2") {
 		t.Fatalf("new password hash = %q, want bcrypt hash", mgr.users[user.ID].PasswordHash)
 	}
-	token, _, err := mgr.Login("admin", "a-strong-password-123", false)
+	token, _, err := mgr.Login(InitialAdminUsername, InitialAdminPassword, false)
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	if err := mgr.ChangePassword(user.ID, "a-strong-password-123", "a-different-password-456"); err != nil {
+	if err := mgr.ChangePassword(user.ID, InitialAdminPassword, "a-different-password-456"); err != nil {
 		t.Fatalf("ChangePassword() error = %v", err)
 	}
 	if _, err := mgr.ValidateToken(token); err == nil {
@@ -122,8 +143,8 @@ func TestUpdateUserValidationIsAtomic(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	user, err := mgr.CreateInitialAdmin(CreateUserRequest{
-		Username: "admin",
-		Password: "a-strong-password-123",
+		Username: InitialAdminUsername,
+		Password: InitialAdminPassword,
 	})
 	if err != nil {
 		t.Fatalf("CreateInitialAdmin() error = %v", err)

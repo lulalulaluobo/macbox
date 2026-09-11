@@ -55,8 +55,8 @@ provision:
       curl -fsSL https://get.docker.com | sh
     fi
 
-    if ! command -v smbd >/dev/null 2>&1; then
-      apt-get update && apt-get install -y samba smbclient
+    if ! command -v smbd >/dev/null 2>&1 || ! command -v sshd >/dev/null 2>&1; then
+      apt-get update && apt-get install -y samba smbclient openssh-server
     fi
 
     # 2. 准备 /data 挂载与目录结构
@@ -163,6 +163,23 @@ provision:
 
     systemctl restart smbd nmbd || true
     systemctl restart docker || true
+
+    # 5. SSH is root-only for remote administration and never accepts a password.
+    # Do not use AllowUsers here: Lima's internal management account also relies
+    # on this sshd and must remain available to limactl shell.
+    mkdir -p /etc/ssh/sshd_config.d /root/.ssh
+    chmod 700 /root/.ssh
+    cat <<'SSH_EOF' > /etc/ssh/sshd_config.d/99-macnas.conf
+    Port 22
+    PermitRootLogin prohibit-password
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    ChallengeResponseAuthentication no
+    PubkeyAuthentication yes
+    AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2
+    SSH_EOF
+    systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
+    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
 
 probes:
 - script: |
