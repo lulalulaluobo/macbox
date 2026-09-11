@@ -72,15 +72,15 @@ provision:
     # 2. 准备 /data 挂载与目录结构
     {{if .DataDiskName}}
     if [ -d {{shellQuote (printf "/mnt/lima-%s" .DataDiskName)}} ]; then
-      mkdir -p {{shellQuote (printf "/mnt/lima-%s/media" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/files" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/downloads" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/photos" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/appdata" .DataDiskName)}}
+      mkdir -p {{shellQuote (printf "/mnt/lima-%s/media" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/files" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/downloads" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/photos" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/appdata/compose" .DataDiskName)}}
       chmod 0770 {{shellQuote (printf "/mnt/lima-%s" .DataDiskName)}} || true
       ln -sfn {{shellQuote (printf "/mnt/lima-%s" .DataDiskName)}} /data
     else
-      mkdir -p /data/media /data/files /data/downloads /data/photos /data/appdata
+      mkdir -p /data/media /data/files /data/downloads /data/photos /data/appdata/compose
       chmod 0770 /data || true
     fi
     {{else}}
-    mkdir -p /data/media /data/files /data/downloads /data/photos /data/appdata
+    mkdir -p /data/media /data/files /data/downloads /data/photos /data/appdata/compose
     chmod 0770 /data || true
     {{end}}
 

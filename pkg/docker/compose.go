@@ -83,7 +83,12 @@ func (c *Client) listComposeProjects(ctx context.Context, containers []Container
 	}
 
 	// 2. Discover offline projects in /data/appdata/compose/
-	findOut, err := c.vmMgr.Exec(ctx, "find", "/data/appdata/compose", "-maxdepth", "2", "-type", "f", "(", "-name", "compose.yaml", "-o", "-name", "docker-compose.yml", ")")
+	// A fresh NAS data volume has no user Compose projects yet. Keep the
+	// discovery command successful for that empty state instead of marking a
+	// healthy Docker daemon as degraded because find cannot open a missing
+	// optional directory.
+	findScript := "if [ -d /data/appdata/compose ]; then find /data/appdata/compose -maxdepth 2 -type f -name compose.yaml -o -name docker-compose.yml; fi"
+	findOut, err := c.vmMgr.Exec(ctx, "sh", "-c", findScript)
 	if err != nil {
 		return nil, fmt.Errorf("扫描 Compose 配置目录失败: %w", err)
 	}
