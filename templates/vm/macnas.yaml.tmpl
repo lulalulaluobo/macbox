@@ -3,6 +3,16 @@
 
 minimumLimaVersion: 2.0.0
 
+# Keep the internal Lima management identity independent from the macOS user.
+# This account is only used by limactl; remote administration remains root
+# key-only and the MacNAS console account remains admin.
+user:
+  name: macnasctl
+  comment: MacNAS Lima management
+  home: /home/macnasctl
+  shell: /bin/bash
+  passwordlessSudo: true
+
 vmType: "vz"
 vmOpts:
   vz:
@@ -111,8 +121,11 @@ provision:
     cat <<'SERVICE_EOF' > /etc/systemd/system/macnas-mounts.service
     [Unit]
     Description=MacNAS VirtioFS bind mounts
-    After=cloud-init.target cloud-final.service local-fs.target docker.service
-    Wants=cloud-final.service
+    # Do not order this multi-user service after cloud-init.target/cloud-final.
+    # Ubuntu's cloud-init target is itself ordered after multi-user.target;
+    # adding the reverse edge creates a boot cycle and leaves limactl start
+    # waiting forever for the guest readiness marker.
+    After=local-fs.target docker.service
 
     [Service]
     Type=oneshot

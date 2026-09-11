@@ -1281,7 +1281,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   type="text"
                   value={newMountPath}
                   onChange={(e) => setNewMountPath(e.target.value)}
-                  placeholder="例如: /Users/luluen/Movies"
+                  placeholder="例如: /Users/yourname/Movies"
                   required
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono placeholder:text-slate-400 focus:outline-none focus:border-sky-500 transition"
                 />

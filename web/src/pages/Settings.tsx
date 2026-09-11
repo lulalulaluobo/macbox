@@ -733,7 +733,7 @@ export const Settings: React.FC<SettingsProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {users.map((u) => {
               const isRoot = u.isRoot || u.username === 'root';
-              const isCurrent = u.username === 'luluen';
+              const isCurrent = u.uid === 501;
 
               return (
                 <div
@@ -1244,7 +1244,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 <div className="flex items-center space-x-2">
                   <span className="font-bold text-sm text-white">以普通用户身份登录 (安全防误删)</span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-mono font-semibold">
-                    luluen / $
+                    Lima 管理用户 / $
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed">

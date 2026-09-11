@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/luluen/mac-nas/pkg/vm"
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
@@ -26,8 +27,18 @@ func (s *Server) handleVMPrerequisites(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		result["message"] = "未找到 limactl，请先安装 Lima。安装后点击重新检查。"
 		if runtime.GOOS == "darwin" {
-			result["installCommand"] = "brew install lima"
-			result["installHint"] = "打开终端执行命令；如果尚未安装 Homebrew，请先安装 Homebrew。"
+			if brewPath, brewInstalled := vm.FindHomebrew(); brewInstalled {
+				result["brewInstalled"] = true
+				result["brewPath"] = brewPath
+				result["canInstall"] = true
+				result["installCommand"] = "brew install lima"
+				result["installHint"] = "可直接点击安装，MacNAS 将通过本机 Homebrew 安装 Lima。"
+			} else {
+				result["brewInstalled"] = false
+				result["canInstall"] = false
+				result["installCommand"] = `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+				result["installHint"] = "未检测到 Homebrew。请先在终端执行下方官方安装命令，完成后返回重新检查。"
+			}
 		}
 		writeJSON(w, http.StatusOK, result)
 		return
@@ -45,6 +56,35 @@ func (s *Server) handleVMPrerequisites(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleVMInstallLima(w http.ResponseWriter, _ *http.Request) {
+	if runtime.GOOS != "darwin" {
+		writeError(w, http.StatusBadRequest, "Lima 自动安装仅支持 macOS")
+		return
+	}
+	if !s.vmMgr.BeginVMAction("installing-lima") {
+		writeError(w, http.StatusConflict, "已有虚拟机操作正在进行")
+		return
+	}
+	if !s.beginBackgroundWork() {
+		s.vmMgr.EndVMAction()
+		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
+		return
+	}
+	ctx, cancel := s.operationContext(20 * time.Minute)
+	job := s.jobs.add("lima.install", "正在通过 Homebrew 安装 Lima", cancel)
+	go func() {
+		defer s.endBackgroundWork()
+		defer s.vmMgr.EndVMAction()
+		defer cancel()
+		err := vm.InstallLima(ctx)
+		if err != nil {
+			log.Printf("[MacNAS] Lima install error: %v", err)
+		}
+		s.jobs.finish(job.ID, err)
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "installing", "message": "正在通过 Homebrew 安装 Lima", "jobId": job.ID})
 }
 
 func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {

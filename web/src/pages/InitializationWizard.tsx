@@ -42,6 +42,8 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   const [error, setError] = useState<string | null>(null);
   const [sshReady, setSSHReady] = useState(false);
   const [installCommandCopied, setInstallCommandCopied] = useState(false);
+  const [limaInstallJobId, setLimaInstallJobId] = useState<string | null>(null);
+  const [limaInstallJob, setLimaInstallJob] = useState<BackgroundJob | null>(null);
   const finalizingRef = useRef(false);
 
   const cpuMax = useMemo(() => Math.max(1, Math.min(16, vmConfig?.hostCpus || 16)), [vmConfig]);
@@ -73,6 +75,35 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   useEffect(() => {
     void loadRequirements();
   }, []);
+
+  useEffect(() => {
+    if (!limaInstallJobId) return;
+
+    let active = true;
+    const poll = async () => {
+      try {
+        const nextJob = await api.getJob(limaInstallJobId);
+        if (!active) return;
+        setLimaInstallJob(nextJob);
+        if (nextJob.status === 'succeeded') {
+          setLimaInstallJobId(null);
+          await loadRequirements();
+        } else if (nextJob.status === 'failed' || nextJob.status === 'cancelled') {
+          setError(nextJob.error || 'Lima 安装失败，请查看提示后重试');
+          setLimaInstallJobId(null);
+        }
+      } catch (err: any) {
+        if (active) setError(err.message || '无法读取 Lima 安装进度');
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1200);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [limaInstallJobId]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -162,7 +193,27 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
     }
   };
 
+  const installLima = async () => {
+    setError(null);
+    setLimaInstallJob(null);
+    try {
+      const result = await api.installLima();
+      setLimaInstallJob({
+        id: result.jobId,
+        kind: 'lima.install',
+        status: 'running',
+        message: result.message,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      setLimaInstallJobId(result.jobId);
+    } catch (err: any) {
+      setError(err.message || '无法开始安装 Lima');
+    }
+  };
+
   const isStarting = Boolean(jobId) || job?.status === 'running';
+  const isInstallingLima = Boolean(limaInstallJobId) || limaInstallJob?.status === 'running';
   const isComplete = job?.status === 'succeeded' && sshReady && !error;
 
   const stepItems: Array<{ key: WizardStep; label: string }> = [
@@ -258,6 +309,15 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
                       {installCommandCopied ? '已复制' : '复制命令'}
                     </button>
                   </div>
+                  {prerequisites.canInstall && (
+                    <button type="button" onClick={() => void installLima()} disabled={isInstallingLima} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-sky-500 px-5 text-sm font-bold text-white shadow-sm shadow-sky-500/20 transition hover:bg-sky-600 disabled:cursor-wait disabled:opacity-55 sm:w-auto">
+                      {isInstallingLima ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4" />}
+                      {isInstallingLima ? '正在安装 Lima…' : '通过 Homebrew 安装 Lima'}
+                    </button>
+                  )}
+                  {limaInstallJob?.message && (
+                    <p className="text-xs leading-5 text-amber-800 dark:text-amber-200">{limaInstallJob.message}</p>
+                  )}
                 </div>
               )}
 

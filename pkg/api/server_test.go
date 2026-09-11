@@ -178,6 +178,7 @@ func TestPrivilegedRoutesRejectRegularUsers(t *testing.T) {
 	server.registerRoutes()
 
 	paths := []string{
+		"/api/vm/lima/install",
 		"/api/vm/start",
 		"/api/docker/compose/example",
 		"/api/terminal/files/mkdir",

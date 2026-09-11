@@ -307,6 +307,9 @@ export interface VMPrerequisites {
   message?: string;
   installCommand?: string;
   installHint?: string;
+  brewInstalled?: boolean;
+  brewPath?: string;
+  canInstall?: boolean;
   storageReady?: boolean;
   storageMessage?: string;
 }

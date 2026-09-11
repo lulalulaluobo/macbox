@@ -49,6 +49,12 @@ func TestGenerateConfigFile(t *testing.T) {
 	if !strings.Contains(string(content), "guestPort: 5244") {
 		t.Fatal("rendered VM config is missing the default Alist port forward")
 	}
+	if !strings.Contains(string(content), "name: macnasctl") || strings.Contains(string(content), os.Getenv("USER")+".guest") {
+		t.Fatal("rendered VM config must use the fixed internal Lima management user")
+	}
+	if strings.Contains(string(content), "After=cloud-init.target cloud-final.service") || strings.Contains(string(content), "Wants=cloud-final.service") {
+		t.Fatal("rendered VM config must not create a cloud-init/multi-user boot dependency cycle")
+	}
 
 	if os.Getenv("MACNAS_INTEGRATION") != "1" {
 		t.Skip("limactl validation is an integration test; set MACNAS_INTEGRATION=1 to run it")

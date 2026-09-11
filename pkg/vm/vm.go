@@ -61,6 +61,47 @@ type Manager struct {
 	cachedAt     time.Time
 }
 
+// FindHomebrew returns the Homebrew executable used to install optional host
+// dependencies. GUI applications do not inherit an interactive shell PATH, so
+// the standard Apple Silicon and Intel locations are checked explicitly.
+func FindHomebrew() (string, bool) {
+	if path, err := exec.LookPath("brew"); err == nil {
+		return path, true
+	}
+	for _, candidate := range []string{"/opt/homebrew/bin/brew", "/usr/local/bin/brew"} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// InstallLima installs Lima through an existing Homebrew installation and
+// verifies that limactl is available afterwards. Homebrew itself is never
+// bootstrapped automatically because doing so executes a remote installer.
+func InstallLima(ctx context.Context) error {
+	if _, err := exec.LookPath("limactl"); err == nil {
+		return nil
+	}
+	brew, ok := FindHomebrew()
+	if !ok {
+		return fmt.Errorf("未检测到 Homebrew，请先按引导安装 Homebrew")
+	}
+	out, err := runHostCommand(ctx, brew, "install", "lima")
+	if err != nil {
+		return fmt.Errorf("Homebrew 安装 Lima 失败: %s (%w)", strings.TrimSpace(out), err)
+	}
+	if _, err := exec.LookPath("limactl"); err == nil {
+		return nil
+	}
+	for _, candidate := range []string{"/opt/homebrew/bin/limactl", "/usr/local/bin/limactl"} {
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return nil
+		}
+	}
+	return fmt.Errorf("Homebrew 已完成，但未找到 limactl，请重新打开 MacNAS 后重试")
+}
+
 func (m *Manager) InvalidateCache() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -820,8 +861,10 @@ func (m *Manager) SyncMounts(ctx context.Context) error {
 
 	serviceContent := `[Unit]
 Description=MacNAS VirtioFS bind mounts
-After=cloud-init.target cloud-final.service local-fs.target docker.service
-Wants=cloud-final.service
+# Keep this service independent from cloud-init's final target. On Ubuntu,
+# cloud-init.target is ordered after multi-user.target, so making a
+# multi-user service depend on it creates a boot cycle and blocks limactl.
+After=local-fs.target docker.service
 
 [Service]
 Type=oneshot

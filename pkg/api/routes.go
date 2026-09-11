@@ -11,6 +11,7 @@ func (s *Server) registerRoutes() {
 
 	// 2. VM lifecycle & Specs
 	s.mux.HandleFunc("GET /api/vm/prerequisites", s.adminOnly(s.handleVMPrerequisites))
+	s.mux.HandleFunc("POST /api/vm/lima/install", s.adminOnly(s.handleVMInstallLima))
 	s.mux.HandleFunc("POST /api/vm/start", s.adminOnly(s.handleVMStart))
 	s.mux.HandleFunc("POST /api/vm/stop", s.adminOnly(s.handleVMStop))
 	s.mux.HandleFunc("POST /api/vm/restart", s.adminOnly(s.handleVMRestart))

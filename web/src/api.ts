@@ -31,6 +31,7 @@ export const api = {
 
   // VM Controls
   getVMPrerequisites: () => fetchJSON<VMPrerequisites>(`${BASE_URL}/vm/prerequisites`),
+  installLima: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/lima/install`, { method: 'POST' }),
   startVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/start`, { method: 'POST' }),
   stopVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/stop`, { method: 'POST' }),
   restartVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/restart`, { method: 'POST' }),
