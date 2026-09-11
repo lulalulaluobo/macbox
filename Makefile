@@ -1,4 +1,4 @@
-.PHONY: all build build-web build-backend dev test clean
+.PHONY: all build build-web build-backend release-mac dev test clean
 
 all: build
 
@@ -13,6 +13,10 @@ build-backend:
 
 build: build-web build-backend
 	@echo "==> MacNAS 构建完成！运行 ./bin/macnas 即可启动。"
+
+release-mac:
+	@echo "==> 构建 macOS 正式版 DMG..."
+	bash scripts/build-mac-dmg.sh
 
 dev-backend:
 	@echo "==> 启动 Go 后端开发服务..."

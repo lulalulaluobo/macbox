@@ -31,6 +31,9 @@ func main() {
 			projectRoot = dir
 		} else if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "templates")); err == nil {
 			projectRoot = filepath.Dir(dir)
+		} else if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "Resources", "templates")); err == nil {
+			// macOS app bundles keep packaged templates in Contents/Resources.
+			projectRoot = filepath.Join(filepath.Dir(dir), "Resources")
 		} else if cwd, err := os.Getwd(); err == nil {
 			projectRoot = cwd
 		}

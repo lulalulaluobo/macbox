@@ -18,6 +18,9 @@ references/
 
 # Go
 bin/
+desktop/src-tauri/target/
+desktop/src-tauri/binaries/macnas-*
+desktop/src-tauri/gen/
 *.exe
 *.exe~
 *.dll
@@ -31,4 +34,3 @@ tmp/
 *.tmp
 .env.local
 .env.*.local
-
