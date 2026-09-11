@@ -65,7 +65,10 @@ func (s *Server) handleStorageBind(w http.ResponseWriter, r *http.Request) {
 
 	imgPath, err := storage.BindExternalDiskContext(r.Context(), s.cfg, req.Identifier, req.MountPoint, req.SizeGB)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		// Disk selection, mount-point and image-size failures are actionable
+		// input errors. Returning 500 here used to collapse them into the vague
+		// “服务器内部错误” message in the desktop UI.
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -119,7 +122,9 @@ func (s *Server) handleStorageBindSecondary(w http.ResponseWriter, r *http.Reque
 
 	res, err := storage.BindSecondaryDiskContext(r.Context(), s.cfg, req.DiskID, req.MountPoint, req.TargetDir, req.GuestTarget, s.projectRoot, s.vmMgr.InstanceName())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		// A missing/unmounted disk or an invalid folder selection should be
+		// shown to the administrator so it can be corrected without guessing.
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 

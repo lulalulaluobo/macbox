@@ -1,4 +1,4 @@
-.PHONY: all build build-web build-backend release-mac dev test clean
+.PHONY: all build build-web build-backend release-mac release-mac-cli dev dev-backend dev-backend-lan dev-web test clean
 
 all: build
 
@@ -15,12 +15,18 @@ build: build-web build-backend
 	@echo "==> MacNAS 构建完成！运行 ./bin/macnas 即可启动。"
 
 release-mac:
-	@echo "==> 构建 macOS 正式版 DMG..."
-	bash scripts/build-mac-dmg.sh
+	@echo "==> 构建 macOS Web 服务发行包..."
+	bash scripts/build-mac-release.sh
+
+release-mac-cli: release-mac
 
 dev-backend:
 	@echo "==> 启动 Go 后端开发服务..."
 	CGO_ENABLED=0 go run ./cmd/macnas
+
+dev-backend-lan:
+	@echo "==> 启动可供局域网访问的 Go Web 服务..."
+	CGO_ENABLED=0 go run ./cmd/macnas --lan
 
 dev-web:
 	@echo "==> 启动前端开发调试服务器 (http://localhost:3000)..."

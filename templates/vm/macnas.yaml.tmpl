@@ -97,21 +97,38 @@ provision:
       fi
       sleep 1
     done
-    sleep 2
+    if [ -z "$REAL_DATA" ] || [ ! -d "$REAL_DATA" ]; then
+      echo "[macnas-mounts] /data is not ready" >&2
+      exit 1
+    fi
     MOUNT_SCRIPT
 
     {{range .LocalMounts}}
     {{if .Enabled}}
     cat <<'ENTRY_END' >> /usr/local/bin/macnas-mounts.sh
-    if [ -d {{shellQuote (printf "/mnt/macnas-mounts/%s" .ID)}} ]; then
-      REAL_DATA="$(readlink -f /data || echo /data)"
-      TARGET_DIR="${REAL_DATA}/"{{shellQuote .GuestTarget}}
-      mkdir -p "$TARGET_DIR"
-      if ! grep -qs " ${TARGET_DIR} " /proc/mounts; then
-        mount --bind {{shellQuote (printf "/mnt/macnas-mounts/%s" .ID)}} "$TARGET_DIR"
-        echo "[macnas-mounts] bind mounted {{shellQuote .ID}} -> $TARGET_DIR"
+    SOURCE_PATH={{shellQuote (printf "/mnt/macnas-mounts/%s" .ID)}}
+    for i in $(seq 1 60); do
+      if mountpoint -q "$SOURCE_PATH"; then
+        break
       fi
+      sleep 1
+    done
+    if ! mountpoint -q "$SOURCE_PATH"; then
+      echo "[macnas-mounts] source is not ready: $SOURCE_PATH" >&2
+      exit 1
     fi
+    mount -o remount,{{if .Writable}}rw{{else}}ro{{end}} "$SOURCE_PATH" 2>/dev/null || true
+    REAL_DATA="$(readlink -f /data || echo /data)"
+    TARGET_DIR="${REAL_DATA}/"{{shellQuote .GuestTarget}}
+    mkdir -p "$TARGET_DIR"
+    if mountpoint -q "$TARGET_DIR"; then
+      umount "$TARGET_DIR" 2>/dev/null || true
+    fi
+    if ! mountpoint -q "$TARGET_DIR"; then
+      mount --bind "$SOURCE_PATH" "$TARGET_DIR"
+      echo "[macnas-mounts] bind mounted {{shellQuote .ID}} -> $TARGET_DIR"
+    fi
+    mount -o remount,{{if .Writable}}rw{{else}}ro{{end}} "$TARGET_DIR" 2>/dev/null || true
     ENTRY_END
     {{end}}
     {{end}}

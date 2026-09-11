@@ -143,11 +143,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
 
   const handleOpenSecondaryModal = (disk: DiskInfo) => {
     setSecondaryTargetDisk(disk);
-    let defaultDir = '/Volumes/Data/Users/Shared/MacNAS-SSD-Pool';
-    if (disk.mountPoint && disk.mountPoint !== '/' && disk.mountPoint !== '/System/Volumes/Data') {
-      defaultDir = `${disk.mountPoint}/MacNAS-SSD-Pool`;
-    }
-    setSecondaryCustomDir(defaultDir);
+    setSecondaryCustomDir('');
     setShowSecondaryModal(true);
   };
 
@@ -226,7 +222,10 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
 
   const handleAddCustomMount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMountPath.trim()) return;
+    if (!newMountPath.trim()) {
+      setAlertMsg({ type: 'error', text: '请先填写一个 Mac 本地文件夹路径。' });
+      return;
+    }
     setMountsLoading(true);
     try {
       let targetSub = 'shared/' + (newMountName.trim() || 'Folder');
@@ -1273,16 +1272,18 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
             <form onSubmit={handleAddCustomMount} className="space-y-4 text-xs">
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Mac 本地路径 <span className="text-rose-500">*</span>
+                  Mac 本地文件夹 <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
                   value={newMountPath}
                   onChange={(e) => setNewMountPath(e.target.value)}
-                  placeholder="例如: /Users/yourname/Movies"
-                  required
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono placeholder:text-slate-400 focus:outline-none focus:border-sky-500 transition"
+                  placeholder="例如：/Users/你的用户名/Downloads"
+                  className="w-full rounded-xl border border-sky-300 bg-sky-50 px-4 py-3 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-sky-500/50 dark:bg-sky-500/10 dark:text-white"
                 />
+                <p className="mt-1.5 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+                  纯 Web 版无法调用 macOS 文件夹选择器，请填写运行 MacNAS 的 Mac 本机绝对路径。文件仍保留在原位置，不会复制进 NAS 镜像。
+                </p>
               </div>
 
               <div>
@@ -1432,16 +1433,19 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
             </div>
 
             <div className="space-y-1.5 text-xs">
-              <label className="block font-semibold text-slate-700 dark:text-slate-300">
-                Mac 本机高速存储池目录
+                <label className="block font-semibold text-slate-700 dark:text-slate-300">
+                Mac 本机高速存储池文件夹
               </label>
               <input
                 type="text"
                 value={secondaryCustomDir}
                 onChange={(e) => setSecondaryCustomDir(e.target.value)}
-                placeholder="/Volumes/Data/Users/Shared/MacNAS-SSD-Pool"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:border-purple-500 transition"
+                placeholder="例如：/Volumes/Data/MacNAS-SSD-Pool"
+                className="w-full rounded-xl border border-purple-300 bg-purple-50 px-4 py-3 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20 dark:border-purple-500/50 dark:bg-purple-500/10 dark:text-white"
               />
+              <p className="text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+                纯 Web 版请填写运行 MacNAS 的 Mac 本机目录；请选择 256GB 磁盘中的普通文件夹，不能直接选择磁盘根目录。
+              </p>
             </div>
 
             <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100 dark:border-slate-800">
@@ -1455,7 +1459,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
               <button
                 type="button"
                 onClick={handleConfirmBindSecondary}
-                disabled={bindingSecondary}
+                disabled={bindingSecondary || !secondaryCustomDir.trim()}
                 className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-xs flex items-center space-x-1.5 transition disabled:opacity-50"
               >
                 <Zap className="w-3.5 h-3.5 text-yellow-300" />

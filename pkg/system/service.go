@@ -107,6 +107,8 @@ const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
         <string>{{.BinaryPath}}</string>
         <string>-port</string>
         <string>{{.Port}}</string>
+        <string>-host</string>
+        <string>{{.Host}}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -169,6 +171,7 @@ func (sm *ServiceManager) Install(port int) error {
 		"Label":      ServiceLabel,
 		"BinaryPath": binPath,
 		"Port":       fmt.Sprintf("%d", port),
+		"Host":       config.NormalizeListenAddress(sm.cfg.ListenAddress),
 		"LogPath":    logPath,
 		"ErrLogPath": errLogPath,
 		"WorkingDir": sm.projectRoot,

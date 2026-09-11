@@ -115,6 +115,42 @@ func normalizeExistingDirectory(raw, label string) (string, error) {
 	return absPath, nil
 }
 
+// resolveDiskMountPointContext resolves the mount point from the physical
+// disk identifier whenever possible. The frontend also sends a mount point,
+// but that value can be stale after a disk is remounted or after macOS
+// changes the visible APFS volume path. Binding against the authoritative
+// disk listing prevents a 256 GB internal volume from accidentally using the
+// 2 TB volume's path (and vice versa).
+func resolveDiskMountPointContext(ctx context.Context, diskID, requested, label string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if diskID != "" {
+		if disks, err := ListDisksContext(ctx, diskID); err == nil {
+			for _, disk := range disks {
+				if disk.DeviceIdentifier != diskID && disk.DeviceNode != "/dev/"+diskID {
+					continue
+				}
+				if strings.TrimSpace(disk.MountPoint) == "" {
+					return "", fmt.Errorf("磁盘 %s 当前没有可写挂载卷，请先在 macOS 中挂载该磁盘", diskID)
+				}
+				requested = disk.MountPoint
+				break
+			}
+		} else if ctx != nil && ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+	}
+	if requested == "" && diskID != "" {
+		info, err := inspectDiskContext(ctx, diskID)
+		if err == nil {
+			requested = info.MountPoint
+		}
+	}
+	if requested == "" {
+		return "", fmt.Errorf("%s路径不存在，请先在系统中挂载对应磁盘", label)
+	}
+	return normalizeExistingDirectory(requested, label)
+}
+
 func sameResolvedPath(left, right string) bool {
 	leftResolved, leftErr := filepath.EvalSymlinks(left)
 	rightResolved, rightErr := filepath.EvalSymlinks(right)
@@ -776,20 +812,10 @@ func BindExternalDiskContext(ctx context.Context, cfg *config.Config, diskID, mo
 		}
 		diskID = normalized
 	}
-	if mountPoint == "" {
-		if diskID == "" {
-			return "", fmt.Errorf("必须提供磁盘标识或挂载路径")
-		}
-		// Try to look up mount point from diskID
-		info, err := inspectDiskContext(ctx, diskID)
-		if err == nil && info.MountPoint != "" {
-			mountPoint = info.MountPoint
-		} else {
-			return "", fmt.Errorf("磁盘 %s 未挂载，请先在系统中挂载或指定挂载卷目录", diskID)
-		}
+	if diskID == "" && mountPoint == "" {
+		return "", fmt.Errorf("必须提供磁盘标识或挂载路径")
 	}
-
-	normalizedMountPoint, err := normalizeExistingDirectory(mountPoint, "挂载")
+	normalizedMountPoint, err := resolveDiskMountPointContext(ctx, diskID, mountPoint, "挂载")
 	if err != nil {
 		return "", err
 	}
@@ -1065,14 +1091,17 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 		}
 		diskID = normalized
 	}
-	if strings.TrimSpace(mountPoint) != "" {
-		normalized, err := normalizeExistingDirectory(mountPoint, "第二硬盘挂载")
+	if diskID == "" && strings.TrimSpace(mountPoint) == "" && strings.TrimSpace(targetDir) == "" {
+		return nil, fmt.Errorf("必须选择磁盘或提供存储目录")
+	}
+	if strings.TrimSpace(diskID) != "" || strings.TrimSpace(mountPoint) != "" {
+		resolved, err := resolveDiskMountPointContext(ctx, diskID, mountPoint, "第二硬盘挂载")
 		if err != nil {
 			return nil, err
 		}
-		mountPoint = normalized
+		mountPoint = resolved
 		if isSystemHelperMountPoint(mountPoint) {
-			return nil, fmt.Errorf("选中的挂载点是 macOS 系统辅助卷（%s），请选择可写的数据卷，例如 /Volumes/数据卷名", mountPoint)
+			return nil, fmt.Errorf("选中的挂载点是 macOS 系统辅助卷（%s），请选择可写的数据卷", mountPoint)
 		}
 	}
 
@@ -1081,9 +1110,7 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 		return nil, fmt.Errorf("第二存储卷目录必须使用绝对路径")
 	}
 	if targetDir == "" {
-		if fi, err := os.Stat("/Volumes/Data/Users/Shared"); err == nil && fi.IsDir() {
-			targetDir = "/Volumes/Data/Users/Shared/MacNAS-SSD-Pool"
-		} else if mountPoint != "" {
+		if mountPoint != "" {
 			targetDir = filepath.Join(mountPoint, "MacNAS-SSD-Pool")
 		} else {
 			home, err := os.UserHomeDir()

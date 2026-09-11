@@ -847,7 +847,10 @@ func (m *Manager) SyncMounts(ctx context.Context) error {
 		"  fi\n" +
 		"  sleep 1\n" +
 		"done\n" +
-		"sleep 1\n"
+		"if [ -z \"$REAL_DATA\" ] || [ ! -d \"$REAL_DATA\" ]; then\n" +
+		"  echo \"[macnas-mounts] /data is not ready\" >&2\n" +
+		"  exit 1\n" +
+		"fi\n"
 
 	for _, mount := range mounts {
 		if _, err := config.NormalizeLocalMountID(mount.ID); err != nil {
@@ -866,18 +869,30 @@ func (m *Manager) SyncMounts(ctx context.Context) error {
 			return fmt.Errorf("本地挂载 %q 配置无效: %w", mount.ID, err)
 		}
 		script += fmt.Sprintf(
-			"if [ -d %s ]; then\n"+
-				"  mount -o remount,%s %s 2>/dev/null || true\n"+
-				"  REAL_DATA=\"$(readlink -f /data || echo /data)\"\n"+
-				"  TARGET_DIR=\"$REAL_DATA\"/%s\n"+
-				"  mkdir -p \"$TARGET_DIR\"\n"+
-				"  if ! grep -qs \" ${TARGET_DIR} \" /proc/mounts; then\n"+
-				"    mount --bind %s \"$TARGET_DIR\"\n"+
-				"    echo \"[macnas-mounts] mounted %s -> $TARGET_DIR\"\n"+
+			"SOURCE_PATH=%s\n"+
+				"for i in $(seq 1 60); do\n"+
+				"  if mountpoint -q \"$SOURCE_PATH\"; then\n"+
+				"    break\n"+
 				"  fi\n"+
-				"  mount -o remount,%s \"$TARGET_DIR\" 2>/dev/null || true\n"+
-				"fi\n",
-			shellQuote(sourcePath), mode, shellQuote(sourcePath), shellQuote(guestTarget), shellQuote(sourcePath), shellQuote(mount.ID), mode,
+				"  sleep 1\n"+
+				"done\n"+
+				"if ! mountpoint -q \"$SOURCE_PATH\"; then\n"+
+				"  echo \"[macnas-mounts] source is not ready: $SOURCE_PATH\" >&2\n"+
+				"  exit 1\n"+
+				"fi\n"+
+				"mount -o remount,%s \"$SOURCE_PATH\" 2>/dev/null || true\n"+
+				"REAL_DATA=\"$(readlink -f /data || echo /data)\"\n"+
+				"TARGET_DIR=\"$REAL_DATA\"/%s\n"+
+				"mkdir -p \"$TARGET_DIR\"\n"+
+				"if mountpoint -q \"$TARGET_DIR\"; then\n"+
+				"  umount \"$TARGET_DIR\" 2>/dev/null || true\n"+
+				"fi\n"+
+				"if ! mountpoint -q \"$TARGET_DIR\"; then\n"+
+				"  mount --bind \"$SOURCE_PATH\" \"$TARGET_DIR\"\n"+
+				"  echo \"[macnas-mounts] mounted %s -> $TARGET_DIR\"\n"+
+				"fi\n"+
+				"mount -o remount,%s \"$TARGET_DIR\" 2>/dev/null || true\n",
+			shellQuote(sourcePath), mode, shellQuote(guestTarget), shellQuote(mount.ID), mode,
 		)
 	}
 

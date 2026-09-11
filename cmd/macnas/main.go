@@ -22,24 +22,11 @@ import (
 )
 
 func main() {
-	// Determine project root directory first
+	// Resolve the release layout from the executable first. This keeps the
+	// binary usable from any working directory and also handles the symlink
+	// installed in ~/.local/bin by the CLI release installer.
 	exePath, err := os.Executable()
-	projectRoot := "."
-	if err == nil {
-		dir := filepath.Dir(exePath)
-		if _, err := os.Stat(filepath.Join(dir, "templates")); err == nil {
-			projectRoot = dir
-		} else if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "templates")); err == nil {
-			projectRoot = filepath.Dir(dir)
-		} else if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "Resources", "templates")); err == nil {
-			// macOS app bundles keep packaged templates in Contents/Resources.
-			projectRoot = filepath.Join(filepath.Dir(dir), "Resources")
-		} else if cwd, err := os.Getwd(); err == nil {
-			projectRoot = cwd
-		}
-	} else if cwd, err := os.Getwd(); err == nil {
-		projectRoot = cwd
-	}
+	projectRoot := detectProjectRoot(exePath)
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -92,6 +79,7 @@ func main() {
 
 	portFlag := flag.Int("port", 0, "Server port (default from config or 19808)")
 	hostFlag := flag.String("host", "", "Listen address (default from config or 127.0.0.1)")
+	lanFlag := flag.Bool("lan", false, "Listen on all IPv4 interfaces for LAN access (equivalent to --host 0.0.0.0)")
 	webDirFlag := flag.String("web", "", "Directory containing web frontend build (default: web/dist)")
 	flag.Parse()
 
@@ -103,8 +91,14 @@ func main() {
 		port = 19808
 	}
 	listenAddress := config.NormalizeListenAddress(cfg.ListenAddress)
+	if *lanFlag && *hostFlag != "" && config.NormalizeListenAddress(*hostFlag) != "0.0.0.0" {
+		log.Fatal("[MacNAS] --lan 与 --host 不能同时指定不同监听地址")
+	}
 	if *hostFlag != "" {
 		listenAddress = config.NormalizeListenAddress(*hostFlag)
+	}
+	if *lanFlag {
+		listenAddress = "0.0.0.0"
 	}
 	// The CLI override is intentionally ephemeral, but the VM manager must use
 	// the same bind address while this process is running.
@@ -229,6 +223,30 @@ func main() {
 	}
 	server.Close()
 	log.Println("[MacNAS] 服务已停止。")
+}
+
+func detectProjectRoot(exePath string) string {
+	candidates := make([]string, 0, 2)
+	if exePath != "" {
+		if resolved, err := filepath.EvalSymlinks(exePath); err == nil {
+			candidates = append(candidates, resolved)
+		}
+		candidates = append(candidates, exePath)
+	}
+
+	for _, candidate := range candidates {
+		dir := filepath.Dir(candidate)
+		roots := []string{dir, filepath.Dir(dir), filepath.Join(filepath.Dir(dir), "Resources")}
+		for _, root := range roots {
+			if info, err := os.Stat(filepath.Join(root, "templates")); err == nil && info.IsDir() {
+				return root
+			}
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return "."
 }
 
 func safeWebPath(root, requestPath string) (string, bool) {

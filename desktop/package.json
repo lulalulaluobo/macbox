@@ -5,8 +5,7 @@
   "description": "MacNAS macOS desktop launcher",
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build",
-    "build:mac": "bash ../scripts/build-mac-dmg.sh"
+    "build": "tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.8.5"

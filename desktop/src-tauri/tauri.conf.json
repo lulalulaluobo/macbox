@@ -25,8 +25,8 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": ["dmg"],
+    "active": false,
+    "targets": [],
     "icon": ["icons/icon.icns", "icons/icon.png"],
     "externalBin": ["binaries/macnas"],
     "resources": {

@@ -94,6 +94,40 @@ func TestGenerateConfigRejectsUnsafeTemplateValues(t *testing.T) {
 	}
 }
 
+func TestGenerateConfigUsesRaceSafeLocalMountScript(t *testing.T) {
+	testHome := t.TempDir()
+	t.Setenv("HOME", testHome)
+	tmplPath := filepath.Join("..", "..", "templates", "vm", "macnas.yaml.tmpl")
+	outputPath := filepath.Join(t.TempDir(), "local-mount.yaml")
+
+	cfg := config.DefaultConfig()
+	cfg.Storage.LocalMounts = []config.LocalMount{{
+		ID:          "downloads",
+		Name:        "Downloads",
+		HostPath:    filepath.Join(testHome, "Downloads"),
+		GuestTarget: "downloads/MacDownloads",
+		Enabled:     true,
+	}}
+	if err := NewManager(cfg).GenerateConfigFile(tmplPath, outputPath); err != nil {
+		t.Fatalf("GenerateConfigFile error: %v", err)
+	}
+
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read rendered yaml error: %v", err)
+	}
+	rendered := string(content)
+	for _, expected := range []string{
+		"mountpoint -q \"$SOURCE_PATH\"",
+		"umount \"$TARGET_DIR\"",
+		"mount --bind \"$SOURCE_PATH\" \"$TARGET_DIR\"",
+	} {
+		if !strings.Contains(rendered, expected) {
+			t.Errorf("rendered VM config is missing race-safe mount step %q", expected)
+		}
+	}
+}
+
 func TestValidateDataDiskContext(t *testing.T) {
 	testHome := t.TempDir()
 	t.Setenv("HOME", testHome)
