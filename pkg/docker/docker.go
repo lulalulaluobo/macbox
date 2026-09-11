@@ -166,7 +166,7 @@ func (c *Client) runDockerCmd(ctx context.Context, args ...string) ([]byte, erro
 
 	// Fallback to running inside VM
 	vmArgs := append([]string{"docker"}, args...)
-	out, err := c.vmMgr.Exec(ctx, vmArgs...)
+	out, err := c.vmMgr.ExecAsManagementUser(ctx, vmArgs...)
 	return []byte(out), err
 }
 

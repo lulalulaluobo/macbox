@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -24,6 +25,15 @@ type resizeMessage struct {
 	Type string `json:"type"`
 	Rows uint16 `json:"rows"`
 	Cols uint16 `json:"cols"`
+}
+
+// managementCommand starts a fresh process for macnasctl so repaired
+// supplementary groups (docker/macnas) are visible immediately. Keep sudo -i
+// out of this path because its login-shell handling rewrites multiline -c
+// scripts passed to Python.
+func managementCommand(ctx context.Context, instanceName string, command ...string) *exec.Cmd {
+	args := append([]string{"shell", instanceName, "sudo", "-u", "macnasctl", "--"}, command...)
+	return exec.CommandContext(ctx, "limactl", args...)
 }
 
 // HandleTerminalWS upgrades an HTTP connection to WebSocket and connects it to a live PTY session
@@ -73,16 +83,17 @@ func HandleTerminalWS(w http.ResponseWriter, r *http.Request, instanceName strin
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[MacNAS Error] 容器名称无效\x1b[0m\r\n"))
 			return
 		}
+		dockerArgs := []string{"docker", "exec"}
 		if loginUser == "root" {
-			cmd = exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "docker", "exec", "-u", "0", "-it", container, "sh")
-		} else {
-			cmd = exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "docker", "exec", "-it", container, "sh")
+			dockerArgs = append(dockerArgs, "-u", "0")
 		}
+		dockerArgs = append(dockerArgs, "-it", container, "sh")
+		cmd = managementCommand(r.Context(), instanceName, dockerArgs...)
 	} else {
 		if loginUser == "root" {
 			cmd = exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "sudo", "-i")
 		} else {
-			cmd = exec.CommandContext(r.Context(), "limactl", "shell", instanceName)
+			cmd = managementCommand(r.Context(), instanceName, "bash", "-l")
 		}
 	}
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")

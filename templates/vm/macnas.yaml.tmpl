@@ -171,6 +171,15 @@ provision:
       groupadd --system macnas
     fi
     id -u macnas &>/dev/null || useradd -M -g macnas -s /usr/sbin/nologin macnas
+
+    # Lima executes management commands as macnasctl. Keep its supplementary
+    # groups in the provisioned image so Docker and the NAS data volume are
+    # accessible without requiring a root terminal.
+    for group in docker macnas; do
+      if getent group "$group" >/dev/null 2>&1; then
+        usermod -aG "$group" macnasctl
+      fi
+    done
     chown macnas:macnas /data /data/media /data/files /data/downloads /data/photos /data/appdata 2>/dev/null || true
     chmod 0770 /data /data/media /data/files /data/downloads /data/photos /data/appdata 2>/dev/null || true
 

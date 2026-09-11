@@ -401,30 +401,17 @@ func listDisksAPFS(ctx context.Context, selectedDiskIdentifier, secondary string
 		}
 
 		if len(vols) > 0 {
-			var mainVol *apfsVolumeEntry
-			for i := range vols {
-				v := &vols[i]
-				if v.MountPoint == "/" || v.MountPoint == "/System/Volumes/Data" {
-					mainVol = v
-					break
+			if mainVol := selectUsableAPFSVolume(vols); mainVol != nil {
+				disk.MountPoint = mainVol.MountPoint
+				disk.Mounted = true
+				disk.VolumeName = mainVol.VolumeName
+				disk.UsedSpace = mainVol.CapacityInUse
+				disk.UsedSpaceString = formatBytes(mainVol.CapacityInUse)
+				if disk.TotalSize >= mainVol.CapacityInUse {
+					disk.FreeSpace = disk.TotalSize - mainVol.CapacityInUse
+					disk.FreeSpaceString = formatBytes(disk.FreeSpace)
+					disk.UsedPercent = float64(mainVol.CapacityInUse) / float64(disk.TotalSize) * 100
 				}
-				if mainVol == nil && v.MountPoint != "" {
-					mainVol = v
-				}
-			}
-			if mainVol == nil {
-				mainVol = &vols[0]
-			}
-
-			disk.MountPoint = mainVol.MountPoint
-			disk.Mounted = (mainVol.MountPoint != "")
-			disk.VolumeName = mainVol.VolumeName
-			disk.UsedSpace = mainVol.CapacityInUse
-			disk.UsedSpaceString = formatBytes(mainVol.CapacityInUse)
-			if disk.TotalSize >= mainVol.CapacityInUse {
-				disk.FreeSpace = disk.TotalSize - mainVol.CapacityInUse
-				disk.FreeSpaceString = formatBytes(disk.FreeSpace)
-				disk.UsedPercent = float64(mainVol.CapacityInUse) / float64(disk.TotalSize) * 100
 			}
 		}
 
@@ -440,6 +427,98 @@ func listDisksAPFS(ctx context.Context, selectedDiskIdentifier, secondary string
 	}
 
 	return results, nil
+}
+
+// selectUsableAPFSVolume chooses the writable user-data volume for a physical
+// disk. APFS containers also expose Preboot, Recovery, VM, Update and Apple
+// silicon helper volumes; selecting the first mounted volume made disk0 look
+// like /System/Volumes/iSCPreboot and caused storage binding to fail.
+func selectUsableAPFSVolume(vols []apfsVolumeEntry) *apfsVolumeEntry {
+	best := -1
+	bestScore := -1
+	for i := range vols {
+		volume := &vols[i]
+		if !isUsableAPFSVolume(*volume) {
+			continue
+		}
+		score := 50
+		if volume.MountPoint == "/System/Volumes/Data" {
+			// Prefer the writable Data half of a paired macOS installation
+			// over its read-only root snapshot.
+			score = 100
+		} else if volume.MountPoint == "/" {
+			score = 95
+		} else if isDataVolumeName(volume.VolumeName) {
+			score = 90
+		}
+		if score > bestScore {
+			best = i
+			bestScore = score
+		}
+	}
+	if best < 0 {
+		return nil
+	}
+	return &vols[best]
+}
+
+func isDataVolumeName(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	return lower == "data" || strings.HasSuffix(lower, " - data")
+}
+
+func isUsableAPFSVolume(volume apfsVolumeEntry) bool {
+	mount := filepath.Clean(strings.TrimSpace(volume.MountPoint))
+	if mount == "." || mount == "" {
+		return false
+	}
+	lowerName := strings.ToLower(strings.TrimSpace(volume.VolumeName))
+	lowerMount := strings.ToLower(mount)
+	for _, token := range []string{"preboot", "recovery", "vm", "update", "iscpreboot", "xart", "hardware"} {
+		if lowerName == token || strings.HasPrefix(lowerName, token+" ") {
+			return false
+		}
+	}
+	for _, prefix := range []string{
+		"/system/volumes/preboot",
+		"/system/volumes/vm",
+		"/system/volumes/update",
+		"/system/volumes/iscr",
+		"/system/volumes/xart",
+		"/system/volumes/hardware",
+		"/private/tmp/",
+	} {
+		if strings.HasPrefix(lowerMount, prefix) {
+			return false
+		}
+	}
+	// The read-only system half of a paired macOS installation is not a
+	// suitable directory target when its writable Data volume is available.
+	if lowerMount == "/volumes/macintosh hd" && !isDataVolumeName(volume.VolumeName) {
+		return false
+	}
+	return true
+}
+
+func isSystemHelperMountPoint(mountPoint string) bool {
+	mount := strings.ToLower(filepath.Clean(strings.TrimSpace(mountPoint)))
+	if mount == "/system/volumes/data" {
+		return false
+	}
+	for _, prefix := range []string{
+		"/system/volumes/isc",
+		"/system/volumes/preboot",
+		"/system/volumes/vm",
+		"/system/volumes/update",
+		"/system/volumes/xart",
+		"/system/volumes/hardware",
+		"/private/tmp/",
+	} {
+		if strings.HasPrefix(mount, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func listDisksFallback(ctx context.Context, selectedDiskIdentifier, secondary string) ([]DiskInfo, error) {
@@ -713,6 +792,9 @@ func BindExternalDiskContext(ctx context.Context, cfg *config.Config, diskID, mo
 	normalizedMountPoint, err := normalizeExistingDirectory(mountPoint, "挂载")
 	if err != nil {
 		return "", err
+	}
+	if isSystemHelperMountPoint(normalizedMountPoint) {
+		return "", fmt.Errorf("选中的挂载点是 macOS 系统辅助卷（%s），请选择可写的数据卷，例如 /Volumes/数据卷名", normalizedMountPoint)
 	}
 	mountPoint = normalizedMountPoint
 
@@ -989,6 +1071,9 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 			return nil, err
 		}
 		mountPoint = normalized
+		if isSystemHelperMountPoint(mountPoint) {
+			return nil, fmt.Errorf("选中的挂载点是 macOS 系统辅助卷（%s），请选择可写的数据卷，例如 /Volumes/数据卷名", mountPoint)
+		}
 	}
 
 	providedTargetDir := strings.TrimSpace(targetDir)

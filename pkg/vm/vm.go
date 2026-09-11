@@ -686,19 +686,41 @@ func (m *Manager) Start(ctx context.Context, projectRoot string) error {
 	if err != nil {
 		m.SetLastError(err.Error())
 	} else {
-		if waitErr := waitForContext(ctx, 3*time.Second); waitErr != nil {
+		if accessErr := m.EnsureRuntimeAccess(ctx); accessErr != nil {
+			err = accessErr
+			m.SetLastError(accessErr.Error())
+		} else if waitErr := waitForContext(ctx, 3*time.Second); waitErr != nil {
 			err = waitErr
 			m.SetLastError(waitErr.Error())
 		} else {
 			m.SetLastError("")
 			if syncErr := m.SyncMounts(ctx); syncErr != nil {
 				log.Printf("[MacNAS VM] mount sync failed after start: %v", syncErr)
+				err = syncErr
 				m.SetLastError(syncErr.Error())
 			}
 		}
 	}
 	m.InvalidateCache()
 	return err
+}
+
+// EnsureRuntimeAccess repairs the fixed Lima management account's
+// supplementary groups. Lima can keep an existing shell session alive after
+// usermod, so callers that need the new groups should use
+// ExecAsManagementUser, which starts a fresh process with initgroups applied.
+func (m *Manager) EnsureRuntimeAccess(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	out, err := m.Exec(ctx, "sudo", "usermod", "-aG", "docker,macnas", "macnasctl")
+	if err != nil {
+		return fmt.Errorf("修复 Lima 管理账号权限失败: %s (%w)", strings.TrimSpace(out), err)
+	}
+	if _, err := m.ExecAsManagementUser(ctx, "id"); err != nil {
+		return fmt.Errorf("验证 Lima 管理账号权限失败: %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
@@ -983,14 +1005,21 @@ func runHostCommand(ctx context.Context, name string, args ...string) (string, e
 
 // Exec runs a command inside the Lima VM via limactl shell
 func (m *Manager) Exec(ctx context.Context, command ...string) (string, error) {
-	return runVMCommand(ctx, m.InstanceName(), nil, command...)
+	return runVMCommand(ctx, m.InstanceName(), nil, managementCommandArgs(command...)...)
+}
+
+// ExecAsManagementUser runs a command in a fresh process for the fixed Lima
+// management account. sudo -u refreshes supplementary groups without sudo -i's
+// login-shell argument rewriting, which would corrupt multiline scripts.
+func (m *Manager) ExecAsManagementUser(ctx context.Context, command ...string) (string, error) {
+	return m.Exec(ctx, command...)
 }
 
 // ExecWithInput runs a command inside the Lima VM and streams input to its
 // stdin. This is used for passwords and file contents so they never need to
 // be interpolated into a shell command.
 func (m *Manager) ExecWithInput(ctx context.Context, stdin io.Reader, command ...string) (string, error) {
-	return runVMCommand(ctx, m.InstanceName(), stdin, command...)
+	return runVMCommand(ctx, m.InstanceName(), stdin, managementCommandArgs(command...)...)
 }
 
 // ExecStream runs a command inside the Lima VM and streams stdout/stderr to an io.Writer
@@ -998,7 +1027,7 @@ func (m *Manager) ExecStream(ctx context.Context, w io.Writer, command ...string
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	args := append([]string{"shell", m.InstanceName()}, command...)
+	args := append([]string{"shell", m.InstanceName()}, managementCommandArgs(command...)...)
 	cmd := exec.CommandContext(ctx, "limactl", args...)
 	cmd.Stdout = w
 	cmd.Stderr = w
@@ -1010,10 +1039,14 @@ func (m *Manager) ExecStreamWithInput(ctx context.Context, w io.Writer, stdin io
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	args := append([]string{"shell", m.InstanceName()}, command...)
+	args := append([]string{"shell", m.InstanceName()}, managementCommandArgs(command...)...)
 	cmd := exec.CommandContext(ctx, "limactl", args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = w
 	cmd.Stderr = w
 	return cmd.Run()
+}
+
+func managementCommandArgs(command ...string) []string {
+	return append([]string{"sudo", "-u", "macnasctl", "--"}, command...)
 }

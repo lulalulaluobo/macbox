@@ -148,6 +148,35 @@ func TestValidateStorageTargetDir(t *testing.T) {
 	}
 }
 
+func TestSelectUsableAPFSVolume(t *testing.T) {
+	volumes := []apfsVolumeEntry{
+		{VolumeName: "iSCPreboot", MountPoint: "/System/Volumes/iSCPreboot", CapacityInUse: 1},
+		{VolumeName: "Macintosh HD", MountPoint: "/Volumes/Macintosh HD", CapacityInUse: 2},
+		{VolumeName: "Data", MountPoint: "/Volumes/Data", CapacityInUse: 3},
+	}
+	selected := selectUsableAPFSVolume(volumes)
+	if selected == nil || selected.MountPoint != "/Volumes/Data" {
+		t.Fatalf("selected APFS volume = %+v, want writable Data volume", selected)
+	}
+
+	helpersOnly := []apfsVolumeEntry{
+		{VolumeName: "Preboot", MountPoint: "/System/Volumes/Preboot"},
+		{VolumeName: "Recovery", MountPoint: "/private/tmp/recovery"},
+	}
+	if selected := selectUsableAPFSVolume(helpersOnly); selected != nil {
+		t.Fatalf("selected helper APFS volume %+v", selected)
+	}
+}
+
+func TestSystemHelperMountPoint(t *testing.T) {
+	if !isSystemHelperMountPoint("/System/Volumes/iSCPreboot") {
+		t.Fatal("iSCPreboot must be rejected as a storage target")
+	}
+	if isSystemHelperMountPoint("/Volumes/Data") || isSystemHelperMountPoint("/System/Volumes/Data") {
+		t.Fatal("writable data volumes must remain valid storage targets")
+	}
+}
+
 func TestUnbindExternalDiskRestoresBackupWhenImageIsMissing(t *testing.T) {
 	testHome := t.TempDir()
 	t.Setenv("HOME", testHome)

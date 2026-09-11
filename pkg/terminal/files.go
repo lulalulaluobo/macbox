@@ -131,7 +131,7 @@ limit = int(sys.argv[3])
 print(json.dumps({"items": items[offset:offset + limit], "hasMore": offset + limit < len(items)}))
 `)
 
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "python3", "-c", pyScript, targetPath, strconv.Itoa(offset), strconv.Itoa(limit))
+	cmd := managementCommand(ctx, instanceName, "python3", "-c", pyScript, targetPath, strconv.Itoa(offset), strconv.Itoa(limit))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, false, fmt.Errorf("读取目录失败: %s (%w)", strings.TrimSpace(string(out)), err)
@@ -220,7 +220,7 @@ finally:
 `
 
 func safeReadCommand(ctx context.Context, instanceName, filePath, mode string, start, length int64) *exec.Cmd {
-	return exec.CommandContext(ctx, "limactl", "shell", instanceName, "python3", "-c", safeReadScript,
+	return managementCommand(ctx, instanceName, "python3", "-c", safeReadScript,
 		filePath, mode, strconv.FormatInt(start, 10), strconv.FormatInt(length, 10))
 }
 
@@ -493,10 +493,17 @@ func resolveAllowedPathContext(ctx context.Context, instanceName, requested stri
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "python3", "-c", allowedPathResolverScript, clean)
+	cmd := managementCommand(ctx, instanceName, "python3", "-c", allowedPathResolverScript, clean)
 	resolved, err := cmd.Output()
 	if err != nil || strings.TrimSpace(string(resolved)) == "" {
-		return "", fmt.Errorf("路径不在允许的 /data 存储范围内")
+		detail := strings.TrimSpace(string(resolved))
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			detail = strings.TrimSpace(string(exitErr.Stderr))
+		}
+		if detail == "" {
+			detail = "虚拟机路径解析命令未返回结果"
+		}
+		return "", fmt.Errorf("路径不在允许的 /data 存储范围内: %s", detail)
 	}
 	// Use the same canonical path that was checked. Returning the original
 	// lexical path would reopen a symlink/TOCTOU window between validation and

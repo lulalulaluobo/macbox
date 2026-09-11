@@ -52,6 +52,9 @@ func TestGenerateConfigFile(t *testing.T) {
 	if !strings.Contains(string(content), "name: macnasctl") || strings.Contains(string(content), os.Getenv("USER")+".guest") {
 		t.Fatal("rendered VM config must use the fixed internal Lima management user")
 	}
+	if !strings.Contains(string(content), "usermod -aG \"$group\" macnasctl") {
+		t.Fatal("rendered VM config must grant the management user Docker and NAS data access")
+	}
 	if strings.Contains(string(content), "After=cloud-init.target cloud-final.service") || strings.Contains(string(content), "Wants=cloud-final.service") {
 		t.Fatal("rendered VM config must not create a cloud-init/multi-user boot dependency cycle")
 	}
