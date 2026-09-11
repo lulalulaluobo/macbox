@@ -11,6 +11,8 @@ import { BatchActionBar } from './filemanager/BatchActionBar';
 import { FilePreviewModal } from './filemanager/FilePreviewModal';
 import { FileModals } from './filemanager/FileModals';
 import { FileActionSheet } from './filemanager/FileActionSheet';
+import { DriveDetailModal } from './filemanager/DriveDetailModal';
+import type { DriveDetailInfo } from './filemanager/DriveDetailModal';
 
 interface FileManagerProps {
   initialPath?: string;
@@ -568,9 +570,15 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   const primaryDisk = storageDisks.find((disk) => disk.isSelected);
   const secondaryDisks = storageDisks.filter((disk) => disk.isSecondary && !disk.isSelected);
+  // 后端的 secondaryTarget 可能已是绝对路径（/data/...），也可能是 guest 内相对路径，
+  // 统一成 VM 内绝对路径，避免出现 /data//data/... 这类非法路径导致去重失效。
+  const toGuestPath = (target?: string | null, fallback = 'volume2-ssd') => {
+    const t = (target || '').trim() || fallback;
+    return t.startsWith('/') ? t : `/data/${t}`;
+  };
   const secondaryDiskOptions = secondaryDisks.map((disk) => ({
     id: disk.identifier,
-    path: `/data/${disk.secondaryTarget || 'volume2-ssd'}`,
+    path: toGuestPath(disk.secondaryTarget),
   }));
   const secondaryMountOptions = localMounts
     .filter((mount) => mount.enabled && !mount.guestTarget.includes('/') && (mount.guestTarget.toLowerCase().includes('volume') || mount.name.includes('存储空间') || mount.name.includes('硬盘')))
@@ -586,20 +594,53 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       id: primaryDisk?.identifier || 'primary',
       defaultName: '硬盘 1',
       path: '/data',
+      detail: {
+        kind: '主存储',
+        // 不拼接 Mac 侧挂载点：APFS 系统卷挂载点（如 /System/Volumes/*）对用户是噪音
+        source: primaryDisk?.name,
+        total: primaryDisk?.totalSizeString,
+        used: primaryDisk?.usedSpaceString,
+        free: primaryDisk?.freeSpaceString,
+        usedPercent: primaryDisk?.usedPercent,
+        fileSystem: primaryDisk?.fileSystem,
+      } as DriveDetailInfo,
     },
-    ...secondaryOptions.map((disk, index) => ({
-      id: disk.id,
-      defaultName: `硬盘 ${index + 2}`,
-      path: disk.path,
-    })),
+    ...secondaryOptions.map((disk, index) => {
+      const matchedDisk = secondaryDisks.find((d) => toGuestPath(d.secondaryTarget) === disk.path);
+      const matchedMount = localMounts.find((m) => m.enabled && toGuestPath(m.guestTarget) === disk.path);
+      return {
+        id: disk.id,
+        defaultName: `硬盘 ${index + 2}`,
+        path: disk.path,
+        detail: {
+          kind: matchedDisk ? '扩展存储' : matchedMount ? '本机目录直通' : '已发现目录',
+          source: matchedDisk?.name ?? matchedMount?.hostPath,
+          total: matchedDisk?.totalSizeString,
+          used: matchedDisk?.usedSpaceString,
+          free: matchedDisk?.freeSpaceString,
+          usedPercent: matchedDisk?.usedPercent,
+          fileSystem: matchedDisk?.fileSystem,
+          writable: matchedMount?.writable,
+          description: matchedMount?.description,
+        } as DriveDetailInfo,
+      };
+    }),
   ];
   const activeDriveId = [...driveOptions]
     .sort((a, b) => b.path.length - a.path.length)
     .find((drive) => currentPath === drive.path || currentPath.startsWith(`${drive.path}/`))?.id;
 
-  const handleRenameDrive = (driveId: string, currentName: string) => {
-    const nextName = window.prompt('修改硬盘显示名称', currentName)?.trim();
-    if (!nextName) return;
+  // 硬盘详情弹窗：铅笔按钮展示容量/映射路径等信息，名称可顺带修改
+  const [detailDriveId, setDetailDriveId] = useState<string | null>(null);
+  const detailDrive = detailDriveId
+    ? driveOptions
+        .map((drive) => ({ ...drive, name: diskNames[drive.id] || drive.defaultName }))
+        .find((drive) => drive.id === detailDriveId) || null
+    : null;
+  const openDriveDetail = (driveId: string) => {
+    setDetailDriveId(driveId);
+  };
+  const handleSaveDriveName = (driveId: string, nextName: string) => {
     const updated = { ...diskNames, [driveId]: nextName };
     setDiskNames(updated);
     localStorage.setItem('macnas_disk_display_names', JSON.stringify(updated));
@@ -632,7 +673,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-white text-sky-500 dark:bg-slate-800' : 'bg-white text-slate-400 dark:bg-slate-800'}`}><HardDrive className="h-4 w-4" /></span>
                   <span className={`truncate text-xs font-bold ${active ? 'text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200'}`}>{name}</span>
                 </button>
-                <button type="button" onClick={() => handleRenameDrive(drive.id, name)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-sky-500 dark:hover:bg-slate-800" aria-label={`重命名${name}`}><Pencil className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => openDriveDetail(drive.id)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-sky-500 dark:hover:bg-slate-800" aria-label={`查看${name}详情`}><Pencil className="h-3.5 w-3.5" /></button>
               </div>
             );
           })}
@@ -810,6 +851,12 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           }}
         />
       </div>
+
+      <DriveDetailModal
+        drive={detailDrive}
+        onClose={() => setDetailDriveId(null)}
+        onSaveName={handleSaveDriveName}
+      />
 
       <FileActionSheet
         item={actionItem}
