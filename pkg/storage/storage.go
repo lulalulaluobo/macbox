@@ -717,7 +717,7 @@ func BindExternalDiskContext(ctx context.Context, cfg *config.Config, diskID, mo
 	mountPoint = normalizedMountPoint
 
 	if sizeGB == 0 {
-		sizeGB = 100 // Default to 100 GiB sparse image
+		sizeGB = 10 // Default to a small sparse image; host passthrough data stays on macOS
 	}
 	if sizeGB < 1 || sizeGB > maxExternalDiskSizeGB {
 		return "", fmt.Errorf("外接数据盘容量必须在 1 到 %d GiB 之间", maxExternalDiskSizeGB)

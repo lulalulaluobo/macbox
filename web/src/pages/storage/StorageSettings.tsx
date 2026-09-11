@@ -58,7 +58,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   // External Disk Bind Modal
   const [showBindModal, setShowBindModal] = useState(false);
   const [bindingDisk, setBindingDisk] = useState<DiskInfo | null>(null);
-  const [bindSizeGB, setBindSizeGB] = useState<number>(100);
+  const [bindSizeGB, setBindSizeGB] = useState<number>(10);
   const [bindLoading, setBindLoading] = useState(false);
   const [showUnbindConfirm, setShowUnbindConfirm] = useState(false);
   const [unbindLoading, setUnbindLoading] = useState(false);
@@ -102,15 +102,10 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
 
   const handleOpenBindModal = (disk: DiskInfo) => {
     setBindingDisk(disk);
-    // Estimate sensible size: min(200GB, 80% free space if available, max 50GB)
-    let defaultGB = 100;
-    if (disk.freeSpace > 0) {
-      const freeGB = Math.floor(disk.freeSpace / (1024 * 1024 * 1024));
-      if (freeGB > 10) {
-        defaultGB = Math.min(500, Math.floor(freeGB * 0.8));
-      }
-    }
-    setBindSizeGB(defaultGB);
+    // This is a sparse image for /data, not a reservation of the whole disk.
+    // Keep the default small because host folders configured as VirtioFS
+    // passthrough mounts remain on macOS and do not consume this image.
+    setBindSizeGB(10);
     setShowBindModal(true);
   };
 
@@ -1187,12 +1182,15 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  分配数据镜像容量 (GiB)
+                  NAS 本地数据盘上限 (GiB)
                 </label>
+                <p className="mb-2 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
+                  这是外接盘上的稀疏镜像最大容量，仅用于未直通的应用配置、持久化数据和缓存。通过“本机目录直通”映射的文件仍留在 Mac 原目录，不占用此镜像。建议 10 GiB，纯测试可填写 5 GiB。
+                </p>
                 <div className="flex items-center space-x-3">
                   <input
                     type="number"
-                    min={10}
+                    min={5}
                     max={20000}
                     value={bindSizeGB}
                     onChange={(e) => setBindSizeGB(parseInt(e.target.value) || 10)}
