@@ -8,7 +8,7 @@ export function getStoredTheme(): ThemeMode {
   if (saved === 'light' || saved === 'dark' || saved === 'system') {
     return saved;
   }
-  return 'dark';
+  return 'light';
 }
 
 export function applyTheme(theme: ThemeMode) {
@@ -26,10 +26,12 @@ export function applyTheme(theme: ThemeMode) {
   if (isDark) {
     root.classList.add('dark');
     root.classList.remove('light');
+    root.dataset.theme = 'midnight';
     root.style.colorScheme = 'dark';
   } else {
     root.classList.add('light');
     root.classList.remove('dark');
+    root.dataset.theme = 'sora-sky';
     root.style.colorScheme = 'light';
   }
 }

@@ -2,13 +2,16 @@ import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, Compos
 
 const BASE_URL = '/api';
 
+function getAuthenticatedFileUrl(endpoint: 'download' | 'raw', path: string) {
+  const params = new URLSearchParams({ path });
+  return `${BASE_URL}/terminal/files/${endpoint}?${params.toString()}`;
+}
+
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
-  const token = localStorage.getItem('macnas-auth-token');
   const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers,
     },
   });
@@ -169,7 +172,10 @@ export const api = {
       body: JSON.stringify({ action }),
     }),
   deleteComposeProject: (name: string, deleteVolumes = false) =>
-    fetchJSON<{ status: string }>(`${BASE_URL}/docker/compose/${name}?volumes=${deleteVolumes}`, { method: 'DELETE' }),
+    fetchJSON<{ status: string }>(
+      `${BASE_URL}/docker/compose/${name}?volumes=${deleteVolumes}${deleteVolumes ? '&confirm=DELETE_DATA' : ''}`,
+      { method: 'DELETE' },
+    ),
 
   // Docker Networks & Mirrors
   getDockerNetworks: () => fetchJSON<DockerNetwork[]>(`${BASE_URL}/docker/networks`),
@@ -267,8 +273,7 @@ export const api = {
   uploadFile: async (file: File, targetDir: string) => {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('targetDir', targetDir);
-    const res = await fetch(`${BASE_URL}/terminal/files/upload`, {
+    const res = await fetch(`${BASE_URL}/terminal/files/upload?targetDir=${encodeURIComponent(targetDir)}`, {
       method: 'POST',
       body: formData,
     });
@@ -278,8 +283,8 @@ export const api = {
     }
     return res.json();
   },
-  getFileDownloadUrl: (path: string) => `${BASE_URL}/terminal/files/download?path=${encodeURIComponent(path)}`,
-  getFileRawUrl: (path: string) => `${BASE_URL}/terminal/files/raw?path=${encodeURIComponent(path)}`,
+  getFileDownloadUrl: (path: string) => getAuthenticatedFileUrl('download', path),
+  getFileRawUrl: (path: string) => getAuthenticatedFileUrl('raw', path),
   renameFile: (oldPath: string, newPath: string) => fetchJSON<{ status: string; message: string }>(
     `${BASE_URL}/terminal/files/rename`,
     {
@@ -392,6 +397,13 @@ export const api = {
     }),
 
   // Web Console Authentication & User Management
+  getAuthStatus: () =>
+    fetchJSON<{ setupRequired: boolean }>(`${BASE_URL}/auth/status`),
+  setupAdmin: (username: string, password: string, displayName?: string) =>
+    fetchJSON<{ status: string; user: NASUser }>(`${BASE_URL}/auth/setup`, {
+      method: 'POST',
+      body: JSON.stringify({ username, password, displayName: displayName || '' }),
+    }),
   login: (username: string, password: string, rememberMe: boolean = false) =>
     fetchJSON<AuthResponse>(`${BASE_URL}/auth/login`, {
       method: 'POST',

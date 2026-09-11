@@ -179,30 +179,27 @@ export const Apps: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-3">
-            <h2 className="text-2xl font-extrabold text-white tracking-tight">NAS 应用商城</h2>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium">
+            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">NAS 应用商城</h2>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 font-medium">
               Docker 容器引擎
             </span>
           </div>
-          <p className="text-sm text-slate-400 mt-1">
-            一键安装官方精选与社区生态应用。安装前自由定制宿主机端口、数据存储与外接盘映射；支持通过 Docker Compose 录入私有应用。
-          </p>
         </div>
 
-        <div className="flex items-center space-x-2.5">
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
           <button
             onClick={handleSyncCommunity}
             disabled={syncing}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition shadow-sm disabled:opacity-50"
+            className="flex min-h-10 min-w-10 flex-none items-center justify-center space-x-1.5 rounded-full border border-slate-200/80 bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-xs transition hover:bg-slate-200 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800/90 dark:text-slate-200 dark:hover:bg-slate-700"
             title="同步并加载开源社区开源应用商城"
           >
-            <Layers className={`w-3.5 h-3.5 text-amber-400 ${syncing ? 'animate-spin' : ''}`} />
-            <span>{syncing ? '同步中...' : '同步社区源'}</span>
+            <Layers className={`w-3.5 h-3.5 text-amber-500 dark:text-amber-400 ${syncing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{syncing ? '同步中...' : '同步社区源'}</span>
           </button>
 
           <button
             onClick={() => setShowCustomModal(true)}
-            className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold shadow-lg shadow-sky-500/25 transition"
+            className="flex min-h-10 flex-1 items-center justify-center space-x-1.5 rounded-full bg-[#ff7d9a] px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-[#ff7d9a]/20 transition hover:bg-[#f36f8d] sm:flex-none"
           >
             <Plus className="w-4 h-4" />
             <span>导入 Compose 应用</span>
@@ -210,7 +207,7 @@ export const Apps: React.FC = () => {
 
           <button
             onClick={loadApps}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition"
+            className="flex min-h-10 min-w-10 items-center justify-center rounded-full border border-slate-200/80 bg-slate-100 text-slate-600 transition hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
             title="刷新商城列表"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -218,45 +215,45 @@ export const Apps: React.FC = () => {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 flex items-center space-x-3.5">
-          <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+      {/* A single quiet status strip replaces four competing cards. */}
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[22px] border border-slate-200/80 bg-slate-200/70 shadow-xs dark:border-slate-800 dark:bg-slate-800 sm:grid-cols-4">
+        <div className="flex items-center space-x-3.5 bg-white p-3.5 dark:bg-slate-900/75">
+          <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-500 dark:text-sky-400">
             <Store className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xl font-black text-white">{totalAppsCount}</div>
-            <div className="text-[11px] text-slate-400">商城可用项目</div>
+            <div className="text-xl font-black text-slate-900 dark:text-white">{totalAppsCount}</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">商城可用项目</div>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 flex items-center space-x-3.5">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+        <div className="flex items-center space-x-3.5 bg-white p-3.5 dark:bg-slate-900/75">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 dark:text-emerald-400">
             <PlayCircle className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xl font-black text-emerald-400">{runningAppsCount}</div>
-            <div className="text-[11px] text-slate-400">正在运行服务</div>
+            <div className="text-xl font-black text-emerald-600 dark:text-emerald-400">{runningAppsCount}</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">正在运行服务</div>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 flex items-center space-x-3.5">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+        <div className="flex items-center space-x-3.5 bg-white p-3.5 dark:bg-slate-900/75">
+          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-500 dark:text-indigo-400">
             <PackageCheck className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xl font-black text-indigo-300">{installedAppsCount}</div>
-            <div className="text-[11px] text-slate-400">已部署安装</div>
+            <div className="text-xl font-black text-indigo-600 dark:text-indigo-300">{installedAppsCount}</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">已部署安装</div>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 flex items-center space-x-3.5">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+        <div className="flex items-center space-x-3.5 bg-white p-3.5 dark:bg-slate-900/75">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 dark:text-amber-400">
             <Sparkles className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-xl font-black text-amber-300">{customAppsCount}</div>
-            <div className="text-[11px] text-slate-400">我的自定义 Compose</div>
+            <div className="text-xl font-black text-amber-600 dark:text-amber-300">{customAppsCount}</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">我的自定义 Compose</div>
           </div>
         </div>
       </div>
@@ -266,8 +263,8 @@ export const Apps: React.FC = () => {
         <div
           className={`p-4 rounded-xl text-xs flex items-center justify-between transition-all ${
             alertMsg.type === 'success'
-              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
-              : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
+              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-300'
+              : 'bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-300'
           }`}
         >
           <div className="flex items-center space-x-2">
@@ -281,36 +278,42 @@ export const Apps: React.FC = () => {
       )}
 
       {/* Filter and Search Bar */}
-      <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 space-y-3.5">
+      <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800/80 shadow-xs space-y-3.5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           {/* Search */}
           <div className="relative flex-1 max-w-md">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               placeholder="搜索应用名称、描述、端口 (如: jellyfin, 8096)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-sky-500 transition"
+              className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-sky-500 transition"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          {/* Source Filter Pills */}
-          <div className="flex items-center space-x-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+          {/* Source filters are secondary and stay collapsed until needed. */}
+          <details className="group rounded-xl border border-slate-200 bg-slate-50 text-xs dark:border-slate-800 dark:bg-slate-950">
+            <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-3 font-semibold text-slate-600 dark:text-slate-300">
+              <span>来源：{selectedSource === 'all' ? '全部' : selectedSource === 'builtin' ? '官方精选' : selectedSource === 'community' ? '社区商城' : '我的自定义'}</span>
+              <span className="text-sky-600 group-open:hidden dark:text-sky-400">筛选</span>
+              <span className="hidden text-slate-400 group-open:block">收起</span>
+            </summary>
+          <div className="flex items-center space-x-1.5 border-t border-slate-200 p-1 dark:border-slate-800">
             <button
               onClick={() => setSelectedSource('all')}
               className={`px-3 py-1.5 rounded-lg font-medium transition ${
                 selectedSource === 'all'
-                  ? 'bg-slate-800 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
               }`}
             >
               全部来源
@@ -319,8 +322,8 @@ export const Apps: React.FC = () => {
               onClick={() => setSelectedSource('builtin')}
               className={`px-3 py-1.5 rounded-lg font-medium transition ${
                 selectedSource === 'builtin'
-                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-300 dark:border-sky-500/30'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
               }`}
             >
               官方精选
@@ -329,8 +332,8 @@ export const Apps: React.FC = () => {
               onClick={() => setSelectedSource('community')}
               className={`px-3 py-1.5 rounded-lg font-medium transition ${
                 selectedSource === 'community'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
               }`}
             >
               社区商城
@@ -339,17 +342,18 @@ export const Apps: React.FC = () => {
               onClick={() => setSelectedSource('custom')}
               className={`px-3 py-1.5 rounded-lg font-medium transition ${
                 selectedSource === 'custom'
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
               }`}
             >
               我的自定义
             </button>
           </div>
+          </details>
         </div>
 
         {/* Category Tabs */}
-        <div className="flex items-center space-x-1 overflow-x-auto pb-1 border-t border-slate-800/60 pt-2.5">
+        <div className="mobile-chip-row flex items-center space-x-1 overflow-x-auto border-t border-slate-200/80 pb-1 pt-2.5 dark:border-slate-800/60">
           {categories.map((cat) => (
             <button
               key={cat.id}
@@ -357,7 +361,7 @@ export const Apps: React.FC = () => {
               className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition ${
                 selectedCategory === cat.id
                   ? 'bg-sky-500 text-white shadow-md shadow-sky-500/20 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60'
               }`}
             >
               {cat.name}
@@ -368,13 +372,13 @@ export const Apps: React.FC = () => {
 
       {/* Apps Grid */}
       {filteredApps.length === 0 ? (
-        <div className="p-12 rounded-2xl bg-slate-900/40 border border-slate-800 text-center space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-slate-800 mx-auto flex items-center justify-center text-slate-500">
+        <div className="p-12 rounded-2xl bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 text-center space-y-3 shadow-xs">
+          <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 mx-auto flex items-center justify-center text-slate-400 dark:text-slate-500">
             <Server className="w-6 h-6" />
           </div>
-          <h4 className="text-base font-bold text-white">未找到匹配的应用</h4>
-          <p className="text-xs text-slate-400 max-w-md mx-auto">
-            未发现与当前分类或关键词匹配的应用。您可以尝试清空筛选条件，或点击右上角导入自定义 Docker Compose。
+          <h4 className="text-base font-bold text-slate-900 dark:text-white">未找到匹配的应用</h4>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+            未发现与当前分类或关键词匹配的应用
           </p>
           <div className="pt-2 flex justify-center space-x-3">
             {(selectedCategory !== 'all' || selectedSource !== 'all' || searchQuery) && (
@@ -384,7 +388,7 @@ export const Apps: React.FC = () => {
                   setSelectedSource('all');
                   setSearchQuery('');
                 }}
-                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition"
+                className="px-4 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-medium border border-slate-200 dark:border-slate-700 transition"
               >
                 重置所有筛选
               </button>
@@ -440,7 +444,7 @@ export const Apps: React.FC = () => {
       {/* Logs Modal */}
       {activeLogApp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="terminal-dark-preserve w-full max-w-4xl h-[78vh] flex flex-col rounded-2xl bg-[#0b0f19] border border-slate-800 shadow-2xl overflow-hidden">
+          <div className="terminal-dark-preserve w-full max-w-4xl h-[78dvh] flex flex-col rounded-2xl bg-[#0b0f19] border border-slate-800 shadow-2xl overflow-hidden">
             <div className="px-5 py-3.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
                 <Terminal className="w-4 h-4 text-sky-400" />

@@ -1,27 +1,27 @@
-import React from 'react';
-import {
-  ArrowLeft, Search, Grid, List, FolderPlus, Upload, RefreshCw, Copy, Scissors, Clipboard, X
-} from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowLeft, CheckSquare, Clipboard, Copy, FolderPlus, Grid, List, Plus, RefreshCw, Scissors, Search, SlidersHorizontal, Upload, X } from 'lucide-react';
 import { ClipboardState } from './types';
 
 interface FileToolbarProps {
   currentPath: string;
-  pathParts: string[];
   searchQuery: string;
   sortBy: 'name' | 'size' | 'mtime';
   sortOrder: 'asc' | 'desc';
   viewMode: 'grid' | 'list';
+  selectionMode: boolean;
+  selectedCount: number;
+  totalCount: number;
   loading: boolean;
   uploading: boolean;
   uploadProgress: string;
   clipboard: ClipboardState | null;
   fileInputRef: React.RefObject<HTMLInputElement>;
-  onNavigateToPart: (index: number) => void;
   onGoUp: () => void;
-  onGoHome: () => void;
   onSearchChange: (query: string) => void;
   onSortChange: (sortBy: 'name' | 'size' | 'mtime', sortOrder: 'asc' | 'desc') => void;
   onViewModeChange: (mode: 'grid' | 'list') => void;
+  onToggleSelectionMode: () => void;
+  onSelectAll: () => void;
   onOpenMkdir: () => void;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRefresh: () => void;
@@ -29,201 +29,84 @@ interface FileToolbarProps {
   onClearClipboard: () => void;
 }
 
+const sortOptions = [
+  { label: '名称 A–Z', by: 'name', order: 'asc' },
+  { label: '名称 Z–A', by: 'name', order: 'desc' },
+  { label: '最近修改', by: 'mtime', order: 'desc' },
+  { label: '文件大小', by: 'size', order: 'desc' },
+] as const;
+
 export const FileToolbar: React.FC<FileToolbarProps> = ({
-  currentPath,
-  pathParts,
-  searchQuery,
-  sortBy,
-  sortOrder,
-  viewMode,
-  loading,
-  uploading,
-  uploadProgress,
-  clipboard,
-  fileInputRef,
-  onNavigateToPart,
-  onGoUp,
-  onGoHome,
-  onSearchChange,
-  onSortChange,
-  onViewModeChange,
-  onOpenMkdir,
-  onFileChange,
-  onRefresh,
-  onPaste,
-  onClearClipboard,
+  currentPath, searchQuery, sortBy, sortOrder, viewMode, selectionMode, selectedCount, totalCount,
+  loading, uploading, uploadProgress, clipboard, fileInputRef, onGoUp,
+  onSearchChange, onSortChange, onViewModeChange, onToggleSelectionMode, onSelectAll, onOpenMkdir,
+  onFileChange, onRefresh, onPaste, onClearClipboard,
 }) => {
+  const [showFilters, setShowFilters] = useState(false);
+
   return (
-    <div className="space-y-3">
-      {/* Action Toolbar */}
-      <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        {/* Breadcrumbs & Navigation */}
-        <div className="flex items-center space-x-2 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
-          <button
-            onClick={onGoUp}
-            disabled={currentPath === '/' || currentPath === '/data'}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:pointer-events-none transition"
-            title="返回上一级"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={onGoHome}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition ${
-              currentPath === '/data' ? 'bg-sky-500/20 text-sky-300' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            NAS 数据
-          </button>
-
-          {pathParts.map((part, index) => {
-            const isLast = index === pathParts.length - 1;
-            return (
-              <div key={index} className="flex items-center space-x-1 shrink-0">
-                <span className="text-slate-600 text-xs">/</span>
-                <button
-                  onClick={() => onNavigateToPart(index)}
-                  className={`px-2 py-1 rounded-lg text-xs font-mono transition ${
-                    isLast
-                      ? 'font-bold text-sky-400 bg-sky-500/10'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-                  }`}
-                >
-                  {part}
-                </button>
+    <div className="shrink-0 space-y-2">
+      <section className="rounded-[20px] border border-slate-200/80 bg-white p-2 dark:border-slate-800/80 dark:bg-slate-900/80">
+        {selectionMode ? (
+          <div className="flex min-h-11 items-center justify-between gap-3 px-1">
+            <button type="button" onClick={onToggleSelectionMode} className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-600 dark:text-slate-300" aria-label="退出选择"><X className="h-5 w-5" /></button>
+            <div className="min-w-0 text-center">
+              <p className="text-sm font-bold text-slate-900 dark:text-white">选择文件</p>
+              <p className="text-[10px] text-slate-400">已选择 {selectedCount} 项</p>
+            </div>
+            <button type="button" onClick={onSelectAll} className="min-h-10 px-2 text-xs font-bold text-sky-600 dark:text-sky-400">{selectedCount === totalCount && totalCount > 0 ? '取消全选' : '全选'}</button>
+          </div>
+        ) : (
+          <>
+            <div className="flex min-h-11 items-center gap-1.5">
+              <button onClick={onGoUp} disabled={currentPath === '/' || currentPath === '/data'} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-600 disabled:pointer-events-none disabled:opacity-30 dark:bg-slate-800 dark:text-slate-300" title="返回上一级"><ArrowLeft className="h-4 w-4" /></button>
+              <button type="button" onClick={() => setShowFilters(true)} className="min-w-0 flex-1 truncate px-2 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">{sortOptions.find((item) => item.by === sortBy && item.order === sortOrder)?.label || '排序'}</button>
+              <button type="button" onClick={() => setShowFilters((open) => !open)} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${showFilters || searchQuery ? 'bg-sky-500 text-white' : 'bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`} aria-label="搜索和筛选"><SlidersHorizontal className="h-4 w-4" /></button>
+              <button onClick={() => onViewModeChange(viewMode === 'grid' ? 'list' : 'grid')} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-300" title={viewMode === 'grid' ? '切换列表视图' : '切换网格视图'}>{viewMode === 'grid' ? <List className="h-4 w-4" /> : <Grid className="h-4 w-4" />}</button>
+              <button type="button" onClick={onToggleSelectionMode} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-300" aria-label="选择文件"><CheckSquare className="h-4 w-4" /></button>
+              <div className="hidden items-center gap-1 md:flex">
+                <button onClick={onRefresh} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500" title="刷新"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
+                <button onClick={onOpenMkdir} className="hidden h-9 items-center gap-1 rounded-lg px-2 text-xs text-slate-600 md:flex dark:text-slate-300"><FolderPlus className="h-4 w-4" />新建</button>
+                <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="hidden h-9 items-center gap-1 rounded-lg px-2 text-xs text-slate-600 disabled:opacity-50 md:flex dark:text-slate-300"><Upload className="h-4 w-4" />上传</button>
               </div>
-            );
-          })}
-        </div>
+            </div>
 
-        {/* Right Toolbar Controls */}
-        <div className="flex items-center space-x-2 shrink-0">
-          {/* Search Input */}
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="搜索文件..."
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              className="w-36 md:w-44 pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition"
-            />
-          </div>
+            {showFilters && (
+              <div className="mt-2 space-y-2 border-t border-slate-100 pt-2 dark:border-slate-800">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input autoFocus type="search" placeholder="搜索名称或后缀，如 .mp4" value={searchQuery} onChange={(e) => onSearchChange(e.target.value)} className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-xs text-slate-800 focus:border-sky-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200" />
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                  {sortOptions.map((option) => <button key={option.label} type="button" onClick={() => { onSortChange(option.by, option.order); setShowFilters(false); }} className={`min-h-10 rounded-xl px-2 text-xs font-semibold ${sortBy === option.by && sortOrder === option.order ? 'bg-sky-500 text-white' : 'bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>{option.label}</button>)}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
-          {/* Sort Order */}
-          <select
-            value={`${sortBy}-${sortOrder}`}
-            onChange={(e) => {
-              const [by, order] = e.target.value.split('-') as ['name' | 'size' | 'mtime', 'asc' | 'desc'];
-              onSortChange(by, order);
-            }}
-            className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 focus:outline-none focus:border-sky-500 transition"
-          >
-            <option value="name-asc">按名称 (A-Z)</option>
-            <option value="name-desc">按名称 (Z-A)</option>
-            <option value="size-desc">按大小 (大到小)</option>
-            <option value="mtime-desc">按时间 (最新)</option>
-          </select>
+      <input type="file" ref={fileInputRef} onChange={onFileChange} multiple className="hidden" />
 
-          {/* View Mode Toggle */}
-          <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800">
-            <button
-              onClick={() => onViewModeChange('grid')}
-              className={`p-1.5 rounded-lg transition ${viewMode === 'grid' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}`}
-              title="网格视图"
-            >
-              <Grid className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => onViewModeChange('list')}
-              className={`p-1.5 rounded-lg transition ${viewMode === 'list' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}`}
-              title="列表视图"
-            >
-              <List className="w-3.5 h-3.5" />
-            </button>
-          </div>
+      {uploading && <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs text-sky-600 dark:text-sky-300"><span>{uploadProgress || '正在上传文件…'}</span></div>}
 
-          {/* New Folder */}
-          <button
-            onClick={onOpenMkdir}
-            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center space-x-1.5 transition"
-          >
-            <FolderPlus className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden sm:inline">新建</span>
-          </button>
-
-          {/* Upload File */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="px-3.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold flex items-center space-x-1.5 shadow-lg shadow-sky-600/20 transition disabled:opacity-50"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>{uploading ? '上传中...' : '上传'}</span>
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={onFileChange}
-            multiple
-            className="hidden"
-          />
-
-          {/* Refresh */}
-          <button
-            onClick={onRefresh}
-            className="p-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition"
-            title="刷新"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </div>
-
-      {/* Upload Progress Bar */}
-      {uploading && (
-        <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-300 text-xs flex items-center justify-between animate-pulse">
-          <div className="flex items-center space-x-2">
-            <Upload className="w-4 h-4 animate-bounce" />
-            <span>{uploadProgress || '正在上传文件，请稍候...'}</span>
-          </div>
+      {clipboard && (
+        <div className="flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          {clipboard.action === 'copy' ? <Copy className="h-4 w-4 shrink-0" /> : <Scissors className="h-4 w-4 shrink-0" />}
+          <span className="min-w-0 flex-1 truncate">已{clipboard.action === 'copy' ? '复制' : '移动'} {clipboard.items.length} 项</span>
+          <button type="button" onClick={onPaste} className="flex min-h-9 items-center gap-1 rounded-xl bg-amber-500 px-3 font-bold text-white"><Clipboard className="h-3.5 w-3.5" />粘贴</button>
+          <button type="button" onClick={onClearClipboard} className="flex h-9 w-9 items-center justify-center" aria-label="清除剪贴板"><X className="h-4 w-4" /></button>
         </div>
       )}
 
-      {/* Clipboard Paste Banner */}
-      {clipboard && (
-        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg animate-in fade-in">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-300 shrink-0">
-              {clipboard.action === 'copy' ? <Copy className="w-4 h-4" /> : <Scissors className="w-4 h-4" />}
-            </div>
-            <div>
-              <span className="font-bold text-white text-xs">
-                剪贴板：已{clipboard.action === 'copy' ? '复制' : '剪切'} {clipboard.items.length} 个项目
-              </span>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                当前目标目录：<code className="text-amber-300 font-mono">{currentPath}</code>，点击右侧按钮即可粘贴放入。
-              </p>
-            </div>
+      {!selectionMode && (
+        <details className="fixed bottom-[calc(92px+env(safe-area-inset-bottom))] right-4 z-30 md:hidden">
+          <summary className="flex h-14 w-14 cursor-pointer list-none items-center justify-center rounded-full bg-sky-500 text-white" aria-label="新建或上传"><Plus className="h-7 w-7" /></summary>
+          <div className="absolute bottom-16 right-0 w-40 space-y-1 rounded-2xl border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
+            <button type="button" onClick={onOpenMkdir} className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-xs font-bold text-slate-700 dark:text-slate-200"><FolderPlus className="h-4 w-4 text-sky-500" />新建文件夹</button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-xs font-bold text-slate-700 disabled:opacity-50 dark:text-slate-200"><Upload className="h-4 w-4 text-[#ff7d9a]" />上传文件</button>
           </div>
-          <div className="flex items-center space-x-2 self-end sm:self-center shrink-0">
-            <button
-              onClick={onPaste}
-              className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center space-x-1.5 shadow-md shadow-amber-500/20 transition"
-            >
-              <Clipboard className="w-3.5 h-3.5" />
-              <span>粘贴到当前目录</span>
-            </button>
-            <button
-              onClick={onClearClipboard}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
-              title="清除剪贴板"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+        </details>
       )}
     </div>
   );

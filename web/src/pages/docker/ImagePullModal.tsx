@@ -44,33 +44,33 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-2xl rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="w-full max-w-2xl rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="px-6 py-4 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between">
+        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-950/70 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
+            <div className="p-2 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
               <Download className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">拉取 Docker 镜像</h3>
-              <p className="text-xs text-slate-400">从 Docker Hub 或指定容器镜像仓库拉取镜像到本地</p>
+              <h3 className="font-bold text-base text-slate-900 dark:text-white">拉取 Docker 镜像</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">从 Docker Hub 或镜像仓库下载镜像</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
             disabled={pulling}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition disabled:opacity-50"
+            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-900 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400 dark:hover:text-white transition disabled:opacity-50"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-5 overflow-y-auto max-h-[70vh]">
+        <div className="p-6 space-y-5 overflow-y-auto max-h-[70dvh]">
           {errorMsg && (
-            <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center space-x-2">
+            <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-300 text-xs flex items-center space-x-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               <span>{errorMsg}</span>
             </div>
@@ -78,8 +78,8 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
 
           {/* Input */}
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              镜像名称与标签 (Image Name & Tag)
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+              镜像名称与标签 (如: nginx:alpine)
             </label>
             <div className="flex space-x-2">
               <input
@@ -88,25 +88,24 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
                 onChange={e => setImageName(e.target.value)}
                 disabled={pulling}
                 placeholder="例如: nginx:alpine, redis:7-alpine, vaultwarden/server:latest"
-                className="flex-1 px-3.5 py-2 text-xs font-mono bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition disabled:opacity-60"
+                className="flex-1 px-3.5 py-2 text-xs font-mono bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-sky-500 transition disabled:opacity-60"
               />
               <button
                 onClick={() => handlePull()}
                 disabled={pulling || !imageName.trim()}
-                className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-xs text-white font-bold transition disabled:opacity-50"
+                className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-xs text-white font-bold transition disabled:opacity-50 shadow-xs"
               >
                 {pulling ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                 <span>{pulling ? '拉取中' : '开始拉取'}</span>
               </button>
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">若未指定标签，默认将拉取 :latest 最新版</p>
           </div>
 
           {/* Popular Images Tags */}
           <div className="space-y-2">
-            <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-300">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>常用热门基础镜像点选:</span>
+            <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
+              <span>常用热门基础镜像:</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {POPULAR_IMAGES.map(item => (
@@ -117,7 +116,7 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
                   onClick={() => {
                     setImageName(item.name);
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-mono transition flex items-center space-x-1"
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 border border-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 dark:hover:text-white dark:border-slate-700 text-xs font-mono transition flex items-center space-x-1"
                 >
                   <span>{item.name}</span>
                 </button>
@@ -140,11 +139,11 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 bg-slate-950/70 border-t border-slate-800 flex justify-end">
+        <div className="px-6 py-4 bg-slate-50 dark:bg-slate-950/70 border-t border-slate-200 dark:border-slate-800 flex justify-end">
           <button
             onClick={onClose}
             disabled={pulling}
-            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-semibold transition disabled:opacity-50"
+            className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-semibold transition disabled:opacity-50"
           >
             {pulling ? '后台拉取中' : '关闭'}
           </button>

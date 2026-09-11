@@ -159,8 +159,8 @@ export const Settings: React.FC<SettingsProps> = ({
       setAlertMsg({ type: 'error', text: '请填写用户名和登录密码' });
       return;
     }
-    if (newNASPassword.length < 6) {
-      setAlertMsg({ type: 'error', text: '密码长度至少需要 6 个字符' });
+	if (newNASPassword.length < 12) {
+	  setAlertMsg({ type: 'error', text: '密码长度至少需要 12 个字符' });
       return;
     }
     if (newNASPassword !== newNASConfirmPassword) {
@@ -211,8 +211,8 @@ export const Settings: React.FC<SettingsProps> = ({
         enabled: editEnabled,
       };
       if (editNewPassword.trim()) {
-        if (editNewPassword.trim().length < 6) {
-          setAlertMsg({ type: 'error', text: '重置密码长度至少需要 6 个字符' });
+		if (editNewPassword.trim().length < 12) {
+		  setAlertMsg({ type: 'error', text: '重置密码长度至少需要 12 个字符' });
           setNasActionLoading(false);
           return;
         }
@@ -461,27 +461,21 @@ export const Settings: React.FC<SettingsProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 pb-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-3">
-            <h2 className="text-2xl font-extrabold text-white tracking-tight">系统与安全设置</h2>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium">
-              Linux VM 安全中枢
-            </span>
-          </div>
-          <p className="text-sm text-slate-400 mt-1">
-            管理 Linux 终端用户账户、Root 超级管理员密码、SSH 远程连接策略（开放 Root 登录与端口）及终端默认登录身份。
-          </p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-2xl">设置</h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">账户、安全与系统偏好</p>
         </div>
 
         <button
           onClick={loadData}
-          className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition shadow-sm self-start sm:self-auto"
+          aria-label="刷新设置状态"
+          className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${usersLoading || sshLoading ? 'animate-spin' : ''}`} />
-          <span>刷新状态</span>
+          <span className="hidden sm:inline">刷新</span>
         </button>
       </div>
 
@@ -505,141 +499,98 @@ export const Settings: React.FC<SettingsProps> = ({
       )}
 
       {/* Navigation Sub-Tabs */}
-      <div className="flex items-center space-x-2 bg-slate-100/90 dark:bg-slate-900/70 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800/80 overflow-x-auto text-xs font-semibold shadow-xs">
+      <div className="grid grid-cols-3 gap-1 rounded-2xl border border-slate-200 bg-slate-100/80 p-1.5 text-xs font-semibold dark:border-slate-800 dark:bg-slate-900/70 sm:grid-cols-6">
         <button
           onClick={() => setActiveSubTab('nas_users')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
+          className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 py-2 transition ${
             activeSubTab === 'nas_users'
               ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
-          <UserCheck className="w-4 h-4 text-sky-400" />
-          <span>👑 NAS 用户管理 (登录/管理员)</span>
+          <UserCheck className="h-4 w-4" />
+          <span>NAS 用户</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('users')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
+          className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 py-2 transition ${
             activeSubTab === 'users'
               ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
           <Users className="w-4 h-4 text-slate-500" />
-          <span>Linux 终端用户</span>
+          <span>系统用户</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('rootpwd')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
+          className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 py-2 transition ${
             activeSubTab === 'rootpwd'
               ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
           <Crown className="w-4 h-4 text-amber-500" />
-          <span>Root 密码管理</span>
+          <span>Root 密码</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('ssh')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
+          className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 py-2 transition ${
             activeSubTab === 'ssh'
               ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
           <Shield className="w-4 h-4 text-teal-500" />
-          <span>SSH 远程连接设置</span>
+          <span>SSH</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('terminal')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
+          className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 py-2 transition ${
             activeSubTab === 'terminal'
               ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
           <Terminal className="w-4 h-4 text-sky-500" />
-          <span>终端登录身份设置</span>
+          <span>终端</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('appearance')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl whitespace-nowrap shrink-0 transition ${
+          className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 py-2 transition ${
             activeSubTab === 'appearance'
               ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-800/50'
           }`}
         >
           <Palette className="w-4 h-4 text-indigo-500" />
-          <span>外观与主题</span>
+          <span>外观</span>
         </button>
       </div>
 
       {/* ===================== 0. NAS Console Users Management Panel ===================== */}
       {activeSubTab === 'nas_users' && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* Header Card */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/90 dark:border-slate-800/80 shadow-xs">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white p-4 dark:border-slate-800/80 dark:bg-slate-900/60">
             <div>
               <div className="flex items-center space-x-2.5">
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">NAS 控制台用户与超级管理员管理</h3>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/30 font-medium">
-                  Web 控制中枢
-                </span>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white sm:text-base">NAS 用户</h3>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                管理登录 Web 管理界面的权限账户。系统初始管理员为 <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">admin</span>，新建并授权其他超级管理员后，即可安全删除初始 admin 账户。
-              </p>
+              <p className="mt-0.5 hidden text-xs text-slate-500 dark:text-slate-400 sm:block">管理登录账号与管理员权限</p>
             </div>
             <button
               onClick={() => setShowAddNASModal(true)}
-              className="flex items-center space-x-1.5 px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold shadow-md shadow-sky-500/25 transition self-start sm:self-auto cursor-pointer"
+              className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-sky-500 px-3 py-2 text-xs font-bold text-white transition hover:bg-sky-600"
             >
               <Plus className="w-4 h-4" />
-              <span>添加 NAS 用户</span>
+              <span>添加用户</span>
             </button>
-          </div>
-
-          {/* User Stats Overview */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 shadow-xs flex items-center space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-sky-50 dark:bg-sky-500/15 border border-sky-200 dark:border-sky-500/30 flex items-center justify-center text-sky-600 dark:text-sky-400">
-                <Users className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">控制台用户总数</p>
-                <p className="text-xl font-extrabold text-slate-900 dark:text-white">{nasUsers.length} 人</p>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 shadow-xs flex items-center space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400">
-                <Crown className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">超级管理员数量</p>
-                <p className="text-xl font-extrabold text-slate-900 dark:text-white">
-                  {nasUsers.filter((u) => u.role === 'admin' && u.enabled).length} 位
-                </p>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 shadow-xs flex items-center space-x-3.5">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                <Shield className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">当前会话身份</p>
-                <p className="text-base font-bold text-slate-900 dark:text-white truncate">
-                  {currentUser?.username || 'admin'}
-                  {currentUser?.role === 'admin' && <span className="ml-1 text-xs text-amber-500 font-semibold">(超管)</span>}
-                </p>
-              </div>
-            </div>
           </div>
 
           {/* NAS Users Cards Grid */}
@@ -763,7 +714,7 @@ export const Settings: React.FC<SettingsProps> = ({
             <div>
               <h3 className="text-base font-bold text-white">系统用户与权限</h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                展示当前 Linux 虚拟机已创建的交互式系统用户。普通用户可随时分配 sudo 管理员权限及加入 docker 组。
+                展示当前 Linux 虚拟机已创建的交互式系统用户。普通用户默认不会获得 sudo 或 docker 权限。
               </p>
             </div>
             <button
@@ -1877,7 +1828,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   type="password"
                   value={newNASPassword}
                   onChange={(e) => setNewNASPassword(e.target.value)}
-                  placeholder="至少 6 位密码"
+				  placeholder="至少 12 位密码"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
                   required
                 />

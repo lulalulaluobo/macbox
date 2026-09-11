@@ -97,10 +97,10 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
   }, [inputText, isMultiline]);
 
   return (
-    <div className="terminal-dark-preserve border-t border-slate-800/90 bg-[#090d16]/95 backdrop-blur-md p-3 space-y-2.5">
+    <div className="terminal-dark-preserve shrink-0 space-y-1.5 border-t border-slate-800/90 bg-[#090d16] p-2 sm:space-y-2 sm:p-3">
       {/* 1. Virtual Control Keypad Bar (对标移动与桌面级终端按键条) */}
-      <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 scrollbar-none select-none">
-        <div className="flex items-center space-x-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800/90 shadow-inner">
+      <div className="flex touch-pan-x items-center gap-2 overflow-x-auto overscroll-x-contain scrollbar-none select-none [-webkit-overflow-scrolling:touch]">
+        <div className="flex shrink-0 items-center space-x-1.5 rounded-xl border border-slate-800/90 bg-slate-900/90 p-1 shadow-inner">
           {/* Arrow Keys */}
           <button
             type="button"
@@ -141,7 +141,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
         </div>
 
         {/* Shortcuts & Control Keys */}
-        <div className="flex items-center space-x-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800/90 shadow-inner">
+        <div className="flex shrink-0 items-center space-x-1.5 rounded-xl border border-slate-800/90 bg-slate-900/90 p-1 shadow-inner">
           <button
             type="button"
             onClick={() => onSendRaw('\t')}
@@ -190,7 +190,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
         </div>
 
         {/* Right Mode Switchers */}
-        <div className="flex items-center space-x-1.5">
+        <div className="flex shrink-0 items-center space-x-1.5">
           <button
             type="button"
             onClick={() => setIsMultiline(!isMultiline)}
@@ -203,8 +203,8 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
       </div>
 
       {/* 2. Text Input Area (支持长文本、中文、多行 Prompt 顺畅输入) */}
-      <div className="flex items-end gap-2 bg-slate-950 p-2 rounded-2xl border border-slate-800 focus-within:border-sky-500/70 shadow-2xl transition">
-        <div className="p-1.5 text-slate-500 flex-shrink-0">
+      <div className="flex items-end gap-1.5 rounded-2xl border border-slate-800 bg-slate-950 p-1.5 transition focus-within:border-sky-500/70 sm:gap-2 sm:p-2">
+        <div className="hidden flex-shrink-0 p-1.5 text-slate-500 sm:block">
           <Sparkles className="w-4 h-4 text-sky-400" />
         </div>
 
@@ -216,7 +216,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
           disabled={disabled}
           placeholder={placeholder}
           rows={isMultiline ? 3 : 1}
-          className="flex-1 bg-transparent text-white text-xs sm:text-sm font-mono placeholder:text-slate-500 focus:outline-none resize-none leading-relaxed min-h-[38px] max-h-[160px] py-1.5"
+          className="min-h-[36px] max-h-[120px] min-w-0 flex-1 resize-none bg-transparent py-1.5 font-mono text-xs leading-relaxed text-white placeholder:text-slate-500 focus:outline-none sm:max-h-[160px] sm:text-sm"
         />
 
         <div className="flex items-center space-x-1.5 pb-0.5 flex-shrink-0">
@@ -235,7 +235,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             type="button"
             onClick={handleSend}
             disabled={disabled || !inputText.trim()}
-            className="px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 active:scale-95 text-white font-bold text-xs shadow-lg shadow-sky-500/20 transition flex items-center space-x-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex min-h-10 items-center space-x-1.5 rounded-xl bg-sky-500 px-3 py-2 text-xs font-bold text-white shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3.5"
             title="发送命令到终端 (Enter)"
           >
             <span>发送</span>

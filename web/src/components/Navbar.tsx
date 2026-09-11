@@ -4,7 +4,6 @@ import {
   HardDrive,
   Box,
   Grid,
-  Activity,
   Terminal,
   Settings,
   Sun,
@@ -13,13 +12,16 @@ import {
   LogOut,
   Crown,
   Key,
+  MoreHorizontal,
+  Share2,
+  ChevronRight,
 } from 'lucide-react';
 import { VMStatus, NASUser } from '../types';
 import { useTheme } from '../theme';
 
 interface NavbarProps {
-  activeTab: 'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings';
-  setActiveTab: (tab: 'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings') => void;
+  activeTab: 'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings' | 'storage_settings' | 'smb_sharing';
+  setActiveTab: (tab: 'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings' | 'storage_settings' | 'smb_sharing') => void;
   vmStatus?: VMStatus;
   dockerReady?: boolean;
   primaryIP?: string;
@@ -28,181 +30,88 @@ interface NavbarProps {
   onOpenChangePwd?: () => void;
 }
 
+type NavTab = NavbarProps['activeTab'];
+
+const primaryNavItems = [
+  { id: 'dashboard' as const, label: '首页', icon: LayoutDashboard },
+  { id: 'storage' as const, label: '文件', icon: HardDrive },
+  { id: 'docker' as const, label: 'Docker', icon: Box },
+  { id: 'apps' as const, label: '应用', icon: Grid },
+];
+
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   vmStatus,
-  dockerReady,
   currentUser,
   onLogout,
   onOpenChangePwd,
 }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showMore, setShowMore] = useState(false);
   const { isDark, toggleTheme } = useTheme();
 
-  const navItems = [
-    { id: 'dashboard' as const, label: '首页', icon: LayoutDashboard },
-    { id: 'storage' as const, label: '存储', icon: HardDrive },
-    { id: 'docker' as const, label: 'Docker', icon: Box },
-    { id: 'apps' as const, label: '应用', icon: Grid },
-    { id: 'terminal' as const, label: '终端', icon: Terminal },
-    { id: 'settings' as const, label: '设置', icon: Settings },
-  ];
-
-  const getVMStatusColor = () => {
-    if (!vmStatus) return 'bg-slate-400 dark:bg-slate-500';
-    switch (vmStatus.status) {
-      case 'Running':
-        return 'bg-emerald-500';
-      case 'Stopped':
-        return 'bg-amber-500';
-      default:
-        return 'bg-slate-400 dark:bg-slate-500';
-    }
+  const navigate = (tab: NavTab) => {
+    setActiveTab(tab);
+    setShowUserMenu(false);
+    setShowMore(false);
   };
 
+  const vmRunning = vmStatus?.status === 'Running';
+
   return (
-    <header className="sticky top-0 z-50 backdrop-blur-md bg-white/85 dark:bg-[#090d16]/85 border-b border-slate-200/80 dark:border-slate-800/80 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-2">
-          {/* Brand */}
-          <div className="flex items-center space-x-3 cursor-pointer shrink-0" onClick={() => setActiveTab('dashboard')}>
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-500/20 text-white font-bold text-xl">
-              🍎
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 via-slate-800 to-sky-600 dark:from-white dark:via-slate-200 dark:to-sky-400 bg-clip-text text-transparent">
-                  MacNAS
-                </span>
-                <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
-                  MVP v0.1
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Mac mini 家庭服务器</p>
-            </div>
-          </div>
+    <>
+      {activeTab === 'dashboard' && <header className="sora-navbar sticky top-0 z-40 border-b border-slate-200/70 bg-white/82 backdrop-blur-xl transition-colors dark:border-slate-800/70 dark:bg-[#090d16]/82">
+        <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:min-h-[68px] sm:px-6">
+          <button type="button" className="group flex min-h-11 items-center gap-2.5 text-left" onClick={() => navigate('dashboard')} aria-label="返回首页">
+            <span className="flex h-9 w-9 items-center justify-center rounded-[13px] bg-[#ff7d9a] shadow-sm shadow-[#ff7d9a]/20 transition-transform group-hover:-rotate-3">
+              <img src="/icons/macnas-mark.svg" alt="" className="h-7 w-7 rounded-[9px] object-cover" />
+            </span>
+            <span>
+              <span className="block text-[17px] font-black leading-5 tracking-tight text-[#24324a] dark:text-white">MacNAS</span>
+            </span>
+          </button>
 
-          {/* Navigation Tabs */}
-          <nav className="flex items-center space-x-1 bg-slate-100/90 dark:bg-slate-900/60 p-1.5 rounded-2xl border border-slate-200/90 dark:border-slate-800/60 shadow-xs shrink-0">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all duration-200 shrink-0 ${
-                    isActive
-                      ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
-                      : 'text-slate-600 hover:text-slate-950 hover:bg-white dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/50'
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400'}`} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Status Indicators, Theme Toggle & User */}
-          <div className="flex items-center space-x-2 sm:space-x-2.5 shrink-0">
-
-            {/* Lima VM Status */}
-            <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 text-xs font-medium text-slate-700 dark:text-slate-300">
-              <span className={`w-2 h-2 rounded-full ${getVMStatusColor()} animate-pulse`} />
-              <span>VM: {vmStatus?.status || '检测中'}</span>
+          <div className="flex items-center gap-2">
+            <div className={`flex min-h-9 items-center gap-1.5 rounded-full px-3 text-[11px] font-bold ${vmRunning ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'}`}>
+              <span className={`h-2 w-2 rounded-full ${vmRunning ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              <span>{vmRunning ? '运行中' : vmStatus?.status || '检查中'}</span>
             </div>
 
-            {/* Docker Status */}
-            <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/50 text-xs font-medium text-slate-700 dark:text-slate-300">
-              <Activity className={`w-3.5 h-3.5 ${dockerReady ? 'text-emerald-500' : 'text-slate-400'}`} />
-              <span>Docker {dockerReady ? '就绪' : '离线'}</span>
-            </div>
-
-            {/* Theme Toggle Button */}
             <button
+              type="button"
               onClick={toggleTheme}
-              title={isDark ? '切换至明亮模式 (白天)' : '切换至暗黑模式 (夜间)'}
-              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700/60 text-slate-700 dark:text-slate-300 transition active:scale-95 shadow-xs"
+              title={isDark ? '切换至明亮模式' : '切换至夜间模式'}
+              className="flex min-h-10 min-w-10 items-center justify-center rounded-full border border-slate-200/80 bg-white text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
             >
-              {isDark ? (
-                <>
-                  <Sun className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs font-medium hidden xl:inline">日间</span>
-                </>
-              ) : (
-                <>
-                  <Moon className="w-4 h-4 text-sky-500" />
-                  <span className="text-xs font-medium hidden xl:inline">夜间</span>
-                </>
-              )}
+              {isDark ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-sky-500" />}
             </button>
 
-            {/* Current User Capsule */}
             {currentUser && (
               <div className="relative">
                 <button
+                  type="button"
                   onClick={() => setShowUserMenu(!showUserMenu)}
-                  className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-white dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700/60 text-slate-700 dark:text-slate-200 transition active:scale-95 shadow-xs"
+                  className="flex min-h-10 items-center gap-2 rounded-full border border-slate-200/80 bg-white px-2.5 text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  aria-expanded={showUserMenu}
                 >
-                  <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white text-[11px] font-bold">
-                    {currentUser.username.charAt(0).toUpperCase()}
-                  </div>
-                  <span className="text-xs font-semibold max-w-[80px] truncate">{currentUser.username}</span>
-                  {currentUser.role === 'admin' ? (
-                    <span title="超级管理员"><Crown className="w-3.5 h-3.5 text-amber-500" /></span>
-                  ) : (
-                    <User className="w-3.5 h-3.5 text-slate-400" />
-                  )}
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#fff0bd] text-[11px] font-black text-[#6d5a35]">{currentUser.username.charAt(0).toUpperCase()}</span>
+                  <span className="hidden max-w-24 truncate text-xs font-semibold sm:block">{currentUser.displayName || currentUser.username}</span>
                 </button>
 
-                {/* Dropdown Menu */}
                 {showUserMenu && (
                   <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setShowUserMenu(false)}
-                    />
-                    <div className="absolute right-0 mt-2 w-48 py-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl z-50 text-xs animate-fadeIn">
-                      <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800">
-                        <p className="font-semibold text-slate-900 dark:text-white truncate">{currentUser.displayName || currentUser.username}</p>
-                        <p className="text-[11px] text-slate-500 flex items-center space-x-1 mt-0.5">
-                          {currentUser.role === 'admin' ? (
-                            <span className="text-amber-500 flex items-center">
-                              <Crown className="w-3 h-3 mr-1" /> 超级管理员
-                            </span>
-                          ) : (
-                            <span>普通用户</span>
-                          )}
+                    <button type="button" className="fixed inset-0 z-40 cursor-default" onClick={() => setShowUserMenu(false)} aria-label="关闭账户菜单" />
+                    <div className="absolute right-0 z-50 mt-2 w-52 rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-xl dark:border-slate-800 dark:bg-slate-900">
+                      <div className="border-b border-slate-100 px-2 py-2.5 dark:border-slate-800">
+                        <p className="truncate font-bold text-slate-900 dark:text-white">{currentUser.displayName || currentUser.username}</p>
+                        <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
+                          {currentUser.role === 'admin' ? <><Crown className="h-3 w-3 text-amber-500" />超级管理员</> : <><User className="h-3 w-3" />普通用户</>}
                         </p>
                       </div>
-
-                      {onOpenChangePwd && (
-                        <button
-                          onClick={() => {
-                            setShowUserMenu(false);
-                            onOpenChangePwd();
-                          }}
-                          className="w-full text-left px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center space-x-2"
-                        >
-                          <Key className="w-3.5 h-3.5 text-slate-400" />
-                          <span>修改个人密码</span>
-                        </button>
-                      )}
-
-                      {onLogout && (
-                        <button
-                          onClick={() => {
-                            setShowUserMenu(false);
-                            onLogout();
-                          }}
-                          className="w-full text-left px-3 py-2 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 flex items-center space-x-2"
-                        >
-                          <LogOut className="w-3.5 h-3.5" />
-                          <span>退出登录</span>
-                        </button>
-                      )}
+                      <button type="button" onClick={() => navigate('terminal')} className="mt-1 flex min-h-10 w-full items-center gap-2 rounded-xl px-2.5 text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"><Terminal className="h-4 w-4" />打开终端</button>
+                      {onOpenChangePwd && <button type="button" onClick={() => { setShowUserMenu(false); onOpenChangePwd(); }} className="mt-1 flex min-h-10 w-full items-center gap-2 rounded-xl px-2.5 text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"><Key className="h-4 w-4" />修改密码</button>}
+                      {onLogout && <button type="button" onClick={() => { setShowUserMenu(false); onLogout(); }} className="flex min-h-10 w-full items-center gap-2 rounded-xl px-2.5 text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"><LogOut className="h-4 w-4" />退出登录</button>}
                     </div>
                   </>
                 )}
@@ -210,7 +119,56 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </div>
         </div>
-      </div>
-    </header>
+      </header>}
+
+      <nav className="mobile-bottom-nav fixed inset-x-0 bottom-0 z-50 grid grid-cols-5 gap-1 border-t border-slate-200/90 bg-white/96 px-2 pb-[calc(6px+env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-10px_30px_-22px_rgba(36,50,74,0.55)] backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/96 sm:px-[max(1rem,calc((100vw-720px)/2))]" aria-label="主导航">
+        {primaryNavItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          return (
+            <button type="button" key={item.id} onClick={() => navigate(item.id)} className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold transition sm:flex-row sm:gap-2 sm:text-xs ${isActive ? 'bg-[#fff0f4] text-[#bd5e78] dark:bg-rose-500/15 dark:text-rose-300' : 'text-[#8b9aaa] hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
+              <Icon className={`h-[18px] w-[18px] shrink-0 ${isActive ? 'text-[#ff7d9a]' : 'text-current'}`} />
+              <span className="truncate">{item.label}</span>
+            </button>
+          );
+        })}
+        <button type="button" onClick={() => navigate('settings')} className={`hidden min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold transition md:flex md:flex-row md:gap-2 md:text-xs ${(activeTab === 'settings' || activeTab === 'storage_settings' || activeTab === 'smb_sharing' || activeTab === 'terminal') ? 'bg-[#fff0f4] text-[#bd5e78] dark:bg-rose-500/15 dark:text-rose-300' : 'text-[#8b9aaa] hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800'}`}>
+          <Settings className="h-[18px] w-[18px]" />
+          <span>设置</span>
+        </button>
+        <button type="button" onClick={() => setShowMore(true)} className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[18px] px-1 text-[10px] font-bold transition md:hidden ${(activeTab === 'settings' || activeTab === 'storage_settings' || activeTab === 'smb_sharing' || activeTab === 'terminal') ? 'bg-[#fff0f4] text-[#bd5e78]' : 'text-[#8b9aaa]'}`}>
+          <MoreHorizontal className="h-[19px] w-[19px]" />
+          <span>更多</span>
+        </button>
+      </nav>
+
+      {showMore && (
+        <div className="fixed inset-0 z-[60] md:hidden" role="dialog" aria-modal="true" aria-label="更多功能">
+          <button type="button" className="absolute inset-0 bg-slate-950/25 backdrop-blur-[2px]" onClick={() => setShowMore(false)} aria-label="关闭更多功能" />
+          <section className="absolute inset-x-0 bottom-0 rounded-t-[28px] bg-white px-4 pb-[calc(20px+env(safe-area-inset-bottom))] pt-3 shadow-2xl dark:bg-slate-900">
+            <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-slate-200 dark:bg-slate-700" />
+            <div className="mb-3 px-1">
+              <h2 className="text-lg font-black text-slate-900 dark:text-white">更多</h2>
+              <p className="mt-0.5 text-xs text-slate-500">存储、共享与系统工具</p>
+            </div>
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+              {[
+                { id: 'storage_settings' as const, label: '存储设置', detail: '磁盘、容量与目录直通', icon: HardDrive },
+                { id: 'smb_sharing' as const, label: 'SMB 共享', detail: '局域网文件共享', icon: Share2 },
+                { id: 'terminal' as const, label: 'Web 终端', detail: '管理 Linux 虚拟机', icon: Terminal },
+                { id: 'settings' as const, label: '系统设置', detail: '用户、安全与外观', icon: Settings },
+              ].map((item) => {
+                const Icon = item.icon;
+                return <button type="button" key={item.id} onClick={() => navigate(item.id)} className="flex min-h-16 w-full items-center gap-3 border-b border-slate-100 px-3 text-left last:border-b-0 dark:border-slate-800">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-500 dark:bg-sky-500/10"><Icon className="h-5 w-5" /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-900 dark:text-white">{item.label}</span><span className="block text-xs text-slate-500">{item.detail}</span></span>
+                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                </button>;
+              })}
+            </div>
+          </section>
+        </div>
+      )}
+    </>
   );
 };

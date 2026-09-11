@@ -1,11 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  Folder, Film, Image, Download, FileText, Zap, Upload, AlertTriangle, X
-} from 'lucide-react';
-import { FileItem, LocalMount, TrashItem } from '../../types';
+import { ArrowLeft, Folder, HardDrive, MoreHorizontal, Pencil, ShieldCheck, Star, Trash2, Upload, AlertTriangle, X } from 'lucide-react';
+import { DiskInfo, FileItem, LocalMount, TrashItem } from '../../types';
 import { api } from '../../api';
-import { CategoryItem, ClipboardState, TextPreviewState, getFileType } from './filemanager/types';
-import { FileSidebar } from './filemanager/FileSidebar';
+import { ClipboardState, TextPreviewState, getFileType } from './filemanager/types';
 import { FileToolbar } from './filemanager/FileToolbar';
 import { FileGridView } from './filemanager/FileGridView';
 import { FileListView } from './filemanager/FileListView';
@@ -13,6 +10,7 @@ import { TrashView } from './filemanager/TrashView';
 import { BatchActionBar } from './filemanager/BatchActionBar';
 import { FilePreviewModal } from './filemanager/FilePreviewModal';
 import { FileModals } from './filemanager/FileModals';
+import { FileActionSheet } from './filemanager/FileActionSheet';
 
 interface FileManagerProps {
   initialPath?: string;
@@ -26,10 +24,14 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'mtime'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches ? 'list' : 'grid'
+  );
 
   // Multi-Selection State
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [actionItem, setActionItem] = useState<FileItem | null>(null);
 
   // Clipboard State (Copy / Cut)
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
@@ -43,6 +45,9 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       return [];
     }
   });
+  const [viewingFavorites, setViewingFavorites] = useState(false);
+  const [favoriteItems, setFavoriteItems] = useState<FileItem[]>([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
 
   // Trash View State
   const [viewingTrash, setViewingTrash] = useState<boolean>(false);
@@ -94,18 +99,16 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const [textPreview, setTextPreview] = useState<TextPreviewState | null>(null);
   const [savingText, setSavingText] = useState(false);
 
-  // Categories (fnOS Style)
-  const categories: CategoryItem[] = [
-    { name: '全部存储 (空间1)', path: '/data', icon: Folder, color: 'text-sky-400' },
-    { name: '影视媒体', path: '/data/media', icon: Film, color: 'text-violet-400' },
-    { name: '离线下载', path: '/data/downloads', icon: Download, color: 'text-amber-400' },
-    { name: '照片图库', path: '/data/photos', icon: Image, color: 'text-emerald-400' },
-    { name: '个人文档', path: '/data/files', icon: FileText, color: 'text-blue-400' },
-    { name: '存储空间 2 (高速固态)', path: '/data/volume2-ssd', icon: Zap, color: 'text-amber-400' },
-    { name: 'Mac 直通空间', path: '/mnt/macnas-mounts', icon: Folder, color: 'text-cyan-400' },
-  ];
-
   const [localMounts, setLocalMounts] = useState<LocalMount[]>([]);
+  const [storageDisks, setStorageDisks] = useState<DiskInfo[]>([]);
+  const [discoveredDrivePaths, setDiscoveredDrivePaths] = useState<string[]>([]);
+  const [diskNames, setDiskNames] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('macnas_disk_display_names') || '{}');
+    } catch {
+      return {};
+    }
+  });
 
   const loadFiles = async (targetPath: string) => {
     setLoading(true);
@@ -113,6 +116,12 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       const res = await api.listFiles(targetPath);
       setFiles(res.items || []);
       setCurrentPath(res.path);
+      if (res.path === '/data') {
+        const discovered = (res.items || [])
+          .filter((item) => item.isDir && /^(volume|disk|storage)[-_ ]?\d/i.test(item.name))
+          .map((item) => item.path);
+        if (discovered.length > 0) setDiscoveredDrivePaths(discovered);
+      }
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `读取文件夹失败: ${err.message}` });
     } finally {
@@ -123,12 +132,18 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   useEffect(() => {
     loadFiles(currentPath);
     setSelectedPaths(new Set());
+    setSelectionMode(false);
+    setActionItem(null);
   }, [currentPath]);
 
   useEffect(() => {
-    api.getLocalMounts()
-      .then((res) => setLocalMounts(res.mounts || []))
-      .catch(() => setLocalMounts([]));
+    Promise.all([
+      api.getLocalMounts().catch(() => ({ mounts: [], recommended: [] })),
+      api.getDisks().catch(() => ({ disks: [], managedDisks: [], selectedDisk: '' })),
+    ]).then(([mountsResult, disksResult]) => {
+      setLocalMounts(mountsResult.mounts || []);
+      setStorageDisks(disksResult.disks || []);
+    });
     loadTrash();
   }, []);
 
@@ -141,14 +156,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       videoRef.current.play().catch(() => {});
     }
   }, [videoPreview]);
-
-  // Breadcrumb path parts
-  const pathParts = currentPath.split('/').filter(Boolean);
-
-  const navigateToPart = (index: number) => {
-    const newPath = '/' + pathParts.slice(0, index + 1).join('/');
-    setCurrentPath(newPath);
-  };
 
   const handleGoUp = () => {
     if (currentPath === '/' || currentPath === '/data') return;
@@ -168,6 +175,9 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   // Filtered & Sorted files
   const filteredFiles = files.filter((item) => {
+    if (currentPath === '/data' && discoveredDrivePaths.includes(item.path)) {
+      return false;
+    }
     if (hideSystemFiles && isSystemProtected(item.name)) {
       return false;
     }
@@ -193,7 +203,19 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   // Open / Preview Item
   const handleItemClick = async (item: FileItem) => {
+    if (selectionMode) {
+      setSelectedPaths((prev) => {
+        const next = new Set(prev);
+        if (next.has(item.path)) next.delete(item.path);
+        else next.add(item.path);
+        return next;
+      });
+      return;
+    }
+
     if (item.isDir) {
+      setViewingFavorites(false);
+      setViewingTrash(false);
       setCurrentPath(item.path);
       return;
     }
@@ -237,8 +259,8 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   };
 
   // Rename
-  const handleOpenRename = (item: FileItem, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleOpenRename = (item: FileItem, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setRenameItem(item);
     setRenameNewName(item.name);
     setShowRenameModal(true);
@@ -291,7 +313,17 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     if (paths.length === 0) return;
     setClipboard({ action: 'copy', items: paths });
     setSelectedPaths(new Set());
+    setSelectionMode(false);
     setAlertMsg({ type: 'success', text: `已复制 ${paths.length} 个项目到剪贴板，请前往目标文件夹点击粘贴` });
+  };
+
+  const handleCopyPath = async (path: string) => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setAlertMsg({ type: 'success', text: '路径已复制' });
+    } catch {
+      setAlertMsg({ type: 'error', text: '复制路径失败，请检查浏览器剪贴板权限' });
+    }
   };
 
   const handleCut = (paths: string[], e?: React.MouseEvent) => {
@@ -299,6 +331,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     if (paths.length === 0) return;
     setClipboard({ action: 'cut', items: paths });
     setSelectedPaths(new Set());
+    setSelectionMode(false);
     setAlertMsg({ type: 'success', text: `已剪切 ${paths.length} 个项目到剪贴板，请前往目标文件夹点击粘贴` });
   };
 
@@ -331,6 +364,34 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     });
   };
 
+  const loadFavoriteItems = async () => {
+    setFavoritesLoading(true);
+    try {
+      const parentPaths = Array.from(new Set(favorites.map((path) => {
+        const parts = path.split('/').filter(Boolean);
+        parts.pop();
+        return `/${parts.join('/')}` || '/';
+      })));
+      const listings = await Promise.all(parentPaths.map((path) => api.listFiles(path).catch(() => ({ items: [] as FileItem[] }))));
+      const itemMap = new Map(listings.flatMap((listing) => listing.items || []).map((item) => [item.path, item]));
+      setFavoriteItems(favorites.map((path) => itemMap.get(path)).filter((item): item is FileItem => Boolean(item)));
+    } finally {
+      setFavoritesLoading(false);
+    }
+  };
+
+  const openFavorites = () => {
+    setViewingTrash(false);
+    setSelectionMode(false);
+    setSelectedPaths(new Set());
+    setViewingFavorites(true);
+    loadFavoriteItems();
+  };
+
+  useEffect(() => {
+    if (viewingFavorites) loadFavoriteItems();
+  }, [favorites]);
+
   // Trash Handlers
   const loadTrash = async () => {
     setTrashLoading(true);
@@ -345,8 +406,8 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   };
 
   // Delete / Trash Modals
-  const handleOpenDelete = (item: FileItem, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleOpenDelete = (item: FileItem, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setDeleteTarget(item);
     setShowDeleteModal(true);
   };
@@ -360,6 +421,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       setShowDeleteModal(false);
       setDeleteTarget(null);
       setSelectedPaths(new Set());
+      setSelectionMode(false);
       setAlertMsg({ type: 'success', text: res.message });
       loadFiles(currentPath);
       loadTrash();
@@ -381,6 +443,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       setShowDeleteModal(false);
       setDeleteTarget(null);
       setSelectedPaths(new Set());
+      setSelectionMode(false);
       setAlertMsg({ type: 'success', text: `已彻底删除 ${targets.length} 个项目` });
       loadFiles(currentPath);
     } catch (err: any) {
@@ -503,9 +566,48 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
   };
 
+  const primaryDisk = storageDisks.find((disk) => disk.isSelected);
+  const secondaryDisks = storageDisks.filter((disk) => disk.isSecondary && !disk.isSelected);
+  const secondaryDiskOptions = secondaryDisks.map((disk) => ({
+    id: disk.identifier,
+    path: `/data/${disk.secondaryTarget || 'volume2-ssd'}`,
+  }));
+  const secondaryMountOptions = localMounts
+    .filter((mount) => mount.enabled && !mount.guestTarget.includes('/') && (mount.guestTarget.toLowerCase().includes('volume') || mount.name.includes('存储空间') || mount.name.includes('硬盘')))
+    .map((mount) => ({ id: `mount-${mount.id}`, path: `/data/${mount.guestTarget}` }))
+    .filter((mount) => !secondaryDiskOptions.some((disk) => disk.path === mount.path));
+  const discoveredOptions = discoveredDrivePaths
+    .map((path) => ({ id: `folder-${path}`, path }))
+    .filter((drive) => !secondaryDiskOptions.some((disk) => disk.path === drive.path) && !secondaryMountOptions.some((mount) => mount.path === drive.path));
+  const secondaryOptions = [...secondaryDiskOptions, ...secondaryMountOptions, ...discoveredOptions]
+    .filter((drive, index, all) => all.findIndex((candidate) => candidate.path === drive.path) === index);
+  const driveOptions = [
+    {
+      id: primaryDisk?.identifier || 'primary',
+      defaultName: '硬盘 1',
+      path: '/data',
+    },
+    ...secondaryOptions.map((disk, index) => ({
+      id: disk.id,
+      defaultName: `硬盘 ${index + 2}`,
+      path: disk.path,
+    })),
+  ];
+  const activeDriveId = [...driveOptions]
+    .sort((a, b) => b.path.length - a.path.length)
+    .find((drive) => currentPath === drive.path || currentPath.startsWith(`${drive.path}/`))?.id;
+
+  const handleRenameDrive = (driveId: string, currentName: string) => {
+    const nextName = window.prompt('修改硬盘显示名称', currentName)?.trim();
+    if (!nextName) return;
+    const updated = { ...diskNames, [driveId]: nextName };
+    setDiskNames(updated);
+    localStorage.setItem('macnas_disk_display_names', JSON.stringify(updated));
+  };
+
   return (
     <div
-      className="flex flex-col lg:flex-row gap-6 min-h-[680px]"
+      className="flex h-full min-h-0 flex-col gap-2.5 overflow-hidden"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -519,40 +621,39 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         </div>
       )}
 
-      {/* Left Sidebar: Categories & Storage Info */}
-      <FileSidebar
-        categories={categories}
-        currentPath={currentPath}
-        viewingTrash={viewingTrash}
-        trashCount={trashItems.length}
-        favorites={favorites}
-        localMounts={localMounts}
-        hideSystemFiles={hideSystemFiles}
-        onSelectCategory={(path) => {
-          setViewingTrash(false);
-          setCurrentPath(path);
-        }}
-        onOpenTrash={() => {
-          setViewingTrash(true);
-          loadTrash();
-        }}
-        onSelectFavorite={(path) => {
-          setViewingTrash(false);
-          setCurrentPath(path);
-        }}
-        onToggleFavorite={toggleFavorite}
-        onSelectMount={(path) => {
-          setViewingTrash(false);
-          setCurrentPath(path);
-        }}
-        onToggleHideSystemFiles={() => setHideSystemFiles(!hideSystemFiles)}
-      />
+      <section className={`${selectionMode ? 'hidden' : 'flex'} relative shrink-0 items-stretch gap-2 rounded-[22px] border border-slate-200/80 bg-white p-2 dark:border-slate-800 dark:bg-slate-900/80`}>
+        <div className="mobile-chip-row flex min-w-0 flex-1 gap-2 overflow-x-auto">
+          {driveOptions.map((drive) => {
+            const name = diskNames[drive.id] || drive.defaultName;
+            const active = !viewingTrash && !viewingFavorites && activeDriveId === drive.id;
+            return (
+              <div key={drive.id} className={`flex min-w-[128px] shrink-0 items-center rounded-2xl border px-2 transition sm:min-w-[150px] ${active ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/15' : 'border-transparent bg-slate-50 dark:bg-slate-800/50'}`}>
+                <button type="button" onClick={() => { setViewingTrash(false); setViewingFavorites(false); setCurrentPath(drive.path); }} className="flex min-h-12 min-w-0 flex-1 items-center gap-2 text-left">
+                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-white text-sky-500 dark:bg-slate-800' : 'bg-white text-slate-400 dark:bg-slate-800'}`}><HardDrive className="h-4 w-4" /></span>
+                  <span className={`truncate text-xs font-bold ${active ? 'text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200'}`}>{name}</span>
+                </button>
+                <button type="button" onClick={() => handleRenameDrive(drive.id, name)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-sky-500 dark:hover:bg-slate-800" aria-label={`重命名${name}`}><Pencil className="h-3.5 w-3.5" /></button>
+              </div>
+            );
+          })}
+        </div>
+
+        <details className="group relative shrink-0">
+          <summary className="flex h-full min-h-12 w-12 cursor-pointer list-none flex-col items-center justify-center rounded-2xl bg-slate-50 text-[9px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-300"><MoreHorizontal className="h-5 w-5" /><span className="mt-0.5">更多</span></summary>
+          <div className="absolute right-0 top-[calc(100%+8px)] z-40 max-h-[min(360px,55dvh)] w-[min(300px,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <button type="button" onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); openFavorites(); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-amber-50 hover:text-amber-700 dark:text-slate-200 dark:hover:bg-amber-500/10"><Star className="h-4 w-4 fill-amber-400 text-amber-400" /><span className="flex-1">收藏</span><span className="text-[10px] text-slate-400">{favorites.length}</span></button>
+            <button type="button" onClick={() => { setViewingFavorites(false); setViewingTrash(true); loadTrash(); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-rose-50 hover:text-rose-600 dark:text-slate-200 dark:hover:bg-rose-500/10"><Trash2 className="h-4 w-4 text-rose-500" /><span className="flex-1">回收站</span><span className="text-[10px] text-slate-400">{trashItems.length}</span></button>
+            {localMounts.filter((mount) => mount.enabled && !secondaryOptions.some((drive) => drive.path === `/data/${mount.guestTarget}`)).map((mount) => <button key={mount.id} type="button" onClick={() => { setViewingTrash(false); setViewingFavorites(false); setCurrentPath(`/data/${mount.guestTarget}`); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"><HardDrive className="h-4 w-4 text-cyan-500" /><span className="truncate">{mount.name}</span></button>)}
+            <button type="button" onClick={() => setHideSystemFiles(!hideSystemFiles)} className="mt-1 flex min-h-11 w-full items-center gap-3 border-t border-slate-100 px-3 pt-1 text-left text-xs text-slate-700 dark:border-slate-800 dark:text-slate-200"><ShieldCheck className={`h-4 w-4 ${hideSystemFiles ? 'text-emerald-500' : 'text-amber-500'}`} /><span className="flex-1">系统目录</span><span className="text-[10px] text-slate-400">{hideSystemFiles ? '隐藏' : '显示'}</span></button>
+          </div>
+        </details>
+      </section>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col space-y-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5">
         {/* Alert Banner */}
         {alertMsg && (
-          <div className={`p-3.5 rounded-xl border text-xs flex items-center justify-between ${
+          <div className={`fixed left-1/2 top-20 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center justify-between gap-3 rounded-full border bg-white/95 px-4 py-2.5 text-xs shadow-xl backdrop-blur dark:bg-slate-900/95 ${
             alertMsg.type === 'success'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
               : alertMsg.type === 'warning'
@@ -567,43 +668,54 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         )}
 
         {!hideSystemFiles && (
-          <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center space-x-2">
+          <div className="fixed left-1/2 top-20 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-amber-300 bg-white/95 px-4 py-2.5 text-xs text-amber-700 shadow-xl backdrop-blur dark:bg-slate-900/95 dark:text-amber-300">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
             <span>您已开启系统保护目录显示。请注意：<strong className="underline">appdata</strong> 包含各 Docker 容器的 SQLite 数据库与持久化卷，误删可能导致容器损坏！</span>
           </div>
         )}
 
         {/* Action Toolbar */}
-        <FileToolbar
+        {viewingFavorites ? (
+          <section className="flex min-h-14 shrink-0 items-center gap-3 rounded-[22px] border border-slate-200/80 bg-white px-3 dark:border-slate-800 dark:bg-slate-900/80">
+            <button type="button" onClick={() => setViewingFavorites(false)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" aria-label="返回文件列表"><ArrowLeft className="h-4 w-4" /></button>
+            <Star className="h-5 w-5 shrink-0 fill-amber-400 text-amber-400" />
+            <div className="min-w-0 flex-1"><h2 className="text-sm font-bold text-slate-900 dark:text-white">收藏</h2><p className="text-[11px] text-slate-400">{favoriteItems.length} 个文件与文件夹</p></div>
+          </section>
+        ) : <FileToolbar
           currentPath={currentPath}
-          pathParts={pathParts}
           searchQuery={searchQuery}
           sortBy={sortBy}
           sortOrder={sortOrder}
           viewMode={viewMode}
+          selectionMode={selectionMode}
+          selectedCount={selectedPaths.size}
+          totalCount={filteredFiles.length}
           loading={loading}
           uploading={uploading}
           uploadProgress={uploadProgress}
           clipboard={clipboard}
           fileInputRef={fileInputRef}
-          onNavigateToPart={navigateToPart}
           onGoUp={handleGoUp}
-          onGoHome={() => setCurrentPath('/data')}
           onSearchChange={setSearchQuery}
           onSortChange={(by, order) => {
             setSortBy(by);
             setSortOrder(order);
           }}
           onViewModeChange={setViewMode}
+          onToggleSelectionMode={() => {
+            setSelectionMode((active) => !active);
+            setSelectedPaths(new Set());
+          }}
+          onSelectAll={handleSelectAll}
           onOpenMkdir={() => setShowMkdirModal(true)}
           onFileChange={handleFileChange}
           onRefresh={() => loadFiles(currentPath)}
           onPaste={handlePaste}
           onClearClipboard={() => setClipboard(null)}
-        />
+        />}
 
         {/* File View Container */}
-        <div className="flex-1 p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 min-h-[480px]">
+        <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain rounded-[22px] border border-slate-200/80 bg-white p-3 [-webkit-overflow-scrolling:touch] [contain:strict] dark:border-slate-800/80 dark:bg-slate-900/60 sm:p-4">
           {viewingTrash ? (
             <TrashView
               trashItems={trashItems}
@@ -628,6 +740,16 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
               onRestoreTrash={handleRestoreTrash}
               onClearSelection={() => setTrashSelectedIds(new Set())}
             />
+          ) : viewingFavorites ? (
+            favoritesLoading ? (
+              <div className="flex flex-col items-center justify-center space-y-3 py-24 text-slate-400"><div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" /><p className="text-xs">正在读取收藏…</p></div>
+            ) : favoriteItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center space-y-3 py-24 text-center text-slate-400"><Star className="h-12 w-12" /><p className="text-sm font-semibold text-slate-700 dark:text-slate-300">还没有收藏</p><p className="text-xs">在文件或文件夹的三点菜单中添加收藏</p></div>
+            ) : viewMode === 'grid' ? (
+              <FileGridView files={favoriteItems} selectionMode={false} selectedPaths={selectedPaths} onItemClick={handleItemClick} onToggleSelect={toggleSelectItem} onOpenActions={(item, event) => { event.stopPropagation(); setActionItem(item); }} />
+            ) : (
+              <FileListView files={favoriteItems} selectionMode={false} selectedPaths={selectedPaths} onItemClick={handleItemClick} onToggleSelect={toggleSelectItem} onOpenActions={(item, event) => { event.stopPropagation(); setActionItem(item); }} />
+            )
           ) : loading ? (
             <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3">
               <div className="w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
@@ -635,16 +757,16 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
             </div>
           ) : filteredFiles.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-4">
-              <div className="p-4 rounded-2xl bg-slate-800/50 text-slate-500">
+              <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500">
                 <Folder className="w-12 h-12 stroke-[1.5]" />
               </div>
               <div className="text-center">
-                <p className="text-sm font-semibold text-slate-300">当前目录为空</p>
-                <p className="text-xs text-slate-500 mt-1">您可以点击上方上传文件或新建文件夹，也可直接把文件拖拽到此窗口</p>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">当前目录为空</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">可点击上方上传或新建文件夹</p>
               </div>
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition"
+                className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold shadow-md shadow-sky-500/20 transition"
               >
                 立即上传文件
               </button>
@@ -652,35 +774,33 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           ) : viewMode === 'grid' ? (
             <FileGridView
               files={filteredFiles}
+              selectionMode={selectionMode}
               selectedPaths={selectedPaths}
-              favorites={favorites}
               onItemClick={handleItemClick}
               onToggleSelect={toggleSelectItem}
-              onToggleFavorite={toggleFavorite}
-              onCopy={handleCopy}
-              onCut={handleCut}
-              onOpenRename={handleOpenRename}
-              onOpenDelete={handleOpenDelete}
+              onOpenActions={(item, event) => {
+                event.stopPropagation();
+                setActionItem(item);
+              }}
             />
           ) : (
             <FileListView
               files={filteredFiles}
+              selectionMode={selectionMode}
               selectedPaths={selectedPaths}
-              favorites={favorites}
-              onSelectAll={handleSelectAll}
               onItemClick={handleItemClick}
               onToggleSelect={toggleSelectItem}
-              onToggleFavorite={toggleFavorite}
-              onCopy={handleCopy}
-              onCut={handleCut}
-              onOpenRename={handleOpenRename}
-              onOpenDelete={handleOpenDelete}
+              onOpenActions={(item, event) => {
+                event.stopPropagation();
+                setActionItem(item);
+              }}
             />
           )}
         </div>
 
         {/* Floating Multi-Selection Action Bar */}
         <BatchActionBar
+          visible={selectionMode && !viewingTrash}
           selectedCount={!viewingTrash ? selectedPaths.size : 0}
           onCopy={() => handleCopy(Array.from(selectedPaths))}
           onCut={() => handleCut(Array.from(selectedPaths))}
@@ -688,9 +808,38 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
             setDeleteTarget(null);
             setShowDeleteModal(true);
           }}
-          onClearSelection={() => setSelectedPaths(new Set())}
         />
       </div>
+
+      <FileActionSheet
+        item={actionItem}
+        isFavorite={!!actionItem && favorites.includes(actionItem.path)}
+        onClose={() => setActionItem(null)}
+        onToggleFavorite={() => {
+          if (actionItem) toggleFavorite(actionItem.path);
+          setActionItem(null);
+        }}
+        onCopy={() => {
+          if (actionItem) handleCopy([actionItem.path]);
+          setActionItem(null);
+        }}
+        onCopyPath={() => {
+          if (actionItem) handleCopyPath(actionItem.path);
+          setActionItem(null);
+        }}
+        onCut={() => {
+          if (actionItem) handleCut([actionItem.path]);
+          setActionItem(null);
+        }}
+        onRename={() => {
+          if (actionItem) handleOpenRename(actionItem);
+          setActionItem(null);
+        }}
+        onDelete={() => {
+          if (actionItem) handleOpenDelete(actionItem);
+          setActionItem(null);
+        }}
+      />
 
       {/* Preview Modals */}
       <FilePreviewModal

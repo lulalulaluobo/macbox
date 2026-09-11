@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-labelledby="title desc">
+  <title id="title">MacNAS</title>
+  <desc id="desc">A friendly sky-blue NAS mark</desc>
+  <rect width="192" height="192" rx="48" fill="#8fd3ff"/>
+  <path d="M48 72c0-8.837 7.163-16 16-16h64c8.837 0 16 7.163 16 16v44c0 8.837-7.163 16-16 16H64c-8.837 0-16-7.163-16-16V72Z" fill="#fff" opacity=".96"/>
+  <path d="M61 86h70M61 106h46" stroke="#2387c9" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="132" cy="106" r="5" fill="#ff7d9a"/>
+  <path d="M81 144c7 6 23 6 30 0" fill="none" stroke="#2387c9" stroke-width="7" stroke-linecap="round"/>
+</svg>

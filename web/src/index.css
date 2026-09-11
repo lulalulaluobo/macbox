@@ -4,24 +4,24 @@
 
 @layer base {
   :root {
-    --bg-canvas: #f8fafc;
+    --bg-canvas: #f4faff;
     --bg-card: #ffffff;
-    --bg-card-subtle: #f1f5f9;
-    --border-color: #e2e8f0;
-    --border-subtle: #f1f5f9;
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    --text-muted: #64748b;
-    --card-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
-    --card-shadow-hover: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+    --bg-card-subtle: #f1f9fe;
+    --border-color: #dcecf3;
+    --border-subtle: #edf3f7;
+    --text-primary: #24324a;
+    --text-secondary: #5c6d80;
+    --text-muted: #718195;
+    --card-shadow: 0 8px 20px -14px rgba(36, 50, 74, 0.35);
+    --card-shadow-hover: 0 12px 26px -14px rgba(36, 50, 74, 0.42);
   }
 
   html.dark {
-    --bg-canvas: #080c14;
-    --bg-card: #0f172a;
-    --bg-card-subtle: #1e293b;
-    --border-color: #1e293b;
-    --border-subtle: #1e293b;
+    --bg-canvas: #0b1624;
+    --bg-card: #111d31;
+    --bg-card-subtle: #17263e;
+    --border-color: #243653;
+    --border-subtle: #1d2d46;
     --text-primary: #f8fafc;
     --text-secondary: #cbd5e1;
     --text-muted: #94a3b8;
@@ -32,9 +32,80 @@
   body {
     background-color: var(--bg-canvas);
     color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  }
+}
+
+html {
+  min-width: 320px;
+  background: var(--bg-canvas);
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(56, 189, 248, 0.35);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  html,
+  body {
+    overscroll-behavior-y: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .sora-app-content {
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+  }
+
+  .mobile-chip-row {
+    margin-left: -0.875rem;
+    margin-right: -0.875rem;
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+    scrollbar-width: none;
+  }
+
+  .mobile-chip-row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sora-app-footer {
+    padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 479px) {
+  .sora-app-content:not(.terminal-app-content) {
+    padding-top: 1rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .pwa-update-banner {
+    margin-left: 0.875rem;
+    margin-right: 0.875rem;
   }
 }
 
@@ -110,6 +181,12 @@ html.light .bg-\[\#0f172a\]:not(.terminal-dark-preserve):not(.terminal-dark-pres
 }
 
 /* 3. Sub-panels, Pill Containers and Secondary Surfaces */
+html.light .bg-slate-950:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-950\/40:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-950\/50:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-950\/60:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-950\/70:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
+html.light .bg-slate-950\/80:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
 html.light .bg-slate-800\/30:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
 html.light .bg-slate-800\/40:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
 html.light .bg-slate-800\/50:not(.terminal-dark-preserve):not(.terminal-dark-preserve *),
@@ -254,4 +331,88 @@ html.dark .daemon-banner {
   background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.6) 100%);
   border-color: rgba(51, 65, 85, 0.6);
   box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.5);
+}
+
+/* Sora Sky surfaces: one quiet canvas, with colored edges carrying meaning. */
+html.light .sora-app-shell {
+  background:
+    radial-gradient(circle at 95% 3%, rgba(229, 247, 255, 0.9) 0 7rem, transparent 7.1rem),
+    radial-gradient(circle at 100% 9%, rgba(255, 233, 239, 0.75) 0 3.6rem, transparent 3.7rem),
+    var(--bg-canvas) !important;
+}
+
+html.light .sora-navbar {
+  box-shadow: 0 8px 24px -20px rgba(36, 50, 74, 0.5);
+}
+
+.sora-daemon-card {
+  background-color: #fff;
+  background-image:
+    radial-gradient(circle at 16px 16px, rgba(153, 200, 221, 0.2) 1.2px, transparent 1.4px),
+    linear-gradient(135deg, #f4fbff 0%, #fff7f8 100%);
+  background-size: 24px 24px, 100% 100%;
+}
+
+.sora-navbar {
+  padding-top: env(safe-area-inset-top);
+}
+
+html.light div.sora-login-mark,
+html.light .sora-login-mark svg,
+.sora-login-mark,
+.sora-login-mark svg {
+  color: #fff !important;
+}
+
+.sora-metric-card {
+  border-color: #dcecf2;
+}
+
+.sora-metric-blue {
+  border-color: #d7edf4;
+}
+
+.sora-metric-yellow {
+  border-color: #f3e4c7;
+}
+
+.sora-metric-green {
+  border-color: #e5e4f6;
+}
+
+.sora-metric-pink {
+  border-color: #f5dbe3;
+}
+
+html.dark .sora-daemon-card {
+  background-image: linear-gradient(135deg, #111d31 0%, #1e233b 100%);
+}
+
+html.dark .sora-metric-card {
+  border-color: #243653;
+}
+
+@media (max-width: 639px) {
+  .sora-dashboard-intro h1 {
+    line-height: 1.15;
+  }
+
+  .sora-daemon-card > div > div:first-child {
+    width: 100%;
+  }
+
+  .sora-daemon-card .flex.items-center.space-x-2\.5 {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+}
+
+@media (max-width: 1279px) {
+  .sora-app-shell {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .mobile-bottom-nav {
+    padding-bottom: max(0.375rem, env(safe-area-inset-bottom));
+  }
 }

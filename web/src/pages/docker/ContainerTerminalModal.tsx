@@ -67,7 +67,8 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
 
     // WebSocket connection with ?container= query parameter
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?container=${encodeURIComponent(containerName)}`;
+    const wsParams = new URLSearchParams({ container: containerName });
+    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?${wsParams.toString()}`;
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
@@ -139,38 +140,31 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-0 sm:p-5">
       <div
-        className={`terminal-dark-preserve w-full flex flex-col rounded-2xl bg-[#090d16] border border-slate-800 shadow-2xl overflow-hidden transition-all duration-300 ${
-          fullscreen ? 'h-[96vh] max-w-[96vw]' : 'h-[85vh] max-w-5xl'
+        className={`terminal-dark-preserve flex h-[100dvh] w-full flex-col overflow-hidden bg-[#090d16] shadow-2xl transition-[height,max-width] duration-200 sm:rounded-2xl sm:border sm:border-slate-800 ${
+          fullscreen ? 'sm:h-[96dvh] sm:max-w-[96vw]' : 'sm:h-[88dvh] sm:max-w-5xl'
         }`}
       >
         {/* Header */}
-        <div className="px-5 py-3.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/90 px-3 py-2.5 sm:px-5 sm:py-3.5">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-sky-500/20 bg-sky-500/10 text-sky-400">
               <Box className="w-4 h-4" />
             </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="font-bold text-sm text-white font-mono">{containerName}</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
-                  docker exec
-                </span>
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate font-mono text-sm font-bold text-white">{containerName}</span>
+                <span className={`h-2 w-2 shrink-0 rounded-full ${connected ? 'bg-emerald-400' : 'bg-rose-500'}`} />
               </div>
-              <p className="text-[11px] text-slate-400">交互式容器命令终端 (自动兼容 /bin/bash 与 /bin/sh)</p>
+              <p className="truncate text-[10px] text-slate-400">{connected ? '终端已连接' : '连接已断开'}</p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/80 text-[11px] font-mono mr-2">
-              <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
-              <span className="text-slate-300">{connected ? '终端在线' : '连接中断'}</span>
-            </div>
-
+          <div className="flex shrink-0 items-center gap-1.5">
             <button
               onClick={() => xtermInstance.current?.clear()}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 hover:text-white"
               title="清屏"
             >
               <RefreshCw className="w-4 h-4" />
@@ -178,7 +172,7 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
 
             <button
               onClick={() => setFullscreen(!fullscreen)}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+              className="hidden h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 hover:text-white sm:flex"
               title={fullscreen ? '还原窗口' : '全屏模式'}
             >
               {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -186,7 +180,7 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
 
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700/80 transition"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800 text-slate-300 transition hover:bg-rose-950/60 hover:text-rose-400"
               title="关闭终端"
             >
               <X className="w-4 h-4" />
@@ -197,14 +191,14 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
         {/* Terminal Canvas */}
         <div
           ref={terminalRef}
-          className="flex-1 p-3 bg-[#090d16] overflow-hidden font-mono"
+          className="min-h-0 flex-1 overflow-hidden bg-[#090d16] p-2 font-mono sm:p-3"
         />
 
         {/* Bottom Text Input & Virtual Action Keys */}
         <TerminalInputBar
           onSendRaw={handleSendRaw}
           disabled={!connected}
-          placeholder="向此容器终端发送指令 (Enter 发送，Shift+Enter 换行)..."
+          placeholder="输入命令…"
         />
       </div>
     </div>

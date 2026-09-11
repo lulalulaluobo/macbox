@@ -372,7 +372,6 @@ export interface NASUser {
 }
 
 export interface AuthResponse {
-  token: string;
   user: NASUser;
 }
 
@@ -389,5 +388,4 @@ export interface UpdateNASUserRequest {
   enabled?: boolean;
   newPassword?: string;
 }
-
 

@@ -169,69 +169,65 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
   const webAccessUrl = `http://${hostIP}:${mainHostPort}`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-3xl h-[88vh] flex flex-col rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/55 sm:items-center sm:p-4">
+      <div className="flex h-[100dvh] w-full max-w-3xl flex-col overflow-hidden bg-white dark:bg-slate-900 sm:h-[min(88dvh,780px)] sm:rounded-3xl sm:border sm:border-slate-200 sm:shadow-2xl dark:sm:border-slate-800">
         {/* Modal Header */}
-        <div className="px-6 py-4 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center space-x-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 flex items-center justify-center font-bold">
-              <Sliders className="w-5 h-5" />
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950/70 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-sky-500/20 bg-sky-500/10 font-bold text-sky-600 dark:text-sky-400">
+              <Sliders className="h-5 w-5" />
             </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h3 className="font-extrabold text-base text-white">{currentMeta.name}</h3>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="truncate text-base font-extrabold text-slate-900 dark:text-white">{currentMeta.name}</h3>
+                <span className="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
                   v{currentMeta.version}
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  {currentMeta.category}
-                </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                部署前环境与存储路径自定义配置向导
-              </p>
+              <p className="mt-0.5 truncate text-[11px] text-slate-500">安装配置 · {currentMeta.category}</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
             disabled={installStatus === 'installing'}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition disabled:opacity-50"
+            aria-label="关闭配置"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-900 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="flex-1 p-6 overflow-y-auto space-y-5">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3 sm:space-y-5 sm:p-6">
           {loadingConfig ? (
             <div className="h-64 flex items-center justify-center space-x-2 text-slate-400 text-xs">
-              <RefreshCw className="w-4 h-4 animate-spin text-sky-400" />
-              <span>正在读取应用环境配置模板...</span>
+              <RefreshCw className="w-4 h-4 animate-spin text-sky-500" />
+              <span>正在读取配置模板...</span>
             </div>
           ) : installStatus === 'idle' ? (
-            <div className="space-y-5">
+            <div className="space-y-3 sm:space-y-5">
               {/* App Description Banner */}
-              <div className="p-4 rounded-2xl bg-slate-950/50 border border-slate-800/80 text-xs text-slate-300 leading-relaxed">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 dark:border-slate-800/80 dark:bg-slate-950/50 dark:text-slate-300 sm:p-4">
                 {currentMeta.description}
               </div>
 
               {/* Toggle Advanced YAML Mode */}
-              <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-800/40 border border-slate-800 text-xs">
-                <div className="flex items-center space-x-2 text-slate-300">
-                  <FileCode className="w-4 h-4 text-indigo-400" />
-                  <span>高级模式：直接编辑 Docker Compose YAML 源码</span>
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-800/40">
+                <div className="flex min-w-0 items-center gap-2 text-slate-700 dark:text-slate-300">
+                  <FileCode className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
+                  <span className="font-semibold">YAML 高级模式</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setUseYamlMode(!useYamlMode)}
-                  className={`px-3 py-1 rounded-xl text-xs font-semibold transition ${
+                  className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold transition ${
                     useYamlMode
                       ? 'bg-indigo-600 text-white shadow-md'
-                      : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700'
                   }`}
                 >
-                  {useYamlMode ? '已开启 YAML 模式' : '切换为 YAML 模式'}
+                  {useYamlMode ? '返回表单' : '打开编辑器'}
                 </button>
               </div>
 
@@ -245,20 +241,20 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                     value={customYaml}
                     onChange={e => setCustomYaml(e.target.value)}
                     spellCheck={false}
-                    className="w-full h-80 p-4 font-mono text-xs text-emerald-400/90 bg-[#06090e] border border-slate-800 rounded-2xl resize-none focus:outline-none focus:border-indigo-500 leading-relaxed"
+                    className="h-[55dvh] w-full resize-none rounded-2xl border border-slate-800 bg-[#06090e] p-4 font-mono text-xs leading-relaxed text-emerald-400/90 focus:border-indigo-500 focus:outline-none sm:h-80"
                   />
                 </div>
               ) : (
                 /* Guided Form Mode */
-                <div className="space-y-5">
+                <div className="space-y-3 sm:space-y-5">
                   {/* 1. Ports Configuration */}
-                  <div className="p-5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60 sm:p-5">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2 text-xs font-bold text-white">
-                        <Globe className="w-4 h-4 text-sky-400" />
-                        <span>网络端口映射设置 (Port Bindings)</span>
+                      <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 dark:text-white">
+                        <Globe className="w-4 h-4 text-sky-500 dark:text-sky-400" />
+                        <span>网络端口</span>
                       </div>
-                      <span className="text-[11px] text-slate-400 font-mono">
+                      <span className="hidden text-[11px] text-slate-500 dark:text-slate-400 sm:inline">
                         宿主机 ➔ 容器内部
                       </span>
                     </div>
@@ -271,10 +267,10 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                           return (
                             <div
                               key={cPortStr}
-                              className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 text-xs"
+                              className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800/80 text-xs shadow-xs"
                             >
                               <div>
-                                <span className="font-semibold text-slate-200">
+                                <span className="font-semibold text-slate-800 dark:text-slate-200">
                                   {p.description || `端口 ${p.containerPort}`}
                                 </span>
                                 <span className="text-[11px] text-slate-500 font-mono block">
@@ -283,7 +279,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                               </div>
 
                               <div className="flex items-center space-x-2">
-                                <span className="text-xs text-slate-400">宿主机端口:</span>
+                                <span className="text-xs text-slate-500 dark:text-slate-400">宿主机端口:</span>
                                 <input
                                   type="number"
                                   min={1024}
@@ -295,15 +291,15 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                                       [cPortStr]: parseInt(e.target.value) || p.hostPort,
                                     })
                                   }
-                                  className="w-24 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono text-center text-xs focus:outline-none focus:border-sky-500"
+                                  className="w-24 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-center text-xs focus:outline-none focus:border-sky-500"
                                 />
                               </div>
                             </div>
                           );
                         })
                       ) : currentMeta.port > 0 ? (
-                        <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs">
-                          <span className="text-slate-200">WebUI 主服务访问端口:</span>
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-xs shadow-xs">
+                          <span className="text-slate-800 dark:text-slate-200">WebUI 主服务访问端口:</span>
                           <input
                             type="number"
                             min={1024}
@@ -316,7 +312,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                                   parseInt(e.target.value) || currentMeta.port,
                               })
                             }
-                            className="w-24 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono text-center text-xs focus:outline-none focus:border-sky-500"
+                            className="w-24 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-center text-xs focus:outline-none focus:border-sky-500"
                           />
                         </div>
                       ) : (
@@ -326,14 +322,14 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                   </div>
 
                   {/* 2. Volumes / Storage Directory Configuration */}
-                  <div className="p-5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
+                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60 sm:p-5">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2 text-xs font-bold text-white">
-                        <HardDrive className="w-4 h-4 text-indigo-400" />
-                        <span>数据存储挂载路径 (Volumes & Mount Paths)</span>
+                      <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 dark:text-white">
+                        <HardDrive className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
+                        <span>存储路径</span>
                       </div>
-                      <span className="text-[11px] text-slate-400">
-                        支持指定外部物理挂载硬盘路径
+                      <span className="hidden text-[11px] text-slate-500 dark:text-slate-400 sm:inline">
+                        支持物理外接硬盘路径
                       </span>
                     </div>
 
@@ -344,10 +340,10 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                           return (
                             <div
                               key={idx}
-                              className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800/80 space-y-2 text-xs"
+                              className="p-3.5 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800/80 space-y-2 text-xs shadow-xs"
                             >
                               <div className="flex items-center justify-between">
-                                <span className="font-semibold text-slate-200">
+                                <span className="font-semibold text-slate-800 dark:text-slate-200">
                                   {v.description || `挂载点 ${idx + 1}`}
                                 </span>
                                 <span className="text-[11px] text-slate-500 font-mono">
@@ -365,7 +361,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                                       [v.container]: e.target.value,
                                     })
                                   }
-                                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
                                   placeholder="/data/appdata/..."
                                 />
                               </div>
@@ -375,7 +371,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                                 v.container === '/music' ||
                                 v.container === '/downloads' ||
                                 v.container === '/data') && (
-                                <div className="flex items-center space-x-2 pt-1">
+                                <div className="flex flex-wrap items-center gap-2 pt-1">
                                   <span className="text-[11px] text-slate-500">快捷预设:</span>
                                   <button
                                     type="button"
@@ -385,9 +381,9 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                                         [v.container]: `/data/mnt/disk4${v.container}`,
                                       })
                                     }
-                                    className="text-[11px] px-2 py-0.5 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 transition font-mono"
+                                    className="text-[11px] px-2 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 dark:text-indigo-300 dark:border-indigo-500/20 transition font-mono"
                                   >
-                                    映射至 2TB 物理硬盘 (/data/mnt/disk4{v.container})
+                                    使用 2TB 硬盘
                                   </button>
                                   <button
                                     type="button"
@@ -397,7 +393,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                                         [v.container]: v.host,
                                       })
                                     }
-                                    className="text-[11px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 transition font-mono"
+                                    className="text-[11px] px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400 transition font-mono border border-slate-200 dark:border-slate-700"
                                   >
                                     恢复默认
                                   </button>
@@ -414,10 +410,10 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
 
                   {/* 3. Environment Variables */}
                   {currentMeta.env && currentMeta.env.length > 0 && (
-                    <div className="p-5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
-                      <div className="flex items-center space-x-2 text-xs font-bold text-white">
-                        <Folder className="w-4 h-4 text-emerald-400" />
-                        <span>关键环境变量参数 (Environment)</span>
+                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60 sm:p-5">
+                      <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 dark:text-white">
+                        <Folder className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                        <span>环境变量</span>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -426,10 +422,10 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                           return (
                             <div
                               key={e.key}
-                              className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80 space-y-1.5 text-xs"
+                              className="p-3 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800/80 space-y-1.5 text-xs shadow-xs"
                             >
                               <div className="flex items-center justify-between">
-                                <span className="font-mono font-bold text-slate-300">{e.key}</span>
+                                <span className="font-mono font-bold text-slate-800 dark:text-slate-300">{e.key}</span>
                                 <span className="text-[10px] text-slate-500">{e.description}</span>
                               </div>
                               <input
@@ -441,7 +437,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                                     [e.key]: ev.target.value,
                                   })
                                 }
-                                className="w-full px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-emerald-500"
+                                className="w-full px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:border-emerald-500"
                               />
                             </div>
                           );
@@ -511,8 +507,8 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-4 bg-slate-950/70 border-t border-slate-800 flex items-center justify-between">
-          <span className="text-xs text-slate-500 font-mono">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-white px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 dark:border-slate-800 dark:bg-slate-950/70 sm:justify-between sm:px-6 sm:py-4">
+          <span className="hidden text-xs text-slate-500 sm:inline">
             {installStatus === 'idle'
               ? `预计 WebUI 端口: ${mainHostPort || '默认'}`
               : installStatus === 'installing'
@@ -520,21 +516,21 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
               : '操作完成'}
           </span>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:gap-3">
             {installStatus === 'idle' && (
               <>
                 <button
                   onClick={onClose}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                  className="min-h-11 rounded-xl bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                 >
                   取消
                 </button>
                 <button
                   onClick={handleStartDeploy}
-                  className="flex items-center space-x-2 px-5 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-sky-500/20 transition"
+                  className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 px-4 py-2 text-xs font-bold text-white transition hover:from-sky-500 hover:to-indigo-500 sm:flex-none sm:px-5"
                 >
                   <Download className="w-4 h-4" />
-                  <span>立即定制安装应用</span>
+                  <span>确认安装</span>
                 </button>
               </>
             )}
@@ -542,7 +538,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
             {installStatus === 'installing' && (
               <button
                 disabled
-                className="px-5 py-2 rounded-xl bg-slate-800 text-slate-400 text-xs font-semibold cursor-not-allowed flex items-center space-x-2"
+                className="px-5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 text-xs font-semibold cursor-not-allowed flex items-center space-x-2"
               >
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                 <span>正在安装部署中...</span>
@@ -553,7 +549,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
               <>
                 <button
                   onClick={onClose}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-semibold transition"
                 >
                   关闭
                 </button>
@@ -561,7 +557,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                   href={webAccessUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex items-center space-x-1.5 px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/25 transition"
+                  className="flex items-center space-x-1.5 px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md shadow-emerald-500/25 transition"
                 >
                   <span>打开应用</span>
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -573,7 +569,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
               <>
                 <button
                   onClick={onClose}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-semibold transition"
                 >
                   关闭
                 </button>

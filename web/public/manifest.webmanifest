@@ -1,0 +1,20 @@
+{
+  "name": "MacNAS 控制台",
+  "short_name": "MacNAS",
+  "description": "Mac mini 家庭服务器控制中心",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#8fd3ff",
+  "background_color": "#f4faff",
+  "icons": [
+    {
+      "src": "/icons/macnas-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

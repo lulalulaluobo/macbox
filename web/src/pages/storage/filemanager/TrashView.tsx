@@ -30,20 +30,17 @@ export const TrashView: React.FC<TrashViewProps> = ({
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
         <div>
-          <h3 className="text-base font-bold text-white flex items-center space-x-2">
-            <Trash2 className="w-5 h-5 text-rose-400" />
-            <span>回收站 (暂存删除项目)</span>
+          <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+            <Trash2 className="w-5 h-5 text-rose-500 dark:text-rose-400" />
+            <span>回收站</span>
           </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            被删除的文件与目录暂存保护。您可以随时一键安全还原；在此删除或清空时将安全移入 <strong className="text-sky-300 font-mono">Mac 本机废纸篓 (~/.Trash)</strong>，双重防误删保障。
-          </p>
         </div>
         <div className="flex items-center space-x-2">
           <button
             onClick={onRefreshTrash}
-            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition"
+            className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${trashLoading ? 'animate-spin' : ''}`} />
             <span>刷新</span>
@@ -51,7 +48,7 @@ export const TrashView: React.FC<TrashViewProps> = ({
           <button
             onClick={onOpenEmptyTrash}
             disabled={trashItems.length === 0}
-            className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center space-x-1.5 shadow-lg shadow-rose-600/20 transition disabled:opacity-40"
+            className="px-3.5 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold flex items-center space-x-1.5 shadow-md shadow-rose-500/20 transition disabled:opacity-40"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>清空回收站</span>

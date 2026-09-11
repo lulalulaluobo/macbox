@@ -20,7 +20,7 @@ export const TerminalPage: React.FC = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [loginUser, setLoginUser] = useState<'root' | 'default'>('default');
 
   // File System State
@@ -112,7 +112,8 @@ export const TerminalPage: React.FC = () => {
 
     // WebSocket connection with user param
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?user=${targetUser}`;
+    const wsParams = new URLSearchParams({ user: targetUser });
+    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?${wsParams.toString()}`;
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
@@ -187,8 +188,6 @@ export const TerminalPage: React.FC = () => {
       .catch(() => {
         initTerminal('default');
       });
-
-    loadFiles(currentPath);
 
     return () => {
       if (wsRef.current) wsRef.current.close();
@@ -361,7 +360,7 @@ export const TerminalPage: React.FC = () => {
   };
 
   return (
-    <div className={`space-y-4 ${fullscreen ? 'fixed inset-0 z-50 bg-[#090d16] p-4 flex flex-col' : ''}`}>
+    <div className={`terminal-page flex min-h-0 flex-col gap-4 ${showSidebar ? 'overflow-y-auto overscroll-contain' : 'overflow-hidden'} ${fullscreen ? 'fixed inset-0 z-[70] bg-[#090d16] p-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]' : 'h-full w-full'}`}>
       {/* Alert Banner */}
       {alertMsg && (
         <div className={`p-3.5 rounded-xl text-sm flex items-center justify-between shadow ${
@@ -374,11 +373,11 @@ export const TerminalPage: React.FC = () => {
         </div>
       )}
 
-      {/* Main Split Layout: Left File System, Right Web Terminal */}
-      <div className={`grid ${showSidebar ? 'grid-cols-1 lg:grid-cols-12' : 'grid-cols-1'} gap-4 ${fullscreen ? 'flex-1 min-h-0' : 'min-h-[620px]'}`}>
+      {/* Terminal first; file system is loaded and shown only when requested. */}
+      <div className={`flex min-h-0 flex-col gap-4 ${showSidebar ? 'h-full flex-none overflow-visible' : 'flex-1'}`}>
         {/* Left Side: Integrated File System Explorer */}
         {showSidebar && (
-          <div className="lg:col-span-5 flex flex-col rounded-2xl bg-slate-900/80 border border-slate-800/80 shadow-xl overflow-hidden">
+          <div className="order-2 flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/80">
             {/* Header & Quick Shortcuts */}
             <div className="p-4 border-b border-slate-800/80 space-y-3">
               <div className="flex items-center justify-between">
@@ -583,27 +582,31 @@ export const TerminalPage: React.FC = () => {
         )}
 
         {/* Right Side: Interactive Web Terminal */}
-        <div className={`terminal-dark-preserve ${showSidebar ? 'lg:col-span-7' : 'w-full'} flex flex-col rounded-2xl bg-[#090d16] border border-slate-800/80 shadow-xl overflow-hidden`}>
+        <div className={`terminal-dark-preserve order-1 flex w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'h-full min-h-[520px] flex-none' : 'min-h-0 flex-1'}`}>
           {/* Terminal Top Toolbar */}
-          <div className="p-3.5 border-b border-slate-800/80 bg-[#0d121f] flex flex-wrap items-center justify-between gap-2.5">
-            <div className="flex items-center space-x-3">
+          <div className="flex flex-col gap-2.5 border-b border-slate-800/80 bg-[#0d121f] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-3.5">
+            <div className="flex min-w-0 items-center gap-2">
               <button
-                onClick={() => setShowSidebar(!showSidebar)}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                title={showSidebar ? '折叠文件树' : '展开文件树'}
+                onClick={() => {
+                  const next = !showSidebar;
+                  setShowSidebar(next);
+                  if (next && files.length === 0) loadFiles(currentPath);
+                }}
+                className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 text-[11px] font-semibold text-slate-200 transition hover:bg-slate-700"
+                title={showSidebar ? '收起文件系统' : '展开文件系统'}
               >
                 {showSidebar ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
+                <span>{showSidebar ? '收起文件' : '文件系统'}</span>
               </button>
 
-              <div className="flex items-center space-x-2">
+              <div className="flex min-w-0 items-center gap-1.5">
                 <span className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-                <span className="text-xs font-bold text-white">Lima Linux VM Shell</span>
-                <span className="text-[11px] font-mono text-slate-400">({connected ? '已连接' : '未连接'})</span>
+                <span className="truncate text-xs font-bold text-white">终端</span>
+                <span className="shrink-0 text-[11px] text-slate-400">{connected ? '已连接' : '未连接'}</span>
               </div>
 
               {/* Login Identity Badge & Fast Switcher */}
-              <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded-lg bg-slate-800/80 border border-slate-700/80 text-xs">
-                <span className="text-slate-400 text-[11px]">身份:</span>
+              <div className="ml-auto flex shrink-0 items-center rounded-lg border border-slate-700/80 bg-slate-800/80 p-0.5 text-xs sm:ml-0">
                 <button
                   onClick={() => handleSwitchUser(loginUser === 'root' ? 'default' : 'root')}
                   className={`flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition ${
@@ -616,12 +619,12 @@ export const TerminalPage: React.FC = () => {
                   {loginUser === 'root' ? (
                     <>
                       <Crown className="w-3 h-3 text-amber-400" />
-                      <span>root (超级用户)</span>
+                      <span>root</span>
                     </>
                   ) : (
                     <>
                       <User className="w-3 h-3 text-sky-400" />
-                      <span>普通用户</span>
+                      <span>用户</span>
                     </>
                   )}
                 </button>
@@ -629,13 +632,13 @@ export const TerminalPage: React.FC = () => {
             </div>
 
             {/* Quick Command Buttons */}
-            <div className="flex items-center space-x-1.5 overflow-x-auto">
+            <div className="flex w-full items-center gap-1.5 overflow-x-auto pb-0.5 sm:w-auto">
               {quickCommands.map((qc) => (
                 <button
                   key={qc.label}
                   onClick={() => sendToTerminal(qc.cmd)}
                   disabled={!connected}
-                  className="px-2 py-1 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-[11px] font-mono transition flex items-center space-x-1 disabled:opacity-40"
+                  className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md bg-slate-800/80 px-2 py-1 text-[11px] font-mono text-slate-300 transition hover:bg-slate-700 disabled:opacity-40"
                 >
                   <Play className="w-2.5 h-2.5 text-sky-400" />
                   <span>{qc.label}</span>
@@ -644,7 +647,7 @@ export const TerminalPage: React.FC = () => {
 
               <button
                 onClick={() => xtermInstance.current?.clear()}
-                className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] transition"
+                className="shrink-0 whitespace-nowrap rounded-md bg-slate-800 px-2 py-1 text-[11px] text-slate-300 transition hover:bg-slate-700"
                 title="清屏"
               >
                 清屏
@@ -663,7 +666,7 @@ export const TerminalPage: React.FC = () => {
           {/* Terminal Canvas Container */}
           <div
             ref={terminalRef}
-            className={`flex-1 p-3 bg-[#090d16] ${fullscreen ? 'h-full' : 'h-[440px]'} overflow-hidden font-mono`}
+            className="min-h-0 flex-1 overflow-hidden bg-[#090d16] p-3 font-mono"
           />
 
           {/* Bottom Text Input & Action Keys Helper Bar */}
@@ -722,7 +725,7 @@ export const TerminalPage: React.FC = () => {
       {/* Modal: View / Edit File */}
       {editingFile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="w-full max-w-3xl rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4 flex flex-col max-h-[85vh]">
+          <div className="w-full max-w-3xl rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4 flex flex-col max-h-[85dvh]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center space-x-2">
                 <Edit3 className="w-4 h-4 text-sky-400" />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './pages/Dashboard';
 import { Storage } from './pages/Storage';
@@ -6,8 +6,9 @@ import { Docker } from './pages/Docker';
 import { Apps } from './pages/Apps';
 import { TerminalPage } from './pages/TerminalPage';
 import { Settings } from './pages/Settings';
+import { StorageSettings } from './pages/storage/StorageSettings';
 import { LoginPage } from './pages/LoginPage';
-import { SystemOverview, AppMetadata, NASUser } from './types';
+import { SystemOverview, NASUser } from './types';
 import { api } from './api';
 import { useTheme } from './theme';
 import { Key, X, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -16,10 +17,11 @@ export const App: React.FC = () => {
   useTheme();
   const [currentUser, setCurrentUser] = useState<NASUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings' | 'storage_settings' | 'smb_sharing'>('dashboard');
   const [overview, setOverview] = useState<SystemOverview | undefined>(undefined);
-  const [apps, setApps] = useState<AppMetadata[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [swUpdateReady, setSwUpdateReady] = useState(false);
+  const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
 
   // Self Change Password Modal State
   const [showChangePwdModal, setShowChangePwdModal] = useState(false);
@@ -31,17 +33,10 @@ export const App: React.FC = () => {
 
   // Check auth session on load
   const checkAuth = async () => {
-    const token = localStorage.getItem('macnas-auth-token');
-    if (!token) {
-      setCurrentUser(null);
-      setAuthChecking(false);
-      return;
-    }
     try {
       const res = await api.getMe();
       setCurrentUser(res.user);
     } catch {
-      localStorage.removeItem('macnas-auth-token');
       setCurrentUser(null);
     } finally {
       setAuthChecking(false);
@@ -51,12 +46,8 @@ export const App: React.FC = () => {
   const refreshData = async () => {
     if (!currentUser) return;
     try {
-      const [over, appList] = await Promise.all([
-        api.getOverview(),
-        api.getApps(),
-      ]);
+      const over = await api.getOverview();
       setOverview(over);
-      setApps(appList || []);
       setError(null);
     } catch (err: any) {
       setError(err.message || '无法连接到 MacNAS 后端服务');
@@ -66,13 +57,33 @@ export const App: React.FC = () => {
   useEffect(() => {
     checkAuth();
 
+    const handleSWUpdate = (event: Event) => {
+      const registration = (event as CustomEvent<{ registration?: ServiceWorkerRegistration }>).detail?.registration;
+      if (registration) {
+        swRegistrationRef.current = registration;
+        setSwUpdateReady(true);
+      }
+    };
+    window.addEventListener('macnas-sw-update', handleSWUpdate);
+
     const handleUnauthorized = () => {
-      localStorage.removeItem('macnas-auth-token');
       setCurrentUser(null);
     };
     window.addEventListener('macnas-unauthorized', handleUnauthorized);
-    return () => window.removeEventListener('macnas-unauthorized', handleUnauthorized);
+    return () => {
+      window.removeEventListener('macnas-unauthorized', handleUnauthorized);
+      window.removeEventListener('macnas-sw-update', handleSWUpdate);
+    };
   }, []);
+
+  const applySWUpdate = () => {
+    const waiting = swRegistrationRef.current?.waiting;
+    if (!waiting) return;
+
+    const handleControllerChange = () => window.location.reload();
+    navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange, { once: true });
+    waiting.postMessage({ type: 'SKIP_WAITING' });
+  };
 
   useEffect(() => {
     if (!currentUser) return;
@@ -106,7 +117,6 @@ export const App: React.FC = () => {
     } catch {
       // Ignore logout failure
     }
-    localStorage.removeItem('macnas-auth-token');
     setCurrentUser(null);
   };
 
@@ -116,8 +126,8 @@ export const App: React.FC = () => {
       setChangePwdMsg({ type: 'error', text: '请填写所有密码输入框' });
       return;
     }
-    if (newPassword.length < 6) {
-      setChangePwdMsg({ type: 'error', text: '新密码长度至少需要 6 个字符' });
+	if (newPassword.length < 12) {
+	  setChangePwdMsg({ type: 'error', text: '新密码长度至少需要 12 个字符' });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -146,7 +156,7 @@ export const App: React.FC = () => {
 
   if (authChecking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#090d16] text-slate-500">
+      <div className="min-h-[100dvh] flex items-center justify-center bg-slate-50 dark:bg-[#090d16] text-slate-500">
         <div className="flex flex-col items-center space-y-3">
           <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
           <span className="text-xs font-medium tracking-wide">正在加载 MacNAS 安全环境...</span>
@@ -160,7 +170,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-[#090d16] text-slate-900 dark:text-slate-100 transition-colors duration-200">
+    <div className={`sora-app-shell flex flex-col bg-slate-50 dark:bg-[#090d16] text-slate-900 dark:text-slate-100 transition-colors duration-200 ${activeTab === 'terminal' ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'}`}>
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -172,7 +182,20 @@ export const App: React.FC = () => {
         onOpenChangePwd={() => setShowChangePwdModal(true)}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {swUpdateReady && (
+        <div className="pwa-update-banner mx-auto mt-3 flex max-w-7xl items-center justify-between gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900 shadow-sm dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-100" role="status">
+          <span>新版本已经准备好，更新后即可使用最新功能。</span>
+          <button type="button" onClick={applySWUpdate} className="shrink-0 rounded-xl bg-sky-500 px-3 py-2 font-bold text-white transition hover:bg-sky-600">立即更新</button>
+        </div>
+      )}
+
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 min-w-0">
+        <main className={`sora-app-content min-w-0 flex-1 px-3 ${activeTab === 'terminal'
+          ? 'terminal-app-content flex min-h-0 overflow-hidden pb-[calc(76px+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pt-4'
+          : (activeTab === 'dashboard' || activeTab === 'storage' || activeTab === 'docker')
+            ? 'pb-[calc(76px+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pt-4'
+            : 'pb-32 pt-5 sm:px-6 sm:pb-32 sm:pt-8'
+        }`}>
         {error && (
           <div className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-300 text-sm flex items-center justify-between">
             <span>警告: {error}</span>
@@ -183,17 +206,13 @@ export const App: React.FC = () => {
         {activeTab === 'dashboard' && (
           <Dashboard
             overview={overview}
-            apps={apps}
             onRefresh={refreshData}
             onNavigateTab={setActiveTab}
           />
         )}
 
         {activeTab === 'storage' && (
-          <Storage
-            configDirty={overview?.configDirty}
-            onRefreshOverview={refreshData}
-          />
+          <Storage />
         )}
 
         {activeTab === 'docker' && <Docker />}
@@ -202,6 +221,10 @@ export const App: React.FC = () => {
 
         {activeTab === 'terminal' && <TerminalPage />}
 
+        {activeTab === 'storage_settings' && <StorageSettings mode="storage" configDirty={overview?.configDirty} onRefreshOverview={refreshData} />}
+
+        {activeTab === 'smb_sharing' && <StorageSettings mode="smb" configDirty={overview?.configDirty} onRefreshOverview={refreshData} />}
+
         {activeTab === 'settings' && (
           <Settings
             primaryIP={overview?.system.primaryIP}
@@ -209,7 +232,8 @@ export const App: React.FC = () => {
             onCurrentUserUpdated={(updated) => setCurrentUser(updated)}
           />
         )}
-      </main>
+        </main>
+      </div>
 
       {/* Self Change Password Modal */}
       {showChangePwdModal && (
@@ -263,7 +287,7 @@ export const App: React.FC = () => {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="请输入至少 6 位新密码"
+				  placeholder="请输入至少 12 位新密码"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
                   required
                 />
@@ -302,9 +326,6 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      <footer className="border-t border-slate-200/80 dark:border-slate-800/60 py-6 text-center text-xs text-slate-500">
-        <p>MacNAS MVP v0.1 · 磁盘 → Linux VM → Docker → NAS共享 → Web管理</p>
-      </footer>
     </div>
   );
 };
