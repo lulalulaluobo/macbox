@@ -3,8 +3,10 @@ package storage
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,32 +16,33 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/luluen/mac-nas/pkg/config"
 )
 
 type DiskInfo struct {
-	DeviceIdentifier string `json:"identifier"`      // e.g. "disk4"
-	DeviceNode       string `json:"deviceNode"`      // e.g. "/dev/disk4"
-	Name             string `json:"name"`            // e.g. "Lexar SSD THOR PRO 2TB"
-	VolumeName       string `json:"volumeName"`      // e.g. "MacNAS Data"
-	TotalSize        uint64 `json:"totalSize"`       // bytes
-	TotalSizeString  string `json:"totalSizeString"` // e.g. "2.0 TB"
-	UsedSpace        uint64 `json:"usedSpace"`
-	UsedSpaceString  string `json:"usedSpaceString"`
-	FreeSpace        uint64 `json:"freeSpace"`
-	FreeSpaceString  string `json:"freeSpaceString"`
+	DeviceIdentifier string  `json:"identifier"`      // e.g. "disk4"
+	DeviceNode       string  `json:"deviceNode"`      // e.g. "/dev/disk4"
+	Name             string  `json:"name"`            // e.g. "Lexar SSD THOR PRO 2TB"
+	VolumeName       string  `json:"volumeName"`      // e.g. "MacNAS Data"
+	TotalSize        uint64  `json:"totalSize"`       // bytes
+	TotalSizeString  string  `json:"totalSizeString"` // e.g. "2.0 TB"
+	UsedSpace        uint64  `json:"usedSpace"`
+	UsedSpaceString  string  `json:"usedSpaceString"`
+	FreeSpace        uint64  `json:"freeSpace"`
+	FreeSpaceString  string  `json:"freeSpaceString"`
 	UsedPercent      float64 `json:"usedPercent"`
-	Mounted          bool   `json:"mounted"`
-	MountPoint       string `json:"mountPoint"`
-	FileSystem       string `json:"fileSystem"`
-	IsExternal       bool   `json:"isExternal"`
-	IsSSD            bool   `json:"isSSD"`
-	IsWholeDisk      bool   `json:"isWholeDisk"`
-	IsVirtual        bool   `json:"isVirtual"`
-	IsSelected       bool   `json:"isSelected"`
-	IsSecondary      bool   `json:"isSecondary"`
-	SecondaryTarget  string `json:"secondaryTarget,omitempty"`
+	Mounted          bool    `json:"mounted"`
+	MountPoint       string  `json:"mountPoint"`
+	FileSystem       string  `json:"fileSystem"`
+	IsExternal       bool    `json:"isExternal"`
+	IsSSD            bool    `json:"isSSD"`
+	IsWholeDisk      bool    `json:"isWholeDisk"`
+	IsVirtual        bool    `json:"isVirtual"`
+	IsSelected       bool    `json:"isSelected"`
+	IsSecondary      bool    `json:"isSecondary"`
+	SecondaryTarget  string  `json:"secondaryTarget,omitempty"`
 }
 
 type ManagedDisk struct {
@@ -73,7 +76,130 @@ var (
 	cachedDisks    []DiskInfo
 	cachedDisksAt  time.Time
 	cachedSelected string
+	storageMu      sync.Mutex
+	diskIDPattern  = regexp.MustCompile(`^(?:/dev/)?disk[0-9]+$`)
 )
+
+const maxExternalDiskSizeGB = 16 * 1024
+
+// NormalizeDiskIdentifier restricts disk values to the identifiers accepted by
+// diskutil. Returning the short form also keeps config values stable.
+func NormalizeDiskIdentifier(identifier string) (string, error) {
+	identifier = strings.TrimSpace(identifier)
+	if !diskIDPattern.MatchString(identifier) {
+		return "", fmt.Errorf("磁盘标识格式无效")
+	}
+	return strings.TrimPrefix(identifier, "/dev/"), nil
+}
+
+func normalizeExistingDirectory(raw, label string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 4096 || strings.IndexFunc(raw, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("%s路径无效", label)
+	}
+	absPath, err := filepath.Abs(raw)
+	if err != nil {
+		return "", fmt.Errorf("解析%s路径失败: %w", label, err)
+	}
+	absPath = filepath.Clean(absPath)
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return "", fmt.Errorf("%s路径不存在: %s", label, absPath)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s路径不是目录: %s", label, absPath)
+	}
+	if realPath, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = realPath
+	}
+	return absPath, nil
+}
+
+func sameResolvedPath(left, right string) bool {
+	leftResolved, leftErr := filepath.EvalSymlinks(left)
+	rightResolved, rightErr := filepath.EvalSymlinks(right)
+	if leftErr != nil || rightErr != nil {
+		leftResolved, _ = filepath.Abs(left)
+		rightResolved, _ = filepath.Abs(right)
+	}
+	return filepath.Clean(leftResolved) == filepath.Clean(rightResolved)
+}
+
+func pathWithin(base, candidate string) bool {
+	rel, err := filepath.Rel(filepath.Clean(base), filepath.Clean(candidate))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// validateStorageTargetDir constrains the host directory used for the
+// secondary storage pool. A request must not be able to make the service
+// create/chmod an arbitrary path such as /etc or /Library. Existing symlink
+// components are rejected conservatively because MkdirAll/Chmod would follow
+// them and could otherwise escape the selected volume between checks.
+func validateStorageTargetDir(targetDir, mountPoint, home string) error {
+	targetDir = filepath.Clean(targetDir)
+	if targetDir == "." || targetDir == "/" || !filepath.IsAbs(targetDir) {
+		return fmt.Errorf("第二存储卷目录无效")
+	}
+	if mountPoint != "" && mountPoint != "/" && filepath.Clean(targetDir) == filepath.Clean(mountPoint) {
+		return fmt.Errorf("第二存储卷目录不能直接使用卷根目录")
+	}
+
+	allowedBases := make([]string, 0, 2)
+	if mountPoint != "" && mountPoint != "/" {
+		allowedBases = append(allowedBases, mountPoint)
+		if mountPoint == "/System/Volumes/Data" {
+			allowedBases = append(allowedBases, home)
+		}
+	} else {
+		allowedBases = append(allowedBases, home, "/Volumes")
+	}
+
+	type resolvedBase struct {
+		path string
+		ok   bool
+	}
+	bases := make([]resolvedBase, 0, len(allowedBases))
+	for _, base := range allowedBases {
+		base = filepath.Clean(base)
+		resolved, err := filepath.EvalSymlinks(base)
+		if err != nil {
+			resolved = base
+		}
+		bases = append(bases, resolvedBase{path: filepath.Clean(resolved), ok: true})
+	}
+
+	probe := targetDir
+	for {
+		info, err := os.Lstat(probe)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("第二存储卷目录不能包含符号链接")
+			}
+			resolved, err := filepath.EvalSymlinks(probe)
+			if err != nil {
+				return fmt.Errorf("检查第二存储卷目录失败: %w", err)
+			}
+			resolved = filepath.Clean(resolved)
+			for _, base := range bases {
+				if base.ok && pathWithin(base.path, resolved) {
+					return nil
+				}
+			}
+			return fmt.Errorf("第二存储卷目录必须位于已选择的外部卷或用户目录内")
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("检查第二存储卷目录失败: %w", err)
+		}
+		parent := filepath.Dir(probe)
+		if parent == probe {
+			return fmt.Errorf("第二存储卷目录无效")
+		}
+		probe = parent
+	}
+}
 
 // InvalidateDisksCache forces the next ListDisks call to re-query diskutil
 func InvalidateDisksCache() {
@@ -84,9 +210,33 @@ func InvalidateDisksCache() {
 
 // ListDisks scans all physical disks and accurately maps APFS containers and volumes (cached 5s)
 func ListDisks(selectedDiskIdentifier string, secondaryDiskIdentifier ...string) ([]DiskInfo, error) {
+	return ListDisksContext(context.Background(), selectedDiskIdentifier, secondaryDiskIdentifier...)
+}
+
+// ListDisksContext is the request-aware variant used by HTTP handlers. Disk
+// discovery can involve several native utilities, so a disconnected client
+// must be able to stop the whole scan instead of leaving child processes
+// behind.
+func ListDisksContext(ctx context.Context, selectedDiskIdentifier string, secondaryDiskIdentifier ...string) ([]DiskInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	secondary := ""
 	if len(secondaryDiskIdentifier) > 0 {
 		secondary = secondaryDiskIdentifier[0]
+	}
+	var err error
+	if strings.TrimSpace(selectedDiskIdentifier) != "" {
+		selectedDiskIdentifier, err = NormalizeDiskIdentifier(selectedDiskIdentifier)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if strings.TrimSpace(secondary) != "" {
+		secondary, err = NormalizeDiskIdentifier(secondary)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	disksCacheMu.Lock()
@@ -99,9 +249,12 @@ func ListDisks(selectedDiskIdentifier string, secondaryDiskIdentifier ...string)
 	}
 	disksCacheMu.Unlock()
 
-	disks, err := listDisksAPFS(selectedDiskIdentifier, secondary)
+	disks, err := listDisksAPFS(ctx, selectedDiskIdentifier, secondary)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil || len(disks) == 0 {
-		disks, err = listDisksFallback(selectedDiskIdentifier, secondary)
+		disks, err = listDisksFallback(ctx, selectedDiskIdentifier, secondary)
 	}
 	if err == nil && len(disks) > 0 {
 		disksCacheMu.Lock()
@@ -159,12 +312,18 @@ type diskutilInfoOutput struct {
 	FilesystemName    string `json:"FilesystemName"`
 }
 
-func listDisksAPFS(selectedDiskIdentifier, secondary string) ([]DiskInfo, error) {
-	cmdStr := "diskutil list -plist | plutil -convert json -r -o - -- -"
-	cmd := exec.Command("sh", "-c", cmdStr)
-	output, err := cmd.Output()
+func listDisksAPFS(ctx context.Context, selectedDiskIdentifier, secondary string) ([]DiskInfo, error) {
+	diskutilCmd := exec.CommandContext(ctx, "diskutil", "list", "-plist")
+	plist, err := diskutilCmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("读取磁盘列表失败: %w", err)
+	}
+
+	plutilCmd := exec.CommandContext(ctx, "plutil", "-convert", "json", "-r", "-o", "-", "--", "-")
+	plutilCmd.Stdin = bytes.NewReader(plist)
+	output, err := plutilCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("转换磁盘列表失败: %w", err)
 	}
 
 	var listData diskutilListOutput
@@ -188,8 +347,14 @@ func listDisksAPFS(selectedDiskIdentifier, secondary string) ([]DiskInfo, error)
 			continue
 		}
 		// Filter out synthetic disks and virtual images
-		inf, err := inspectDisk(entry.DeviceIdentifier)
-		if err != nil || inf.TotalSize == 0 || !inf.IsWholeDisk {
+		inf, err := inspectDiskContext(ctx, entry.DeviceIdentifier)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		if inf.TotalSize == 0 || !inf.IsWholeDisk {
 			continue
 		}
 		if inf.IsVirtual {
@@ -251,8 +416,8 @@ func listDisksAPFS(selectedDiskIdentifier, secondary string) ([]DiskInfo, error)
 	return results, nil
 }
 
-func listDisksFallback(selectedDiskIdentifier, secondary string) ([]DiskInfo, error) {
-	cmd := exec.Command("diskutil", "list")
+func listDisksFallback(ctx context.Context, selectedDiskIdentifier, secondary string) ([]DiskInfo, error) {
+	cmd := exec.CommandContext(ctx, "diskutil", "list")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("diskutil list error: %w", err)
@@ -271,8 +436,14 @@ func listDisksFallback(selectedDiskIdentifier, secondary string) ([]DiskInfo, er
 
 	var results []DiskInfo
 	for diskID := range diskMap {
-		info, err := inspectDisk(diskID)
-		if err != nil || info.TotalSize == 0 {
+		info, err := inspectDiskContext(ctx, diskID)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		if info.TotalSize == 0 {
 			continue
 		}
 		if selectedDiskIdentifier != "" && (info.DeviceIdentifier == selectedDiskIdentifier || info.DeviceNode == selectedDiskIdentifier) {
@@ -285,11 +456,21 @@ func listDisksFallback(selectedDiskIdentifier, secondary string) ([]DiskInfo, er
 		results = append(results, *info)
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("读取磁盘列表失败: %w", err)
+	}
 	return results, nil
 }
 
 func inspectDisk(diskID string) (*DiskInfo, error) {
-	cmd := exec.Command("diskutil", "info", diskID)
+	return inspectDiskContext(context.Background(), diskID)
+}
+
+func inspectDiskContext(ctx context.Context, diskID string) (*DiskInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "diskutil", "info", diskID)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -394,7 +575,16 @@ func formatBytes(b uint64) string {
 
 // ListManagedDisks calls limactl disk list --json
 func ListManagedDisks() ([]ManagedDisk, error) {
-	cmd := exec.Command("limactl", "disk", "list", "--json")
+	return ListManagedDisksContext(context.Background())
+}
+
+// ListManagedDisksContext lets callers cancel Lima disk discovery when the
+// request or VM lifecycle operation is no longer interested in the result.
+func ListManagedDisksContext(ctx context.Context) ([]ManagedDisk, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "limactl", "disk", "list", "--json")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -408,32 +598,43 @@ func ListManagedDisks() ([]ManagedDisk, error) {
 			continue
 		}
 		var d ManagedDisk
-		if err := json.Unmarshal([]byte(line), &d); err == nil {
-			if d.Dir != "" {
-				diskFile := filepath.Join(d.Dir, "datadisk")
-				if realPath, err := filepath.EvalSymlinks(diskFile); err == nil {
-					diskFile = realPath
-				}
-				if fi, err := os.Stat(diskFile); err == nil {
-					if sys, ok := fi.Sys().(*syscall.Stat_t); ok {
-						actualBytes := uint64(sys.Blocks) * 512
-						d.ActualSize = actualBytes
-						d.ActualSizeString = formatBytes(actualBytes)
-					}
-				}
-			}
-			if d.ActualSizeString == "" {
-				d.ActualSizeString = formatBytes(d.ActualSize)
-			}
-			disks = append(disks, d)
+		if err := json.Unmarshal([]byte(line), &d); err != nil {
+			return nil, fmt.Errorf("解析 Lima 磁盘列表失败: %w", err)
 		}
+		if d.Dir != "" {
+			diskFile := filepath.Join(d.Dir, "datadisk")
+			if realPath, err := filepath.EvalSymlinks(diskFile); err == nil {
+				diskFile = realPath
+			}
+			if fi, err := os.Stat(diskFile); err == nil {
+				if sys, ok := fi.Sys().(*syscall.Stat_t); ok {
+					actualBytes := uint64(sys.Blocks) * 512
+					d.ActualSize = actualBytes
+					d.ActualSizeString = formatBytes(actualBytes)
+				}
+			}
+		}
+		if d.ActualSizeString == "" {
+			d.ActualSizeString = formatBytes(d.ActualSize)
+		}
+		disks = append(disks, d)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("读取 Lima 磁盘列表失败: %w", err)
 	}
 	return disks, nil
 }
 
 // CreateManagedDisk creates a new managed disk in Lima
 func CreateManagedDisk(name, size string) error {
-	cmd := exec.Command("limactl", "disk", "create", name, "--size", size)
+	return CreateManagedDiskContext(context.Background(), name, size)
+}
+
+func CreateManagedDiskContext(ctx context.Context, name, size string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "limactl", "disk", "create", name, "--size", size)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("limactl disk create failed: %s (%w)", string(output), err)
@@ -443,9 +644,39 @@ func CreateManagedDisk(name, size string) error {
 
 // BindExternalDisk initializes an ext4 disk image on an external filesystem and bridges it to Lima's macnas-data
 func BindExternalDisk(cfg *config.Config, diskID, mountPoint string, sizeGB int) (string, error) {
+	return BindExternalDiskContext(context.Background(), cfg, diskID, mountPoint, sizeGB)
+}
+
+// BindExternalDiskContext is the request-aware variant used by HTTP handlers.
+// Native disk probing and sparse image creation must stop when the caller
+// disconnects instead of continuing a potentially large host-side operation.
+func BindExternalDiskContext(ctx context.Context, cfg *config.Config, diskID, mountPoint string, sizeGB int) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("配置不能为空")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	storageMu.Lock()
+	defer storageMu.Unlock()
+	cfgSnapshot, err := config.Snapshot(cfg)
+	if err != nil {
+		return "", fmt.Errorf("读取存储配置失败: %w", err)
+	}
+
+	if strings.TrimSpace(diskID) != "" {
+		normalized, err := NormalizeDiskIdentifier(diskID)
+		if err != nil {
+			return "", err
+		}
+		diskID = normalized
+	}
 	if mountPoint == "" {
+		if diskID == "" {
+			return "", fmt.Errorf("必须提供磁盘标识或挂载路径")
+		}
 		// Try to look up mount point from diskID
-		info, err := inspectDisk(diskID)
+		info, err := inspectDiskContext(ctx, diskID)
 		if err == nil && info.MountPoint != "" {
 			mountPoint = info.MountPoint
 		} else {
@@ -453,12 +684,17 @@ func BindExternalDisk(cfg *config.Config, diskID, mountPoint string, sizeGB int)
 		}
 	}
 
-	if info, err := os.Stat(mountPoint); err != nil || !info.IsDir() {
-		return "", fmt.Errorf("挂载路径不存在或非目录: %s", mountPoint)
+	normalizedMountPoint, err := normalizeExistingDirectory(mountPoint, "挂载")
+	if err != nil {
+		return "", err
 	}
+	mountPoint = normalizedMountPoint
 
-	if sizeGB <= 0 {
+	if sizeGB == 0 {
 		sizeGB = 100 // Default to 100 GiB sparse image
+	}
+	if sizeGB < 1 || sizeGB > maxExternalDiskSizeGB {
+		return "", fmt.Errorf("外接数据盘容量必须在 1 到 %d GiB 之间", maxExternalDiskSizeGB)
 	}
 
 	home, err := os.UserHomeDir()
@@ -468,56 +704,125 @@ func BindExternalDisk(cfg *config.Config, diskID, mountPoint string, sizeGB int)
 
 	macnasDir := filepath.Join(mountPoint, "MacNAS")
 	// If mount point is root or system data drive, place inside user home on that drive
-	if mountPoint == "/System/Volumes/Data" || mountPoint == "/" || strings.HasPrefix(home, mountPoint) {
+	if mountPoint == "/System/Volumes/Data" || mountPoint == "/" {
 		macnasDir = filepath.Join(home, "MacNAS")
-	} else {
-		if err := os.MkdirAll(macnasDir, 0755); err != nil {
-			macnasDir = filepath.Join(home, "MacNAS")
-		}
 	}
-	if err := os.MkdirAll(macnasDir, 0755); err != nil {
+	if err := os.MkdirAll(macnasDir, 0700); err != nil {
 		return "", fmt.Errorf("无法在外接盘创建 MacNAS 目录: %w", err)
+	}
+	if err := os.Chmod(macnasDir, 0700); err != nil {
+		return "", fmt.Errorf("无法保护外接盘 MacNAS 目录: %w", err)
 	}
 
 	imgFile := filepath.Join(macnasDir, "datadisk.img")
-	if _, err := os.Stat(imgFile); os.IsNotExist(err) {
-		// Create sparse image file with mkfile
-		cmd := exec.Command("mkfile", "-n", fmt.Sprintf("%dg", sizeGB), imgFile)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return "", fmt.Errorf("创建稀疏镜像失败: %s (%w)", string(output), err)
+	createdImage := false
+	cleanupCreatedImage := func(cause error) (string, error) {
+		if !createdImage {
+			return "", cause
 		}
+		if removeErr := os.Remove(imgFile); removeErr != nil && !os.IsNotExist(removeErr) {
+			return "", fmt.Errorf("%v；清理新建镜像失败: %w", cause, removeErr)
+		}
+		return "", cause
+	}
+	if info, err := os.Stat(imgFile); err == nil {
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("数据盘镜像路径不是普通文件: %s", imgFile)
+		}
+	} else if os.IsNotExist(err) {
+		// Create sparse image file with mkfile
+		cmd := exec.CommandContext(ctx, "mkfile", "-n", fmt.Sprintf("%dg", sizeGB), imgFile)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			cause := fmt.Errorf("创建稀疏镜像失败: %s (%w)", string(output), err)
+			if removeErr := os.Remove(imgFile); removeErr != nil && !os.IsNotExist(removeErr) {
+				return "", fmt.Errorf("%v；清理部分镜像失败: %w", cause, removeErr)
+			}
+			return "", cause
+		}
+		createdImage = true
+	} else {
+		return "", fmt.Errorf("检查数据盘镜像失败: %w", err)
 	}
 
-	// Link into Lima disk directory: ~/.lima/_disks/macnas-data/datadisk
-	limaDiskDir := filepath.Join(home, ".lima", "_disks", "macnas-data")
+	dataDiskName, err := config.NormalizeDataDiskName(cfgSnapshot.VM.DataDiskName)
+	if err != nil {
+		return cleanupCreatedImage(err)
+	}
+
+	// Link into Lima disk directory: ~/.lima/_disks/<data-disk>/datadisk
+	limaDiskDir := filepath.Join(home, ".lima", "_disks", dataDiskName)
 	if err := os.MkdirAll(limaDiskDir, 0700); err != nil {
-		return "", fmt.Errorf("无法创建 Lima 磁盘目录: %w", err)
+		return cleanupCreatedImage(fmt.Errorf("无法创建 Lima 磁盘目录: %w", err))
+	}
+	if err := os.Chmod(limaDiskDir, 0700); err != nil {
+		return cleanupCreatedImage(fmt.Errorf("无法保护 Lima 磁盘目录: %w", err))
 	}
 
 	targetDatadisk := filepath.Join(limaDiskDir, "datadisk")
-	// If it exists, check if it's already a symlink or file
+	backupPath := filepath.Join(limaDiskDir, "datadisk.internal.bak")
+	managedLink := false
+	movedInternal := false
 	if fi, err := os.Lstat(targetDatadisk); err == nil {
 		if fi.Mode()&os.ModeSymlink != 0 {
-			_ = os.Remove(targetDatadisk)
-		} else {
-			// Backup original internal datadisk
-			backupPath := filepath.Join(limaDiskDir, "datadisk.internal.bak")
-			if _, err := os.Stat(backupPath); os.IsNotExist(err) {
-				_ = os.Rename(targetDatadisk, backupPath)
-			} else {
-				_ = os.Remove(targetDatadisk)
+			if !sameResolvedPath(targetDatadisk, imgFile) {
+				return cleanupCreatedImage(fmt.Errorf("Lima 数据盘链接已指向其他位置，请先人工确认: %s", targetDatadisk))
 			}
+			managedLink = true
+		} else {
+			if fi.IsDir() || !fi.Mode().IsRegular() {
+				return cleanupCreatedImage(fmt.Errorf("Lima 数据盘目标不是可安全备份的普通文件: %s", targetDatadisk))
+			}
+			if _, backupErr := os.Lstat(backupPath); backupErr == nil {
+				return cleanupCreatedImage(fmt.Errorf("检测到已有内部数据盘备份，请先人工处理: %s", backupPath))
+			} else if !os.IsNotExist(backupErr) {
+				return cleanupCreatedImage(fmt.Errorf("检查内部数据盘备份失败: %w", backupErr))
+			}
+			if err := os.Rename(targetDatadisk, backupPath); err != nil {
+				return cleanupCreatedImage(fmt.Errorf("备份内部数据盘失败: %w", err))
+			}
+			movedInternal = true
+		}
+	} else if !os.IsNotExist(err) {
+		return cleanupCreatedImage(fmt.Errorf("检查 Lima 数据盘目标失败: %w", err))
+	}
+
+	if !managedLink {
+		if err := os.Symlink(imgFile, targetDatadisk); err != nil {
+			var rollbackErr error
+			if movedInternal {
+				rollbackErr = os.Rename(backupPath, targetDatadisk)
+			}
+			cause := fmt.Errorf("软链接外接镜像到 Lima 失败: %w", err)
+			if rollbackErr != nil {
+				cause = fmt.Errorf("%v；恢复内部数据盘失败: %w", cause, rollbackErr)
+			}
+			return cleanupCreatedImage(cause)
 		}
 	}
 
-	if err := os.Symlink(imgFile, targetDatadisk); err != nil {
-		return "", fmt.Errorf("软链接外接镜像到 Lima 失败: %w", err)
+	if err := config.Update(cfg, func(updated *config.Config) error {
+		updated.Storage.SelectedDisk = diskID
+		updated.Storage.MountPoint = mountPoint
+		updated.Storage.DataPath = imgFile
+		return nil
+	}); err != nil {
+		if !managedLink {
+			if removeErr := os.Remove(targetDatadisk); removeErr != nil && !os.IsNotExist(removeErr) {
+				return "", fmt.Errorf("保存配置失败: %v；清理外接盘链接失败: %w", err, removeErr)
+			}
+		}
+		if movedInternal {
+			if restoreErr := os.Rename(backupPath, targetDatadisk); restoreErr != nil {
+				return "", fmt.Errorf("保存配置失败: %v；恢复内部数据盘失败: %w", err, restoreErr)
+			}
+		}
+		if createdImage && !managedLink {
+			if removeErr := os.Remove(imgFile); removeErr != nil && !os.IsNotExist(removeErr) {
+				return "", fmt.Errorf("保存配置失败: %v；清理新建镜像失败: %w", err, removeErr)
+			}
+		}
+		return "", fmt.Errorf("保存外接盘绑定配置失败: %w", err)
 	}
-
-	cfg.Storage.SelectedDisk = diskID
-	cfg.Storage.MountPoint = mountPoint
-	cfg.Storage.DataPath = imgFile
-	_ = config.SaveConfig(cfg)
 	InvalidateDisksCache()
 
 	return imgFile, nil
@@ -525,47 +830,183 @@ func BindExternalDisk(cfg *config.Config, diskID, mountPoint string, sizeGB int)
 
 // UnbindExternalDisk restores internal disk and cleans symlink
 func UnbindExternalDisk(cfg *config.Config) error {
+	if cfg == nil {
+		return fmt.Errorf("配置不能为空")
+	}
+	storageMu.Lock()
+	defer storageMu.Unlock()
+	cfgSnapshot, err := config.Snapshot(cfg)
+	if err != nil {
+		return fmt.Errorf("读取存储配置失败: %w", err)
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	limaDiskDir := filepath.Join(home, ".lima", "_disks", "macnas-data")
+	dataDiskName, err := config.NormalizeDataDiskName(cfgSnapshot.VM.DataDiskName)
+	if err != nil {
+		return err
+	}
+	limaDiskDir := filepath.Join(home, ".lima", "_disks", dataDiskName)
 	targetDatadisk := filepath.Join(limaDiskDir, "datadisk")
+	backupPath := filepath.Join(limaDiskDir, "datadisk.internal.bak")
+	removedLink := false
+	restoredInternal := false
+	var linkTarget string
 
-	if fi, err := os.Lstat(targetDatadisk); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		_ = os.Remove(targetDatadisk)
-		backupPath := filepath.Join(limaDiskDir, "datadisk.internal.bak")
-		if _, err := os.Stat(backupPath); err == nil {
-			_ = os.Rename(backupPath, targetDatadisk)
+	if fi, err := os.Lstat(targetDatadisk); err == nil {
+		if fi.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("Lima 数据盘目标不是 MacNAS 管理的链接，未执行解除绑定")
 		}
+		if strings.TrimSpace(cfgSnapshot.Storage.DataPath) == "" || !sameResolvedPath(targetDatadisk, cfgSnapshot.Storage.DataPath) {
+			return fmt.Errorf("Lima 数据盘链接与当前配置不一致，未执行解除绑定")
+		}
+		resolvedTarget, err := filepath.EvalSymlinks(targetDatadisk)
+		if err != nil {
+			return fmt.Errorf("解析数据盘链接失败: %w", err)
+		}
+		linkTarget = resolvedTarget
+		if backupInfo, backupErr := os.Lstat(backupPath); backupErr == nil {
+			if backupInfo.IsDir() || !backupInfo.Mode().IsRegular() {
+				return fmt.Errorf("内部数据盘备份不是普通文件，未执行恢复")
+			}
+		} else if !os.IsNotExist(backupErr) {
+			return fmt.Errorf("检查内部数据盘备份失败: %w", backupErr)
+		}
+		if err := os.Remove(targetDatadisk); err != nil {
+			return fmt.Errorf("移除外接盘链接失败: %w", err)
+		}
+		removedLink = true
+		if _, backupErr := os.Lstat(backupPath); backupErr == nil {
+			if err := os.Rename(backupPath, targetDatadisk); err != nil {
+				if restoreErr := os.Symlink(linkTarget, targetDatadisk); restoreErr != nil {
+					return fmt.Errorf("恢复内部数据盘失败: %v；恢复外接盘链接也失败: %w", err, restoreErr)
+				}
+				return fmt.Errorf("恢复内部数据盘失败: %w", err)
+			}
+			restoredInternal = true
+		}
+	} else if os.IsNotExist(err) {
+		if strings.TrimSpace(cfgSnapshot.Storage.DataPath) != "" {
+			return fmt.Errorf("Lima 数据盘链接不存在，未执行解除绑定")
+		}
+	} else {
+		return fmt.Errorf("检查 Lima 数据盘目标失败: %w", err)
 	}
 
-	cfg.Storage.SelectedDisk = ""
-	cfg.Storage.MountPoint = ""
-	cfg.Storage.DataPath = ""
+	if err := config.Update(cfg, func(updated *config.Config) error {
+		updated.Storage.SelectedDisk = ""
+		updated.Storage.MountPoint = ""
+		updated.Storage.DataPath = ""
+		return nil
+	}); err != nil {
+		if restoredInternal {
+			if restoreErr := os.Rename(targetDatadisk, backupPath); restoreErr != nil {
+				return fmt.Errorf("保存配置失败: %v；回滚内部数据盘失败: %w", err, restoreErr)
+			}
+		}
+		if removedLink {
+			if linkErr := os.Symlink(linkTarget, targetDatadisk); linkErr != nil {
+				return fmt.Errorf("保存配置失败: %v；回滚外接盘链接失败: %w", err, linkErr)
+			}
+		}
+		return fmt.Errorf("保存解除绑定配置失败: %w", err)
+	}
+
 	InvalidateDisksCache()
-	return config.SaveConfig(cfg)
+	return nil
 }
 
 // BindSecondaryDisk configures a secondary physical disk as high-speed Volume 2
 func BindSecondaryDisk(cfg *config.Config, diskID, mountPoint, targetDir, guestTarget, projectRoot, instanceName string) (map[string]interface{}, error) {
+	return BindSecondaryDiskContext(context.Background(), cfg, diskID, mountPoint, targetDir, guestTarget, projectRoot, instanceName)
+}
+
+// BindSecondaryDiskContext is the request-aware variant. The legacy wrapper is
+// retained for embedded callers, while HTTP requests can cancel the Lima
+// helper if the client disconnects.
+func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, mountPoint, targetDir, guestTarget, projectRoot, instanceName string) (map[string]interface{}, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("配置不能为空")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	storageMu.Lock()
+	defer storageMu.Unlock()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(diskID) != "" {
+		normalized, err := NormalizeDiskIdentifier(diskID)
+		if err != nil {
+			return nil, err
+		}
+		diskID = normalized
+	}
+	if strings.TrimSpace(mountPoint) != "" {
+		normalized, err := normalizeExistingDirectory(mountPoint, "第二硬盘挂载")
+		if err != nil {
+			return nil, err
+		}
+		mountPoint = normalized
+	}
+
+	providedTargetDir := strings.TrimSpace(targetDir)
+	if providedTargetDir != "" && !filepath.IsAbs(providedTargetDir) {
+		return nil, fmt.Errorf("第二存储卷目录必须使用绝对路径")
+	}
 	if targetDir == "" {
 		if fi, err := os.Stat("/Volumes/Data/Users/Shared"); err == nil && fi.IsDir() {
 			targetDir = "/Volumes/Data/Users/Shared/MacNAS-SSD-Pool"
 		} else if mountPoint != "" {
 			targetDir = filepath.Join(mountPoint, "MacNAS-SSD-Pool")
 		} else {
-			home, _ := os.UserHomeDir()
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, err
+			}
 			targetDir = filepath.Join(home, "MacNAS-SSD-Pool")
 		}
 	}
 
-	if err := os.MkdirAll(targetDir, 0777); err != nil {
+	targetDir, err = filepath.Abs(strings.TrimSpace(targetDir))
+	if err != nil || targetDir == "." || targetDir == "/" {
+		return nil, fmt.Errorf("第二存储卷目录无效")
+	}
+	if strings.IndexFunc(targetDir, unicode.IsControl) >= 0 || len(targetDir) > 4096 {
+		return nil, fmt.Errorf("第二存储卷目录无效")
+	}
+	if err := validateStorageTargetDir(targetDir, mountPoint, home); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(targetDir, 0750); err != nil {
 		return nil, fmt.Errorf("创建存储空间 2 目录失败: %w", err)
+	}
+	if err := os.Chmod(targetDir, 0750); err != nil {
+		return nil, fmt.Errorf("保护存储空间 2 目录失败: %w", err)
+	}
+	if info, err := os.Lstat(targetDir); err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return nil, fmt.Errorf("第二存储卷目录必须是普通目录")
 	}
 
 	if guestTarget == "" {
 		guestTarget = "volume2-ssd"
+	}
+	normalizedGuestTarget, err := config.NormalizeGuestTarget(guestTarget)
+	if err != nil {
+		return nil, err
+	}
+	guestTarget = normalizedGuestTarget
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	instanceName, err = config.NormalizeVMName(instanceName)
+	if err != nil {
+		return nil, err
 	}
 
 	mount := config.LocalMount{
@@ -579,20 +1020,22 @@ func BindSecondaryDisk(cfg *config.Config, diskID, mountPoint, targetDir, guestT
 		Description: "Mac 本机 256GB 高速 NVMe 固态硬盘扩展存储池，支持原生 3~5 GB/s 零拷贝极速读写",
 	}
 
-	if err := AddOrUpdateLocalMount(cfg, mount); err != nil {
-		return nil, err
+	if err := config.Update(cfg, func(updated *config.Config) error {
+		if err := upsertLocalMount(updated, mount); err != nil {
+			return err
+		}
+		updated.Storage.SecondaryDisk = diskID
+		updated.Storage.SecondaryMount = targetDir
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("保存第二存储卷配置失败: %w", err)
 	}
-
-	cfg.Storage.SecondaryDisk = diskID
-	cfg.Storage.SecondaryMount = targetDir
-	_ = config.SaveConfig(cfg)
 	InvalidateDisksCache()
 
-	if instanceName == "" {
-		instanceName = "macnas"
+	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "mkdir", "-p", "/data/"+guestTarget)
+	if err := cmd.Run(); err != nil {
+		log.Printf("[MacNAS Storage] 第二存储卷目录将在虚拟机重启时创建: %v", err)
 	}
-	cmd := exec.Command("limactl", "shell", instanceName, "sudo", "mkdir", "-p", "/data/"+guestTarget)
-	_ = cmd.Run()
 
 	return map[string]interface{}{
 		"status":          "success",
@@ -605,9 +1048,20 @@ func BindSecondaryDisk(cfg *config.Config, diskID, mountPoint, targetDir, guestT
 
 // UnbindSecondaryDisk removes the secondary disk volume
 func UnbindSecondaryDisk(cfg *config.Config, projectRoot, instanceName string) error {
-	_ = DeleteLocalMount(cfg, "volume2-ssd")
-	cfg.Storage.SecondaryDisk = ""
-	cfg.Storage.SecondaryMount = ""
+	if cfg == nil {
+		return fmt.Errorf("配置不能为空")
+	}
+	storageMu.Lock()
+	defer storageMu.Unlock()
+
+	if err := config.Update(cfg, func(updated *config.Config) error {
+		deleteLocalMount(updated, "volume2-ssd")
+		updated.Storage.SecondaryDisk = ""
+		updated.Storage.SecondaryMount = ""
+		return nil
+	}); err != nil {
+		return fmt.Errorf("保存解除第二存储卷配置失败: %w", err)
+	}
 	InvalidateDisksCache()
-	return config.SaveConfig(cfg)
+	return nil
 }

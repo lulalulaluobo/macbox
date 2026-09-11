@@ -1,12 +1,18 @@
 package storage
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/luluen/mac-nas/pkg/config"
 )
 
 func TestListDisks(t *testing.T) {
+	if os.Getenv("MACNAS_INTEGRATION") != "1" {
+		t.Skip("diskutil integration test; set MACNAS_INTEGRATION=1 to run against a disposable host")
+	}
+
 	disks, err := ListDisks("")
 	if err != nil {
 		t.Fatalf("ListDisks error: %v", err)
@@ -43,6 +49,10 @@ func TestFormatBytes(t *testing.T) {
 }
 
 func TestLocalMounts(t *testing.T) {
+	// AddOrUpdateLocalMount and the toggle/delete helpers persist config. Use a
+	// disposable home so this test cannot modify the user's NAS configuration.
+	t.Setenv("HOME", t.TempDir())
+
 	defaults := GetDefaultMacMounts()
 	t.Logf("Found %d default Mac user mounts", len(defaults))
 	for _, d := range defaults {
@@ -89,5 +99,51 @@ func TestLocalMounts(t *testing.T) {
 		if len(configured) != 0 {
 			t.Errorf("expected 0 mounts after delete, got %d", len(configured))
 		}
+	}
+}
+
+func TestAddOrUpdateLocalMountRejectsGuestPathEscape(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	hostDir := t.TempDir()
+	cfg := &config.Config{}
+
+	err := AddOrUpdateLocalMount(cfg, config.LocalMount{
+		ID:          "unsafe-target",
+		Name:        "Unsafe target",
+		HostPath:    hostDir,
+		GuestTarget: "../../outside",
+	})
+	if err == nil {
+		t.Fatal("AddOrUpdateLocalMount accepted a guest path outside /data")
+	}
+	if len(cfg.Storage.LocalMounts) != 0 {
+		t.Fatal("rejected mount was added to configuration")
+	}
+}
+
+func TestValidateStorageTargetDir(t *testing.T) {
+	home := t.TempDir()
+	mountPoint := t.TempDir()
+
+	if err := validateStorageTargetDir(filepath.Join(mountPoint, "MacNAS-Pool"), mountPoint, home); err != nil {
+		t.Fatalf("expected target inside selected volume to be accepted: %v", err)
+	}
+	if err := validateStorageTargetDir(filepath.Join(home, "MacNAS-Pool"), "", home); err != nil {
+		t.Fatalf("expected target inside home to be accepted: %v", err)
+	}
+	if err := validateStorageTargetDir(filepath.Join(mountPoint, "..", "outside"), mountPoint, home); err == nil {
+		t.Fatal("target outside selected volume was accepted")
+	}
+	if err := validateStorageTargetDir("/etc/macnas", mountPoint, home); err == nil {
+		t.Fatal("system directory was accepted as storage target")
+	}
+
+	outside := t.TempDir()
+	link := filepath.Join(mountPoint, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("create escape symlink: %v", err)
+	}
+	if err := validateStorageTargetDir(link, mountPoint, home); err == nil {
+		t.Fatal("symlink target was accepted")
 	}
 }

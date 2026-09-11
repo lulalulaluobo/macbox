@@ -1,75 +1,288 @@
 package api
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
-	"runtime"
+	"strings"
 	"testing"
 
+	"github.com/luluen/mac-nas/pkg/auth"
 	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/luluen/mac-nas/pkg/vm"
 )
 
-func getProjectRoot() string {
-	_, filename, _, _ := runtime.Caller(0)
-	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+func requestWithUser(user *auth.User) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/api/protected", nil)
+	return req.WithContext(context.WithValue(req.Context(), userContextKey, user))
 }
 
-func TestAPIRoutes(t *testing.T) {
-	cfg := config.DefaultConfig()
-	root := getProjectRoot()
-	server := NewServer(cfg, root)
+func TestAdminOnlyRequiresAdministrator(t *testing.T) {
+	server := &Server{}
+
+	tests := []struct {
+		name       string
+		request    *http.Request
+		wantStatus int
+		wantCalled bool
+	}{
+		{
+			name:       "anonymous",
+			request:    httptest.NewRequest(http.MethodPost, "/api/protected", nil),
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "regular user",
+			request: requestWithUser(&auth.User{
+				ID:      "u-user",
+				Role:    "user",
+				Enabled: true,
+			}),
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "administrator",
+			request: requestWithUser(&auth.User{
+				ID:      "u-admin",
+				Role:    "admin",
+				Enabled: true,
+			}),
+			wantStatus: http.StatusNoContent,
+			wantCalled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handlerCalled := false
+			protected := server.adminOnly(func(w http.ResponseWriter, _ *http.Request) {
+				handlerCalled = true
+				w.WriteHeader(http.StatusNoContent)
+			})
+			w := httptest.NewRecorder()
+			protected.ServeHTTP(w, tt.request)
+
+			if w.Code != tt.wantStatus {
+				t.Fatalf("expected status %d, got %d: %s", tt.wantStatus, w.Code, w.Body.String())
+			}
+			if handlerCalled != tt.wantCalled {
+				t.Fatalf("protected handler called = %v, want %v", handlerCalled, tt.wantCalled)
+			}
+		})
+	}
+}
+
+func TestAPIHandlerRequiresAuthentication(t *testing.T) {
+	server := &Server{mux: http.NewServeMux()}
 	handler := server.Handler()
 
-	// 1. Test GET /api/system/status
-	req := httptest.NewRequest("GET", "/api/system/status", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
+	request := httptest.NewRequest(http.MethodGet, "/api/system/status", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated API request to return 401, got %d", response.Code)
 	}
+}
 
-	var statusResp map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &statusResp); err != nil {
-		t.Fatalf("invalid json response: %v", err)
-	}
+func TestWriteErrorSanitizesInternalDetails(t *testing.T) {
+	response := httptest.NewRecorder()
+	writeError(response, http.StatusInternalServerError, "/Users/lulu/secret: command output")
 
-	if _, ok := statusResp["system"]; !ok {
-		t.Errorf("missing 'system' in status response")
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", response.Code)
 	}
-	if _, ok := statusResp["vm"]; !ok {
-		t.Errorf("missing 'vm' in status response")
+	body := response.Body.String()
+	if strings.Contains(body, "/Users/lulu/secret") || strings.Contains(body, "command output") {
+		t.Fatalf("internal details leaked in error response: %s", body)
 	}
+	if !strings.Contains(body, "服务器内部错误") {
+		t.Fatalf("generic internal error missing from response: %s", body)
+	}
+}
 
-	// 2. Test GET /api/storage/disks
-	req = httptest.NewRequest("GET", "/api/storage/disks", nil)
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w.Code)
-	}
+func TestHandlerSetsSecurityHeaders(t *testing.T) {
+	server := &Server{mux: http.NewServeMux()}
+	handler := server.Handler()
 
-	// 3. Test GET /api/apps
-	req = httptest.NewRequest("GET", "/api/apps", nil)
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w.Code)
-	}
-	var apps []map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &apps); err == nil {
-		if len(apps) < 3 {
-			t.Errorf("expected at least 3 preset apps, got %d", len(apps))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	for header, want := range map[string]string{
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "no-referrer",
+	} {
+		if got := response.Header().Get(header); got != want {
+			t.Errorf("%s = %q, want %q", header, got, want)
 		}
 	}
+}
 
-	// 4. Test GET /api/samba/status
-	req = httptest.NewRequest("GET", "/api/samba/status", nil)
-	w = httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w.Code)
+func TestStorageOperationLockRejectsConcurrentMutation(t *testing.T) {
+	server := &Server{}
+	first := httptest.NewRecorder()
+	if !server.beginStorageOperation(first) {
+		t.Fatal("first storage operation should acquire the lock")
+	}
+
+	second := httptest.NewRecorder()
+	if server.beginStorageOperation(second) {
+		t.Fatal("second storage operation should be rejected while the first is active")
+	}
+	if second.Code != http.StatusConflict {
+		t.Fatalf("second storage operation status = %d, want %d", second.Code, http.StatusConflict)
+	}
+	server.endStorageOperation()
+
+	third := httptest.NewRecorder()
+	if !server.beginStorageOperation(third) {
+		t.Fatal("storage operation should be available after release")
+	}
+	server.endStorageOperation()
+}
+
+func TestDockerOperationLockRejectsConcurrentMutation(t *testing.T) {
+	server := &Server{}
+	first := httptest.NewRecorder()
+	if !server.beginDockerOperation(first) {
+		t.Fatal("first Docker operation should acquire the lock")
+	}
+
+	second := httptest.NewRecorder()
+	if server.beginDockerOperation(second) {
+		t.Fatal("second Docker operation should be rejected while the first is active")
+	}
+	if second.Code != http.StatusConflict {
+		t.Fatalf("second Docker operation status = %d, want %d", second.Code, http.StatusConflict)
+	}
+	server.endDockerOperation()
+
+	third := httptest.NewRecorder()
+	if !server.beginDockerOperation(third) {
+		t.Fatal("Docker operation should be available after release")
+	}
+	server.endDockerOperation()
+}
+
+func TestRegisterRoutesHasNoConflicts(t *testing.T) {
+	server := &Server{mux: http.NewServeMux()}
+	server.registerRoutes()
+}
+
+func TestPrivilegedRoutesRejectRegularUsers(t *testing.T) {
+	server := &Server{mux: http.NewServeMux()}
+	server.registerRoutes()
+
+	paths := []string{
+		"/api/vm/start",
+		"/api/docker/containers/example/start",
+		"/api/terminal/files/mkdir",
+		"/api/system/root/password",
+		"/api/system/ssh",
+		"/api/apps/example/config",
+	}
+
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			request := requestWithUser(&auth.User{
+				ID:      "u-user",
+				Role:    "user",
+				Enabled: true,
+			})
+			if path == "/api/system/ssh" || path == "/api/apps/example/config" {
+				request.Method = http.MethodGet
+			}
+			request.URL.Path = path
+			response := httptest.NewRecorder()
+			server.mux.ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected regular user to receive 403 for %s, got %d: %s", path, response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandlerRejectsUnapprovedOrigin(t *testing.T) {
+	server := &Server{
+		mux:            http.NewServeMux(),
+		allowedOrigins: map[string]struct{}{},
+	}
+	server.registerRoutes()
+
+	request := httptest.NewRequest(http.MethodOptions, "/api/auth/status", nil)
+	request.Header.Set("Origin", "https://evil.example")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("unapproved origin status = %d, want 403", response.Code)
+	}
+}
+
+func TestHandlerAllowsExplicitOriginWithoutWildcard(t *testing.T) {
+	const origin = "https://console.example"
+	server := &Server{
+		mux:            http.NewServeMux(),
+		allowedOrigins: map[string]struct{}{origin: {}},
+	}
+	server.registerRoutes()
+
+	request := httptest.NewRequest(http.MethodOptions, "/api/auth/status", nil)
+	request.Header.Set("Origin", origin)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("allowed origin preflight status = %d, want 204", response.Code)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != origin {
+		t.Fatalf("allow-origin = %q, want %q", got, origin)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("credentials header = %q, wildcard credential access is not expected", got)
+	}
+}
+
+func TestAuthSetupRejectsNonLoopbackRequest(t *testing.T) {
+	server := &Server{mux: http.NewServeMux()}
+	server.registerRoutes()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/setup", nil)
+	request.RemoteAddr = "192.0.2.10:1234"
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("remote setup status = %d, want 403", response.Code)
+	}
+}
+
+func TestComposeDeleteWithVolumesRequiresConfirmation(t *testing.T) {
+	server := &Server{}
+	request := httptest.NewRequest(http.MethodDelete, "/api/docker/compose/media?volumes=true", nil)
+	request.SetPathValue("name", "media")
+	response := httptest.NewRecorder()
+	server.handleDockerComposeDelete(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("unconfirmed volume deletion status = %d, want 400", response.Code)
+	}
+}
+
+func TestVMHandlerRejectsConcurrentAction(t *testing.T) {
+	server := &Server{vmMgr: vm.NewManager(config.DefaultConfig())}
+	if !server.vmMgr.BeginVMAction("starting") {
+		t.Fatal("failed to set up active VM action")
+	}
+	defer server.vmMgr.EndVMAction()
+
+	request := httptest.NewRequest(http.MethodPost, "/api/vm/restart", nil)
+	response := httptest.NewRecorder()
+	server.handleVMRestart(response, request)
+
+	if response.Code != http.StatusConflict {
+		t.Fatalf("concurrent VM action status = %d, want 409", response.Code)
 	}
 }

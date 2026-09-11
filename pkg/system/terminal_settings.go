@@ -2,6 +2,7 @@ package system
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -17,6 +18,30 @@ type TerminalSettingsManager struct {
 	filePath string
 	mu       sync.RWMutex
 	settings TerminalSettings
+}
+
+func normalizeTerminalSettings(settings TerminalSettings) (TerminalSettings, error) {
+	if settings.DefaultLoginUser == "" {
+		settings.DefaultLoginUser = "default"
+	}
+	if settings.DefaultLoginUser != "root" && settings.DefaultLoginUser != "default" {
+		return TerminalSettings{}, fmt.Errorf("默认登录用户无效")
+	}
+	if settings.FontSize == 0 {
+		settings.FontSize = 13
+	}
+	if settings.FontSize < 9 || settings.FontSize > 32 {
+		return TerminalSettings{}, fmt.Errorf("终端字体大小必须在 9 到 32 之间")
+	}
+	if settings.CursorStyle == "" {
+		settings.CursorStyle = "block"
+	}
+	switch settings.CursorStyle {
+	case "block", "underline", "bar":
+	default:
+		return TerminalSettings{}, fmt.Errorf("光标样式无效")
+	}
+	return settings, nil
 }
 
 func NewTerminalSettingsManager(configDir string) *TerminalSettingsManager {
@@ -40,7 +65,14 @@ func (m *TerminalSettingsManager) load() {
 	if err != nil {
 		return
 	}
-	_ = json.Unmarshal(data, &m.settings)
+	_ = os.Chmod(m.filePath, 0600)
+	var loaded TerminalSettings
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return
+	}
+	if normalized, err := normalizeTerminalSettings(loaded); err == nil {
+		m.settings = normalized
+	}
 }
 
 func (m *TerminalSettingsManager) save() error {
@@ -48,7 +80,31 @@ func (m *TerminalSettingsManager) save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.filePath, data, 0644)
+	tmpFile, err := os.CreateTemp(filepath.Dir(m.filePath), ".terminal-settings-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmpFile.Chmod(0600); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, m.filePath); err != nil {
+		return err
+	}
+	return os.Chmod(m.filePath, 0600)
 }
 
 func (m *TerminalSettingsManager) Get() TerminalSettings {
@@ -61,16 +117,16 @@ func (m *TerminalSettingsManager) Update(newSettings TerminalSettings) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if newSettings.DefaultLoginUser != "root" && newSettings.DefaultLoginUser != "default" {
-		newSettings.DefaultLoginUser = "default"
-	}
-	if newSettings.FontSize <= 8 || newSettings.FontSize > 32 {
-		newSettings.FontSize = 13
-	}
-	if newSettings.CursorStyle == "" {
-		newSettings.CursorStyle = "block"
+	normalized, err := normalizeTerminalSettings(newSettings)
+	if err != nil {
+		return err
 	}
 
-	m.settings = newSettings
-	return m.save()
+	original := m.settings
+	m.settings = normalized
+	if err := m.save(); err != nil {
+		m.settings = original
+		return err
+	}
+	return nil
 }

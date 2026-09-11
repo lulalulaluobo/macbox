@@ -72,7 +72,14 @@ func GetDefaultMacMounts() []config.LocalMount {
 
 // ListLocalMounts returns current active mounts and unadded recommendations
 func ListLocalMounts(cfg *config.Config) (configured []config.LocalMount, recommended []config.LocalMount) {
-	configured = cfg.Storage.LocalMounts
+	if cfg == nil {
+		return nil, GetDefaultMacMounts()
+	}
+	cfgSnapshot, err := config.Snapshot(cfg)
+	if err != nil {
+		return nil, GetDefaultMacMounts()
+	}
+	configured = cloneLocalMounts(cfgSnapshot.Storage.LocalMounts)
 	defaults := GetDefaultMacMounts()
 
 	configuredIDs := make(map[string]bool)
@@ -91,8 +98,11 @@ func ListLocalMounts(cfg *config.Config) (configured []config.LocalMount, recomm
 	return configured, recommended
 }
 
-// AddOrUpdateLocalMount validates and saves a local directory mount
-func AddOrUpdateLocalMount(cfg *config.Config, mount config.LocalMount) error {
+func upsertLocalMount(cfg *config.Config, mount config.LocalMount) error {
+	if cfg == nil {
+		return fmt.Errorf("配置不能为空")
+	}
+
 	// Expand ~ if present
 	if strings.HasPrefix(mount.HostPath, "~") {
 		home, err := os.UserHomeDir()
@@ -101,6 +111,12 @@ func AddOrUpdateLocalMount(cfg *config.Config, mount config.LocalMount) error {
 		}
 		mount.HostPath = filepath.Join(home, strings.TrimPrefix(mount.HostPath, "~"))
 	}
+	var err error
+	mount.HostPath, err = filepath.Abs(strings.TrimSpace(mount.HostPath))
+	if err != nil {
+		return fmt.Errorf("解析 Mac 本地路径失败: %w", err)
+	}
+	mount.HostPath = filepath.Clean(mount.HostPath)
 
 	// Validate path existence
 	fi, err := os.Stat(mount.HostPath)
@@ -114,6 +130,10 @@ func AddOrUpdateLocalMount(cfg *config.Config, mount config.LocalMount) error {
 	if mount.ID == "" {
 		mount.ID = fmt.Sprintf("mount-%d", len(cfg.Storage.LocalMounts)+1)
 	}
+	mount.ID, err = config.NormalizeLocalMountID(mount.ID)
+	if err != nil {
+		return err
+	}
 	if mount.Name == "" {
 		mount.Name = filepath.Base(mount.HostPath)
 	}
@@ -121,9 +141,14 @@ func AddOrUpdateLocalMount(cfg *config.Config, mount config.LocalMount) error {
 		cleanBase := filepath.Base(mount.HostPath)
 		mount.GuestTarget = "shared/" + cleanBase
 	}
-	// Sanitize guest target to be relative to /data
-	mount.GuestTarget = strings.TrimPrefix(mount.GuestTarget, "/data/")
-	mount.GuestTarget = strings.TrimPrefix(mount.GuestTarget, "/")
+	target, err := config.NormalizeGuestTarget(mount.GuestTarget)
+	if err != nil {
+		return err
+	}
+	mount.GuestTarget = target
+	if err := config.ValidateLocalMount(mount); err != nil {
+		return err
+	}
 
 	// Update if ID exists, or append
 	found := false
@@ -138,23 +163,63 @@ func AddOrUpdateLocalMount(cfg *config.Config, mount config.LocalMount) error {
 		cfg.Storage.LocalMounts = append(cfg.Storage.LocalMounts, mount)
 	}
 
-	return config.SaveConfig(cfg)
+	return nil
+}
+
+func cloneLocalMounts(mounts []config.LocalMount) []config.LocalMount {
+	if mounts == nil {
+		return nil
+	}
+	return append([]config.LocalMount(nil), mounts...)
+}
+
+// AddOrUpdateLocalMount validates and saves a local directory mount.
+// The in-memory change is rolled back when persistence fails.
+func AddOrUpdateLocalMount(cfg *config.Config, mount config.LocalMount) error {
+	if cfg == nil {
+		return fmt.Errorf("配置不能为空")
+	}
+	storageMu.Lock()
+	defer storageMu.Unlock()
+
+	if err := config.Update(cfg, func(updated *config.Config) error {
+		return upsertLocalMount(updated, mount)
+	}); err != nil {
+		return fmt.Errorf("保存直通目录配置失败: %w", err)
+	}
+	return nil
 }
 
 // ToggleLocalMount toggles the enabled status of a mount
 func ToggleLocalMount(cfg *config.Config, id string) (bool, error) {
-	for i, m := range cfg.Storage.LocalMounts {
-		if m.ID == id {
-			cfg.Storage.LocalMounts[i].Enabled = !m.Enabled
-			err := config.SaveConfig(cfg)
-			return cfg.Storage.LocalMounts[i].Enabled, err
-		}
+	if cfg == nil {
+		return false, fmt.Errorf("配置不能为空")
 	}
-	return false, fmt.Errorf("未找到指定的直通挂载: %s", id)
+	storageMu.Lock()
+	defer storageMu.Unlock()
+	var err error
+	id, err = config.NormalizeLocalMountID(id)
+	if err != nil {
+		return false, err
+	}
+
+	var enabled bool
+	if err := config.Update(cfg, func(updated *config.Config) error {
+		for i, m := range updated.Storage.LocalMounts {
+			if m.ID == id {
+				enabled = !m.Enabled
+				updated.Storage.LocalMounts[i].Enabled = enabled
+				return nil
+			}
+		}
+		return fmt.Errorf("未找到指定的直通挂载: %s", id)
+	}); err != nil {
+		return false, fmt.Errorf("保存直通目录状态失败: %w", err)
+	}
+	return enabled, nil
 }
 
-// DeleteLocalMount removes a mount from config
-func DeleteLocalMount(cfg *config.Config, id string) error {
+func deleteLocalMount(cfg *config.Config, id string) bool {
 	var updated []config.LocalMount
 	found := false
 	for _, m := range cfg.Storage.LocalMounts {
@@ -165,20 +230,62 @@ func DeleteLocalMount(cfg *config.Config, id string) error {
 		updated = append(updated, m)
 	}
 	if !found {
-		return fmt.Errorf("未找到指定的直通挂载: %s", id)
+		return false
 	}
 	cfg.Storage.LocalMounts = updated
-	return config.SaveConfig(cfg)
+	return true
+}
+
+// DeleteLocalMount removes a mount from config and rolls back on persistence
+// failure so callers never observe an unsaved in-memory deletion.
+func DeleteLocalMount(cfg *config.Config, id string) error {
+	if cfg == nil {
+		return fmt.Errorf("配置不能为空")
+	}
+	storageMu.Lock()
+	defer storageMu.Unlock()
+	var err error
+	id, err = config.NormalizeLocalMountID(id)
+	if err != nil {
+		return err
+	}
+
+	if err := config.Update(cfg, func(updated *config.Config) error {
+		if !deleteLocalMount(updated, id) {
+			return fmt.Errorf("未找到指定的直通挂载: %s", id)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("保存删除直通目录配置失败: %w", err)
+	}
+	return nil
 }
 
 // ToggleLocalMountWritable updates the writable (read-only vs read-write) status of a mount
 func ToggleLocalMountWritable(cfg *config.Config, id string, writable bool) (bool, error) {
-	for i, m := range cfg.Storage.LocalMounts {
-		if m.ID == id {
-			cfg.Storage.LocalMounts[i].Writable = writable
-			err := config.SaveConfig(cfg)
-			return cfg.Storage.LocalMounts[i].Writable, err
-		}
+	if cfg == nil {
+		return false, fmt.Errorf("配置不能为空")
 	}
-	return false, fmt.Errorf("未找到指定的直通挂载: %s", id)
+	storageMu.Lock()
+	defer storageMu.Unlock()
+	var err error
+	id, err = config.NormalizeLocalMountID(id)
+	if err != nil {
+		return false, err
+	}
+
+	var currentWritable bool
+	if err := config.Update(cfg, func(updated *config.Config) error {
+		for i, m := range updated.Storage.LocalMounts {
+			if m.ID == id {
+				updated.Storage.LocalMounts[i].Writable = writable
+				currentWritable = writable
+				return nil
+			}
+		}
+		return fmt.Errorf("未找到指定的直通挂载: %s", id)
+	}); err != nil {
+		return false, fmt.Errorf("保存直通目录权限失败: %w", err)
+	}
+	return currentWritable, nil
 }

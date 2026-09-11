@@ -22,7 +22,7 @@ disk: "{{.DiskSize}}GiB"
 
 {{if .DataDiskName}}
 additionalDisks:
-- name: "{{.DataDiskName}}"
+- name: {{yamlQuote .DataDiskName}}
   format: true
   fsType: "ext4"
 {{end}}
@@ -32,8 +32,8 @@ mountType: "virtiofs"
 mounts:
 {{range .LocalMounts}}
 {{if .Enabled}}
-- location: "{{.HostPath}}"
-  mountPoint: "/mnt/macnas-mounts/{{.ID}}"
+- location: {{yamlQuote .HostPath}}
+  mountPoint: {{yamlQuote (printf "/mnt/macnas-mounts/%s" .ID)}}
   writable: {{.Writable}}
 {{end}}
 {{end}}
@@ -61,17 +61,17 @@ provision:
 
     # 2. 准备 /data 挂载与目录结构
     {{if .DataDiskName}}
-    if [ -d "/mnt/lima-{{.DataDiskName}}" ]; then
-      mkdir -p "/mnt/lima-{{.DataDiskName}}/media" "/mnt/lima-{{.DataDiskName}}/files" "/mnt/lima-{{.DataDiskName}}/downloads" "/mnt/lima-{{.DataDiskName}}/photos" "/mnt/lima-{{.DataDiskName}}/appdata"
-      chmod -R 0777 "/mnt/lima-{{.DataDiskName}}" || true
-      ln -sfn "/mnt/lima-{{.DataDiskName}}" /data
+    if [ -d {{shellQuote (printf "/mnt/lima-%s" .DataDiskName)}} ]; then
+      mkdir -p {{shellQuote (printf "/mnt/lima-%s/media" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/files" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/downloads" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/photos" .DataDiskName)}} {{shellQuote (printf "/mnt/lima-%s/appdata" .DataDiskName)}}
+      chmod 0770 {{shellQuote (printf "/mnt/lima-%s" .DataDiskName)}} || true
+      ln -sfn {{shellQuote (printf "/mnt/lima-%s" .DataDiskName)}} /data
     else
       mkdir -p /data/media /data/files /data/downloads /data/photos /data/appdata
-      chmod -R 0777 /data || true
+      chmod 0770 /data || true
     fi
     {{else}}
     mkdir -p /data/media /data/files /data/downloads /data/photos /data/appdata
-    chmod -R 0777 /data || true
+    chmod 0770 /data || true
     {{end}}
 
     # 3. 创建 VirtioFS bind mount 持久化 systemd 服务 (保证 VM 每次启动自动挂载)
@@ -93,13 +93,13 @@ provision:
     {{range .LocalMounts}}
     {{if .Enabled}}
     cat <<'ENTRY_END' >> /usr/local/bin/macnas-mounts.sh
-    if [ -d "/mnt/macnas-mounts/{{.ID}}" ]; then
+    if [ -d {{shellQuote (printf "/mnt/macnas-mounts/%s" .ID)}} ]; then
       REAL_DATA="$(readlink -f /data || echo /data)"
-      TARGET_DIR="${REAL_DATA}/{{.GuestTarget}}"
+      TARGET_DIR="${REAL_DATA}/"{{shellQuote .GuestTarget}}
       mkdir -p "$TARGET_DIR"
       if ! grep -qs " ${TARGET_DIR} " /proc/mounts; then
-        mount --bind "/mnt/macnas-mounts/{{.ID}}" "$TARGET_DIR"
-        echo "[macnas-mounts] bind mounted {{.ID}} -> $TARGET_DIR"
+        mount --bind {{shellQuote (printf "/mnt/macnas-mounts/%s" .ID)}} "$TARGET_DIR"
+        echo "[macnas-mounts] bind mounted {{shellQuote .ID}} -> $TARGET_DIR"
       fi
     fi
     ENTRY_END
@@ -135,7 +135,7 @@ provision:
        server string = MacNAS
        server role = standalone server
        security = user
-       map to guest = Bad User
+       map to guest = Never
        dns proxy = no
        log file = /var/log/samba/log.%m
        max log size = 50
@@ -146,14 +146,20 @@ provision:
        browseable = yes
        writable = yes
        read only = no
-       guest ok = yes
-       create mask = 0777
-       directory mask = 0777
-       force user = root
+       guest ok = no
+       create mask = 0660
+       directory mask = 0770
+       force user = macnas
+       force group = macnas
     EOF
 
     # 4. 创建默认用户 macnas
-    id -u macnas &>/dev/null || useradd -M -s /usr/sbin/nologin macnas
+    if ! getent group macnas >/dev/null 2>&1; then
+      groupadd --system macnas
+    fi
+    id -u macnas &>/dev/null || useradd -M -g macnas -s /usr/sbin/nologin macnas
+    chown macnas:macnas /data /data/media /data/files /data/downloads /data/photos /data/appdata 2>/dev/null || true
+    chmod 0770 /data /data/media /data/files /data/downloads /data/photos /data/appdata 2>/dev/null || true
 
     systemctl restart smbd nmbd || true
     systemctl restart docker || true
@@ -170,12 +176,14 @@ probes:
 portForwards:
 - guestSocket: "/var/run/docker.sock"
   hostSocket: "{{ "{{.Dir}}" }}/sock/docker.sock"
-- guestIPMustBeZero: true
-  guestPortRange: [1024, 65535]
-  hostIP: "0.0.0.0"
-  hostPortRange: [1024, 65535]
+{{ $hostBindAddress := .HostBindAddress }}
+{{range .ForwardedPorts}}
+- guestPort: {{.}}
+  hostIP: "{{$hostBindAddress}}"
+  hostPort: {{.}}
+{{end}}
 {{if ne .SambaPort 0}}
 - guestPort: 445
-  hostIP: "0.0.0.0"
+  hostIP: "{{.HostBindAddress}}"
   hostPort: {{.SambaPort}}
 {{end}}

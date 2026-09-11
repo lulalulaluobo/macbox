@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -38,8 +40,10 @@ func main() {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Printf("[MacNAS] Warning: failed to load config, using defaults: %v", err)
-		cfg = config.DefaultConfig()
+		// Do not silently run with defaults when the persisted configuration is
+		// unreadable or invalid. That can change listen/storage/auth behavior
+		// without the operator realizing it and may overwrite the wrong state.
+		log.Fatalf("[MacNAS] 无法加载安全配置，服务未启动: %v", err)
 	}
 
 	// Check CLI subcommand: macnas service [install|uninstall|status]
@@ -84,6 +88,7 @@ func main() {
 	}
 
 	portFlag := flag.Int("port", 0, "Server port (default from config or 19808)")
+	hostFlag := flag.String("host", "", "Listen address (default from config or 127.0.0.1)")
 	webDirFlag := flag.String("web", "", "Directory containing web frontend build (default: web/dist)")
 	flag.Parse()
 
@@ -94,6 +99,13 @@ func main() {
 	if port <= 0 {
 		port = 19808
 	}
+	listenAddress := config.NormalizeListenAddress(cfg.ListenAddress)
+	if *hostFlag != "" {
+		listenAddress = config.NormalizeListenAddress(*hostFlag)
+	}
+	// The CLI override is intentionally ephemeral, but the VM manager must use
+	// the same bind address while this process is running.
+	cfg.ListenAddress = listenAddress
 
 	// Resolve web dir
 	webDir := *webDirFlag
@@ -107,7 +119,10 @@ func main() {
 		_ = powerMgr.Start()
 	}
 
-	server := api.NewServer(cfg, projectRoot)
+	server, err := api.NewServerWithPowerManagerChecked(cfg, projectRoot, powerMgr)
+	if err != nil {
+		log.Fatalf("[MacNAS] 认证服务初始化失败，服务未启动: %v", err)
+	}
 	apiHandler := server.Handler()
 
 	embeddedFS := web.GetFS()
@@ -137,11 +152,12 @@ func main() {
 
 		// Fallback to local directory if customized
 		if info, err := os.Stat(webDir); err == nil && info.IsDir() {
-			reqPath := filepath.Clean(r.URL.Path)
-			targetFile := filepath.Join(webDir, reqPath)
-			if fInfo, err := os.Stat(targetFile); err == nil && !fInfo.IsDir() {
-				http.ServeFile(w, r, targetFile)
-				return
+			if targetFile, ok := safeWebPath(webDir, r.URL.Path); ok {
+				fInfo, err := os.Stat(targetFile)
+				if err == nil && !fInfo.IsDir() {
+					http.ServeFile(w, r, targetFile)
+					return
+				}
 			}
 			indexFile := filepath.Join(webDir, "index.html")
 			if _, err := os.Stat(indexFile); err == nil {
@@ -176,16 +192,19 @@ func main() {
 		primaryIP = sysStats.PrimaryIP
 	}
 
-	addr := fmt.Sprintf("0.0.0.0:%d", port)
+	addr := net.JoinHostPort(listenAddress, strconv.Itoa(port))
 	httpServer := &http.Server{
-		Addr:         addr,
-		Handler:      mainHandler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              addr,
+		Handler:           mainHandler,
+		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+		// Do not apply a short global read/write deadline: uploads, downloads,
+		// media streams and log streams are intentionally long-lived. Individual
+		// handlers enforce their own body and process limits.
+		IdleTimeout: 60 * time.Second,
 	}
 
-	printBanner(port, primaryIP)
+	printBanner(port, primaryIP, listenAddress)
 
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -205,10 +224,26 @@ func main() {
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Printf("[MacNAS] 强制退出: %v", err)
 	}
+	server.Close()
 	log.Println("[MacNAS] 服务已停止。")
 }
 
-func printBanner(port int, ip string) {
+func safeWebPath(root, requestPath string) (string, bool) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", false
+	}
+	cleanRequest := filepath.Clean(filepath.FromSlash("/" + requestPath))
+	relative := strings.TrimPrefix(cleanRequest, string(filepath.Separator))
+	target := filepath.Join(rootAbs, relative)
+	rel, err := filepath.Rel(rootAbs, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return target, true
+}
+
+func printBanner(port int, ip string, listenAddress string) {
 	fmt.Println()
 	fmt.Println("===================================================================")
 	fmt.Println("      __  __            _   _           _____ ")
@@ -221,8 +256,12 @@ func printBanner(port int, ip string) {
 	fmt.Println("  Mac mini 家庭微型服务器控制中心 (MVP v0.1)")
 	fmt.Println("===================================================================")
 	fmt.Printf("  ➜ 本地访问地址:  http://localhost:%d\n", port)
-	fmt.Printf("  ➜ 局域网访问:    http://%s:%d\n", ip, port)
-	fmt.Printf("  ➜ SMB 共享地址:  smb://%s:4455/MacNAS\n", ip)
+	if parsedIP := net.ParseIP(listenAddress); parsedIP != nil && parsedIP.IsLoopback() {
+		fmt.Printf("  ➜ 当前监听范围:    仅本机 (%s)\n", listenAddress)
+	} else {
+		fmt.Printf("  ➜ 局域网访问:    http://%s:%d\n", ip, port)
+		fmt.Printf("  ➜ SMB 共享地址:  smb://%s:4455/MacNAS\n", ip)
+	}
 	fmt.Println("===================================================================")
 	fmt.Println()
 }

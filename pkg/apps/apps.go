@@ -2,20 +2,226 @@ package apps
 
 import (
 	"context"
-	"encoding/base64"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/luluen/mac-nas/pkg/docker"
 	"github.com/luluen/mac-nas/pkg/vm"
+	"gopkg.in/yaml.v3"
 )
+
+// App IDs are used as directory and Compose project components. Keep the
+// grammar bounded and require an alphanumeric first character so every call
+// site can safely construct paths and argv values from it.
+var validAppID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+var validEnvironmentKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
+
+const (
+	maxInstallMapEntries = 128
+	maxComposeYAMLBytes  = 8 << 20
+	maxInstallPathBytes  = 4096
+	maxEnvironmentBytes  = 4096
+)
+
+// normalizeInstallConfig validates values that are interpolated into a
+// Compose document. The install endpoint is administrator-only, but it still
+// must not accept malformed paths, ports, or environment keys that can change
+// the meaning of the generated YAML or create unexpected host mounts.
+func normalizeInstallConfig(input InstallCustomConfig) (InstallCustomConfig, error) {
+	output := InstallCustomConfig{}
+	if len(input.PortsMap) > maxInstallMapEntries {
+		return output, fmt.Errorf("端口映射数量不能超过 %d", maxInstallMapEntries)
+	}
+	if len(input.VolumesMap) > maxInstallMapEntries {
+		return output, fmt.Errorf("存储挂载数量不能超过 %d", maxInstallMapEntries)
+	}
+	if len(input.EnvMap) > maxInstallMapEntries {
+		return output, fmt.Errorf("环境变量数量不能超过 %d", maxInstallMapEntries)
+	}
+	if len([]byte(input.CustomYaml)) > maxComposeYAMLBytes {
+		return output, fmt.Errorf("Docker Compose YAML 内容不能超过 8 MB")
+	}
+
+	if len(input.PortsMap) > 0 {
+		output.PortsMap = make(map[string]int, len(input.PortsMap))
+		for rawContainerPort, hostPort := range input.PortsMap {
+			containerPort, err := strconv.Atoi(strings.TrimSpace(rawContainerPort))
+			if err != nil || containerPort < 1 || containerPort > 65535 {
+				return InstallCustomConfig{}, fmt.Errorf("容器端口无效: %q", rawContainerPort)
+			}
+			if hostPort < 1 || hostPort > 65535 {
+				return InstallCustomConfig{}, fmt.Errorf("宿主机端口无效: %d", hostPort)
+			}
+			key := strconv.Itoa(containerPort)
+			if _, exists := output.PortsMap[key]; exists {
+				return InstallCustomConfig{}, fmt.Errorf("容器端口重复: %d", containerPort)
+			}
+			output.PortsMap[key] = hostPort
+		}
+	}
+
+	if len(input.VolumesMap) > 0 {
+		output.VolumesMap = make(map[string]string, len(input.VolumesMap))
+		for rawContainerPath, rawHostPath := range input.VolumesMap {
+			containerPath, err := normalizeComposePath(rawContainerPath, false)
+			if err != nil {
+				return InstallCustomConfig{}, fmt.Errorf("容器挂载路径无效: %w", err)
+			}
+			hostPath, err := normalizeComposePath(rawHostPath, true)
+			if err != nil {
+				return InstallCustomConfig{}, fmt.Errorf("宿主机挂载路径无效: %w", err)
+			}
+			if _, exists := output.VolumesMap[containerPath]; exists {
+				return InstallCustomConfig{}, fmt.Errorf("容器挂载路径重复: %s", containerPath)
+			}
+			output.VolumesMap[containerPath] = hostPath
+		}
+	}
+
+	if len(input.EnvMap) > 0 {
+		output.EnvMap = make(map[string]string, len(input.EnvMap))
+		for rawKey, value := range input.EnvMap {
+			key := strings.TrimSpace(rawKey)
+			if !validEnvironmentKey.MatchString(key) {
+				return InstallCustomConfig{}, fmt.Errorf("环境变量名无效: %q", rawKey)
+			}
+			if len([]byte(value)) > maxEnvironmentBytes || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+				return InstallCustomConfig{}, fmt.Errorf("环境变量 %s 内容过长或包含控制字符", key)
+			}
+			if _, exists := output.EnvMap[key]; exists {
+				return InstallCustomConfig{}, fmt.Errorf("环境变量重复: %s", key)
+			}
+			output.EnvMap[key] = value
+		}
+	}
+
+	output.CustomYaml = input.CustomYaml
+	return output, nil
+}
+
+func normalizeComposePath(raw string, hostPath bool) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" || len([]byte(value)) > maxInstallPathBytes || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("路径格式无效")
+	}
+	if !path.IsAbs(value) {
+		return "", fmt.Errorf("路径必须为绝对路径")
+	}
+	if strings.ContainsAny(value, "\\\"'$") {
+		return "", fmt.Errorf("路径包含不支持的特殊字符")
+	}
+	clean := path.Clean(value)
+	if clean == "/" {
+		return "", fmt.Errorf("不允许使用根路径")
+	}
+	if hostPath {
+		// Application data belongs under the VM data root. The Docker socket is
+		// the one intentional host-level exception used by management apps.
+		if clean != "/var/run/docker.sock" && clean != "/data" && !strings.HasPrefix(clean, "/data/") {
+			return "", fmt.Errorf("宿主机路径必须位于 /data 下")
+		}
+	}
+	return clean, nil
+}
+
+func generateAppSecret() (string, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate app secret: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+type composePortService struct {
+	Ports []interface{} `yaml:"ports"`
+}
+
+type composePortDocument struct {
+	Services map[string]composePortService `yaml:"services"`
+}
+
+func publishedPortValue(value interface{}) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, v >= 1 && v <= 65535
+	case int64:
+		return int(v), v >= 1 && v <= 65535
+	case uint64:
+		return int(v), v >= 1 && v <= 65535
+	case string:
+		spec := strings.Trim(strings.TrimSpace(v), "\"'")
+		if slash := strings.LastIndex(spec, "/"); slash >= 0 {
+			spec = spec[:slash]
+		}
+		parts := strings.Split(spec, ":")
+		if len(parts) < 2 {
+			return 0, false
+		}
+		// Compose accepts [host_ip:]published:target. The published
+		// port is therefore the field immediately before the target.
+		value, err := strconv.Atoi(strings.TrimSpace(parts[len(parts)-2]))
+		return value, err == nil && value >= 1 && value <= 65535
+	case map[string]interface{}:
+		for _, key := range []string{"published", "host_port"} {
+			if port, ok := v[key]; ok {
+				return publishedPortValue(port)
+			}
+		}
+	case map[interface{}]interface{}:
+		for _, key := range []string{"published", "host_port"} {
+			if port, ok := v[key]; ok {
+				return publishedPortValue(port)
+			}
+		}
+	}
+	return 0, false
+}
+
+func publishedHostPorts(content string) ([]int, error) {
+	var document composePortDocument
+	if err := yaml.Unmarshal([]byte(content), &document); err != nil {
+		return nil, err
+	}
+
+	seen := make(map[int]struct{})
+	ports := make([]int, 0)
+	for _, service := range document.Services {
+		for _, rawPort := range service.Ports {
+			if port, ok := publishedPortValue(rawPort); ok {
+				if _, exists := seen[port]; !exists {
+					seen[port] = struct{}{}
+					ports = append(ports, port)
+				}
+			}
+		}
+	}
+	sort.Ints(ports)
+	return ports, nil
+}
+
+func composeEnvironmentItem(key, value string) string {
+	// Guided-form values are literals. Escape Compose's interpolation marker so
+	// a value such as "$TOKEN" is not resolved from the VM environment.
+	value = strings.ReplaceAll(value, "$", "$$")
+	encoded, err := yaml.Marshal(key + "=" + value)
+	if err != nil {
+		return key + "=" + value
+	}
+	return strings.TrimSpace(string(encoded))
+}
 
 type Manager struct {
 	vmMgr        *vm.Manager
@@ -49,7 +255,19 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 		hostIP = "localhost"
 	}
 
-	containers, _ := m.dockerClient.ListContainers(ctx)
+	var containers []docker.ContainerInfo
+	if m.dockerClient != nil {
+		var dockerErr error
+		containers, dockerErr = m.dockerClient.ListContainersSummary(ctx)
+		if dockerErr != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// The catalog remains useful while the VM/Docker daemon is stopped;
+			// retain it, but make the degraded state observable in server logs.
+			log.Printf("[MacNAS Apps] Docker 状态暂不可用，应用状态将按未安装显示: %v", dockerErr)
+		}
+	}
 	containerMap := make(map[string]docker.ContainerInfo)
 	for _, c := range containers {
 		containerMap[c.Names] = c
@@ -61,7 +279,10 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 	catalog := GetBuiltinCatalog()
 	for _, item := range catalog {
 		meta := item.Metadata
-		meta.ComposeTemplate = item.YAML
+		// Compose YAML is returned only by the administrator-protected config
+		// endpoint. The catalog list is also visible to ordinary web users and
+		// must not disclose credentials, host mounts, or other deployment data.
+		meta.ComposeTemplate = ""
 		appMap[meta.ID] = meta
 	}
 
@@ -69,7 +290,7 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 	communityApps := m.communityMgr.GetApps()
 	for _, item := range communityApps {
 		meta := item.Metadata
-		meta.ComposeTemplate = item.YAML
+		meta.ComposeTemplate = ""
 		if _, exists := appMap[meta.ID]; !exists {
 			meta.Source = "community"
 			appMap[meta.ID] = meta
@@ -77,26 +298,15 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 	}
 
 	// 3. Custom User Apps
-	customApps, _ := m.customMgr.List()
+	customApps, err := m.customMgr.List()
+	if err != nil {
+		return nil, fmt.Errorf("读取自定义应用配置失败: %w", err)
+	}
 	for _, item := range customApps {
 		meta := item.Metadata
-		meta.ComposeTemplate = item.YAML
+		meta.ComposeTemplate = ""
 		meta.Source = "custom"
 		appMap[meta.ID] = meta
-	}
-
-	// Batch check which app directories have compose.yaml in one single query
-	existingConfigs := make(map[string]bool)
-	if out, err := m.vmMgr.Exec(ctx, "bash", "-c", "find /data/appdata -maxdepth 2 -name compose.yaml 2>/dev/null"); err == nil {
-		lines := strings.Split(out, "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			parts := strings.Split(line, "/")
-			if len(parts) >= 4 && parts[len(parts)-1] == "compose.yaml" {
-				appId := parts[len(parts)-2]
-				existingConfigs[appId] = true
-			}
-		}
 	}
 
 	var results []AppMetadata
@@ -143,22 +353,26 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 			// No container exists in Docker for this app -> Not installed!
 			appMeta.Installed = false
 			appMeta.Status = "not_installed"
-
-			// If an orphan compose.yaml was left behind because container was deleted directly, clean it up
-			if existingConfigs[id] {
-				go func(appId string) {
-					_, _ = m.vmMgr.Exec(context.Background(), "bash", "-c", fmt.Sprintf("rm -f /data/appdata/%s/compose.yaml", appId))
-				}(id)
-			}
 		}
 
 		results = append(results, appMeta)
 	}
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Name == results[j].Name {
+			return results[i].ID < results[j].ID
+		}
+		return results[i].Name < results[j].Name
+	})
 
 	return results, nil
 }
 
 func (m *Manager) GetAppConfig(ctx context.Context, id string) (*AppMetadata, error) {
+	id = strings.TrimSpace(id)
+	if !validAppID.MatchString(id) {
+		return nil, fmt.Errorf("应用标识格式无效")
+	}
+
 	// 1. Check custom apps
 	if rec, err := m.customMgr.Get(id); err == nil {
 		meta := rec.Metadata
@@ -201,6 +415,15 @@ func (m *Manager) GetAppConfig(ctx context.Context, id string) (*AppMetadata, er
 }
 
 func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg InstallCustomConfig, out io.Writer) error {
+	id = strings.TrimSpace(id)
+	if !validAppID.MatchString(id) {
+		return fmt.Errorf("应用标识格式无效")
+	}
+	var err error
+	cfg, err = normalizeInstallConfig(cfg)
+	if err != nil {
+		return err
+	}
 	fmt.Fprintf(out, "🚀 [MacNAS AppStore] 开始准备部署应用: %s\n", id)
 
 	meta, err := m.GetAppConfig(ctx, id)
@@ -210,6 +433,7 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	}
 
 	var finalYAML string
+	var aria2Secret string
 	if strings.TrimSpace(cfg.CustomYaml) != "" {
 		finalYAML = cfg.CustomYaml
 		fmt.Fprintln(out, "📝 使用用户自定义的高级 Compose YAML 配置")
@@ -223,12 +447,10 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 		// 1. Apply port customizations
 		for cPortStr, hPort := range cfg.PortsMap {
 			cPort, _ := strconv.Atoi(cPortStr)
-			if cPort > 0 && hPort > 0 {
-				oldPortPatt := regexp.MustCompile(fmt.Sprintf(`["']?\d+:%d(?:/\w+)?["']?`, cPort))
-				newPortStr := fmt.Sprintf(`"%d:%d"`, hPort, cPort)
-				finalYAML = oldPortPatt.ReplaceAllString(finalYAML, newPortStr)
-				fmt.Fprintf(out, "⚙️ 定制端口映射: %d -> %d\n", hPort, cPort)
-			}
+			oldPortPatt := regexp.MustCompile(fmt.Sprintf(`["']?\d+:%d(?:/\w+)?["']?`, cPort))
+			newPortStr := fmt.Sprintf(`"%d:%d"`, hPort, cPort)
+			finalYAML = oldPortPatt.ReplaceAllStringFunc(finalYAML, func(string) string { return newPortStr })
+			fmt.Fprintf(out, "⚙️ 定制端口映射: %d -> %d\n", hPort, cPort)
 		}
 
 		// 2. Apply volume customizations
@@ -237,7 +459,7 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 				// Replace host directory mapping to cPath
 				volPatt := regexp.MustCompile(fmt.Sprintf(`["']?[^:"'\s]+:%s(?:[:][a-z,]+)?["']?`, regexp.QuoteMeta(cPath)))
 				newVolStr := fmt.Sprintf(`"%s:%s"`, hPath, cPath)
-				finalYAML = volPatt.ReplaceAllString(finalYAML, newVolStr)
+				finalYAML = volPatt.ReplaceAllStringFunc(finalYAML, func(string) string { return newVolStr })
 				fmt.Fprintf(out, "📁 定制数据目录挂载: %s -> %s\n", hPath, cPath)
 			}
 		}
@@ -245,16 +467,36 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 		// 3. Apply environment customizations
 		for k, v := range cfg.EnvMap {
 			envPatt := regexp.MustCompile(fmt.Sprintf(`(?m)^\s*-\s*%s=.*$`, regexp.QuoteMeta(k)))
-			newEnvLine := fmt.Sprintf("      - %s=%s", k, v)
+			newEnvLine := "      - " + composeEnvironmentItem(k, v)
 			if envPatt.MatchString(finalYAML) {
-				finalYAML = envPatt.ReplaceAllString(finalYAML, newEnvLine)
-				fmt.Fprintf(out, "🔧 定制环境变量: %s=%s\n", k, v)
+				finalYAML = envPatt.ReplaceAllStringFunc(finalYAML, func(string) string { return newEnvLine })
+				fmt.Fprintf(out, "🔧 定制环境变量: %s 已更新\n", k)
 			}
 		}
+
+		// The catalog used a public RPC secret. Generate a per-installation
+		// secret and show it only in this installation stream so AriaNg can be
+		// configured without shipping a reusable credential.
+		if id == "aria2-pro" && strings.Contains(finalYAML, "RPC_SECRET=") {
+			aria2Secret, err = generateAppSecret()
+			if err != nil {
+				return err
+			}
+			finalYAML = regexp.MustCompile(`(?m)^\s*-\s*RPC_SECRET=.*$`).ReplaceAllStringFunc(finalYAML, func(string) string {
+				return "      - RPC_SECRET=" + aria2Secret
+			})
+		}
+	}
+	if len([]byte(finalYAML)) > maxComposeYAMLBytes {
+		return fmt.Errorf("最终 Docker Compose YAML 内容不能超过 8 MB")
+	}
+	forwardedPorts, err := publishedHostPorts(finalYAML)
+	if err != nil {
+		return fmt.Errorf("解析 Compose 配置失败: %w", err)
 	}
 
 	// 1. Create all needed directories inside VM
-	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
+	appDataDir := path.Join("/data/appdata", id)
 	dirsToCreate := []string{appDataDir, "/data/media", "/data/files", "/data/downloads"}
 
 	for _, hPath := range cfg.VolumesMap {
@@ -269,40 +511,65 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	}
 
 	fmt.Fprintf(out, "📁 [1/3] 正在检查并创建宿主机持久化目录...\n")
-	mkdirCmd := fmt.Sprintf("mkdir -p %s", strings.Join(dirsToCreate, " "))
-	if _, err := m.vmMgr.Exec(ctx, "bash", "-c", mkdirCmd); err != nil {
-		fmt.Fprintf(out, "⚠️ 创建宿主机目录提示: %v\n", err)
+	for _, dir := range dirsToCreate {
+		if _, err := m.vmMgr.Exec(ctx, "mkdir", "-p", dir); err != nil {
+			fmt.Fprintf(out, "⚠️ 创建宿主机目录提示 (%s): %v\n", dir, err)
+		}
 	}
 
-	// 2. Safely write compose.yaml via base64
+	// 2. Stream compose.yaml through stdin so YAML cannot be interpreted as shell code.
 	fmt.Fprintf(out, "📝 [2/3] 写入项目配置文件: %s/compose.yaml ...\n", appDataDir)
-	encoded := base64.StdEncoding.EncodeToString([]byte(finalYAML))
-	writeCmd := fmt.Sprintf("echo '%s' | base64 -d > %s/compose.yaml", encoded, appDataDir)
-	if _, err := m.vmMgr.Exec(ctx, "bash", "-c", writeCmd); err != nil {
+	composePath := path.Join(appDataDir, "compose.yaml")
+	if _, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(finalYAML), "sudo", "tee", composePath); err != nil {
 		fmt.Fprintf(out, "❌ 写入 compose.yaml 失败: %v\n", err)
 		return fmt.Errorf("write compose.yaml failed: %w", err)
 	}
 
 	// 3. Pull image with stream
 	fmt.Fprintf(out, "📦 正在拉取 Docker 镜像 (实时进度流):\n")
-	pullCmd := fmt.Sprintf("cd %s && docker compose pull", appDataDir)
-	if err := m.vmMgr.ExecStream(ctx, out, "bash", "-c", pullCmd); err != nil {
+	if err := m.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", composePath, "pull"); err != nil {
 		fmt.Fprintf(out, "\n⚠️ pull 提示已跳过，正在尝试直接启动容器...\n")
 	}
 
 	// 4. Start container
 	fmt.Fprintf(out, "\n⚡ [3/3] 启动 Docker 容器...\n")
-	upCmd := fmt.Sprintf("cd %s && docker compose up -d --remove-orphans", appDataDir)
-	if err := m.vmMgr.ExecStream(ctx, out, "bash", "-c", upCmd); err != nil {
+	if err := m.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", composePath, "up", "-d", "--remove-orphans"); err != nil {
 		fmt.Fprintf(out, "❌ 启动容器失败: %v\n", err)
 		return fmt.Errorf("docker compose up failed: %w", err)
+	}
+	if len(forwardedPorts) > 0 {
+		if err := m.vmMgr.AddForwardedPorts(forwardedPorts...); err != nil {
+			fmt.Fprintf(out, "⚠️ 应用已启动，但记录端口转发失败，请重试或手动重启配置: %v\n", err)
+		} else {
+			fmt.Fprintf(out, "🔌 已记录端口转发 %v；VM 重启后生效。\n", forwardedPorts)
+		}
 	}
 
 	// Special post-install setups
 	if id == "alist" {
-		fmt.Fprintf(out, "🔑 初始化 Alist 管理员密码为 adminadmin123 ...\n")
-		time.Sleep(2 * time.Second)
-		_, _ = m.vmMgr.Exec(ctx, "bash", "-c", "docker exec macnas-alist ./alist admin set adminadmin123")
+		alistPassword, secretErr := generateAppSecret()
+		if secretErr != nil {
+			return secretErr
+		}
+		fmt.Fprintf(out, "🔑 Alist 管理员账号：admin；初始密码（仅显示一次）：%s\n", alistPassword)
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		}
+		if _, err := m.vmMgr.Exec(ctx, "docker", "exec", "macnas-alist", "./alist", "admin", "set", alistPassword); err != nil {
+			return fmt.Errorf("初始化 Alist 管理员密码失败: %w", err)
+		}
+	}
+	if aria2Secret != "" {
+		fmt.Fprintf(out, "🔑 Aria2 RPC 密钥（仅显示一次）：%s\n", aria2Secret)
 	}
 
 	fmt.Fprintf(out, "\n🎉 应用 [%s] 部署完成并已成功上线运行！\n", id)
@@ -328,9 +595,11 @@ func (m *Manager) Install(ctx context.Context, id string) error {
 }
 
 func (m *Manager) Start(ctx context.Context, id string) error {
-	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	upCmd := fmt.Sprintf("cd %s && docker compose start", appDataDir)
-	out, err := m.vmMgr.Exec(ctx, "bash", "-c", upCmd)
+	if !validAppID.MatchString(strings.TrimSpace(id)) {
+		return fmt.Errorf("应用标识格式无效")
+	}
+	composePath := path.Join("/data/appdata", strings.TrimSpace(id), "compose.yaml")
+	out, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "start")
 	if err != nil {
 		return fmt.Errorf("docker compose start failed: %s (%w)", out, err)
 	}
@@ -338,9 +607,11 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 }
 
 func (m *Manager) Stop(ctx context.Context, id string) error {
-	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	upCmd := fmt.Sprintf("cd %s && docker compose stop", appDataDir)
-	out, err := m.vmMgr.Exec(ctx, "bash", "-c", upCmd)
+	if !validAppID.MatchString(strings.TrimSpace(id)) {
+		return fmt.Errorf("应用标识格式无效")
+	}
+	composePath := path.Join("/data/appdata", strings.TrimSpace(id), "compose.yaml")
+	out, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "stop")
 	if err != nil {
 		return fmt.Errorf("docker compose stop failed: %s (%w)", out, err)
 	}
@@ -348,9 +619,11 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 }
 
 func (m *Manager) Restart(ctx context.Context, id string) error {
-	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	upCmd := fmt.Sprintf("cd %s && docker compose restart", appDataDir)
-	out, err := m.vmMgr.Exec(ctx, "bash", "-c", upCmd)
+	if !validAppID.MatchString(strings.TrimSpace(id)) {
+		return fmt.Errorf("应用标识格式无效")
+	}
+	composePath := path.Join("/data/appdata", strings.TrimSpace(id), "compose.yaml")
+	out, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "restart")
 	if err != nil {
 		return fmt.Errorf("docker compose restart failed: %s (%w)", out, err)
 	}
@@ -358,22 +631,31 @@ func (m *Manager) Restart(ctx context.Context, id string) error {
 }
 
 func (m *Manager) Uninstall(ctx context.Context, id string) error {
-	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	downCmd := fmt.Sprintf("cd %s && docker compose down -v && rm -f %s/compose.yaml", appDataDir, appDataDir)
-	out, err := m.vmMgr.Exec(ctx, "bash", "-c", downCmd)
+	if !validAppID.MatchString(strings.TrimSpace(id)) {
+		return fmt.Errorf("应用标识格式无效")
+	}
+	appDataDir := path.Join("/data/appdata", strings.TrimSpace(id))
+	composePath := path.Join(appDataDir, "compose.yaml")
+	// Keep named volumes by default. Removing an application must not silently
+	// delete its persistent data; an explicit data cleanup flow can be added
+	// separately when the UI has a second confirmation step.
+	out, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "down")
 	if err != nil {
 		return fmt.Errorf("docker compose down failed: %s (%w)", out, err)
+	}
+	if _, err := m.vmMgr.Exec(ctx, "rm", "-f", composePath); err != nil {
+		return fmt.Errorf("remove compose.yaml failed: %w", err)
 	}
 	return nil
 }
 
 func (m *Manager) GetLogs(ctx context.Context, id string, tail int) (string, error) {
-	if tail <= 0 {
-		tail = 100
+	tail = docker.NormalizeLogTail(tail)
+	if !validAppID.MatchString(strings.TrimSpace(id)) {
+		return "", fmt.Errorf("应用标识格式无效")
 	}
-	appDataDir := fmt.Sprintf("/data/appdata/%s", id)
-	logsCmd := fmt.Sprintf("cd %s && docker compose logs --tail=%d", appDataDir, tail)
-	return m.vmMgr.Exec(ctx, "bash", "-c", logsCmd)
+	composePath := path.Join("/data/appdata", strings.TrimSpace(id), "compose.yaml")
+	return m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "logs", fmt.Sprintf("--tail=%d", tail))
 }
 
 func (m *Manager) AddCustomApp(input CustomAppInput) (*AppMetadata, error) {

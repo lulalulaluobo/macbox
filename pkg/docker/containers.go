@@ -12,13 +12,13 @@ import (
 )
 
 type containerStatsRaw struct {
-	ID        string `json:"ID"`
-	Name      string `json:"Name"`
-	CPUPerc   string `json:"CPUPerc"`
-	MemUsage  string `json:"MemUsage"`
-	MemPerc   string `json:"MemPerc"`
-	NetIO     string `json:"NetIO"`
-	BlockIO   string `json:"BlockIO"`
+	ID       string `json:"ID"`
+	Name     string `json:"Name"`
+	CPUPerc  string `json:"CPUPerc"`
+	MemUsage string `json:"MemUsage"`
+	MemPerc  string `json:"MemPerc"`
+	NetIO    string `json:"NetIO"`
+	BlockIO  string `json:"BlockIO"`
 }
 
 func (c *Client) getContainerStatsMap(ctx context.Context) map[string]containerStatsRaw {
@@ -45,6 +45,32 @@ func (c *Client) getContainerStatsMap(ctx context.Context) map[string]containerS
 }
 
 var portRegex = regexp.MustCompile(`(?:([0-9\.]+)|\[([0-9a-fA-F:]+)\]):(\d+)->(\d+)(?:/(\w+))?`)
+var containerReferenceRegex = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+const (
+	defaultLogTail = 100
+	maxLogTail     = 10000
+)
+
+// NormalizeLogTail keeps log endpoints from materializing an unbounded
+// response when a client supplies a very large tail value.
+func NormalizeLogTail(tail int) int {
+	if tail <= 0 {
+		return defaultLogTail
+	}
+	if tail > maxLogTail {
+		return maxLogTail
+	}
+	return tail
+}
+
+func normalizeContainerRef(idOrName string) (string, error) {
+	idOrName = strings.TrimSpace(idOrName)
+	if !containerReferenceRegex.MatchString(idOrName) {
+		return "", fmt.Errorf("容器标识格式无效")
+	}
+	return idOrName, nil
+}
 
 func parsePortMappings(portsStr string) []PortMapping {
 	if portsStr == "" {
@@ -85,12 +111,31 @@ func parsePortMappings(portsStr string) []PortMapping {
 }
 
 func (c *Client) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
+	return c.containerStatsCache.get(ctx, containerStatsCacheTTL, func() ([]ContainerInfo, error) {
+		return c.listContainersUncached(ctx, true)
+	})
+}
+
+// ListContainersSummary returns the same container identity/state data without
+// starting docker stats. Catalog and Compose screens only need this lighter
+// snapshot; live metrics remain opt-in for the container detail/overview
+// views.
+func (c *Client) ListContainersSummary(ctx context.Context) ([]ContainerInfo, error) {
+	return c.containerSummaryCache.get(ctx, containerSummaryCacheTTL, func() ([]ContainerInfo, error) {
+		return c.listContainersUncached(ctx, false)
+	})
+}
+
+func (c *Client) listContainersUncached(ctx context.Context, includeStats bool) ([]ContainerInfo, error) {
 	out, err := c.runDockerCmd(ctx, "ps", "-a", "--format", "{{json .}}")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
 
-	statsMap := c.getContainerStatsMap(ctx)
+	statsMap := map[string]containerStatsRaw{}
+	if includeStats {
+		statsMap = c.getContainerStatsMap(ctx)
+	}
 
 	var containers []ContainerInfo
 	scanner := bufio.NewScanner(bytes.NewReader(out))
@@ -160,26 +205,39 @@ func (c *Client) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 }
 
 func (c *Client) StartContainer(ctx context.Context, idOrName string) error {
-	_, err := c.runDockerCmd(ctx, "start", idOrName)
+	var err error
+	idOrName, err = normalizeContainerRef(idOrName)
+	if err != nil {
+		return err
+	}
+	_, err = c.runDockerCmd(ctx, "start", idOrName)
 	return err
 }
 
 func (c *Client) StopContainer(ctx context.Context, idOrName string) error {
-	_, err := c.runDockerCmd(ctx, "stop", idOrName)
+	var err error
+	idOrName, err = normalizeContainerRef(idOrName)
+	if err != nil {
+		return err
+	}
+	_, err = c.runDockerCmd(ctx, "stop", idOrName)
 	return err
 }
 
 func (c *Client) RestartContainer(ctx context.Context, idOrName string) error {
-	_, err := c.runDockerCmd(ctx, "restart", idOrName)
+	var err error
+	idOrName, err = normalizeContainerRef(idOrName)
+	if err != nil {
+		return err
+	}
+	_, err = c.runDockerCmd(ctx, "restart", idOrName)
 	return err
 }
 
 func (c *Client) RemoveContainer(ctx context.Context, idOrName string, force bool) error {
-	// Inspect to get container name before removing
-	inspectOut, _ := c.runDockerCmd(ctx, "inspect", "--format", "{{.Name}}", idOrName)
-	cleanName := strings.TrimPrefix(strings.TrimSpace(string(inspectOut)), "/")
-	if cleanName == "" {
-		cleanName = strings.TrimPrefix(idOrName, "/")
+	idOrName, err := normalizeContainerRef(idOrName)
+	if err != nil {
+		return err
 	}
 
 	args := []string{"rm"}
@@ -191,18 +249,15 @@ func (c *Client) RemoveContainer(ctx context.Context, idOrName string, force boo
 		return err
 	}
 
-	// If it was a macnas app container, clean up /data/appdata/<appId>/compose.yaml
-	if strings.HasPrefix(cleanName, "macnas-") {
-		appId := strings.TrimPrefix(cleanName, "macnas-")
-		_, _ = c.vmMgr.Exec(ctx, "bash", "-c", fmt.Sprintf("rm -f /data/appdata/%s/compose.yaml", appId))
-	}
-
 	return nil
 }
 
 func (c *Client) GetLogs(ctx context.Context, idOrName string, tail int) (string, error) {
-	if tail <= 0 {
-		tail = 100
+	tail = NormalizeLogTail(tail)
+	var err error
+	idOrName, err = normalizeContainerRef(idOrName)
+	if err != nil {
+		return "", err
 	}
 	out, err := c.runDockerCmd(ctx, "logs", fmt.Sprintf("--tail=%d", tail), idOrName)
 	return string(out), err

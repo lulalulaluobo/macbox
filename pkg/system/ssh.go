@@ -2,13 +2,14 @@ package system
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/luluen/mac-nas/pkg/vm"
+	"golang.org/x/crypto/ssh"
 )
 
 type SSHConfig struct {
@@ -35,6 +36,27 @@ type SSHManager struct {
 	vmMgr *vm.Manager
 }
 
+func hasSSHControlChars(value string) bool {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAuthorizedKey(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len([]byte(raw)) > 16<<10 || strings.ContainsAny(raw, "\r\n") {
+		return "", fmt.Errorf("SSH 公钥必须是单行且不能超过 16 KB")
+	}
+	key, _, _, rest, err := ssh.ParseAuthorizedKey([]byte(raw))
+	if err != nil || key == nil || strings.TrimSpace(string(rest)) != "" {
+		return "", fmt.Errorf("SSH 公钥格式无效")
+	}
+	return raw, nil
+}
+
 func NewSSHManager(vmMgr *vm.Manager) *SSHManager {
 	return &SSHManager{
 		vmMgr: vmMgr,
@@ -55,12 +77,15 @@ func (sm *SSHManager) GetConfig(ctx context.Context) (*SSHConfig, error) {
 	}
 
 	// 1. Get SSHLocalPort from VM manager status
-	if vmStatus, err := sm.vmMgr.GetStatus(); err == nil && vmStatus != nil {
+	if vmStatus, err := sm.vmMgr.GetStatusContext(ctx); err == nil && vmStatus != nil {
 		cfg.SSHLocalPort = vmStatus.SSHLocalPort
 	}
 
 	// 2. Check service status
-	statusOut, _ := sm.vmMgr.Exec(ctx, "bash", "-c", "sudo systemctl is-active ssh 2>/dev/null || sudo systemctl is-active sshd 2>/dev/null")
+	statusOut, statusErr := sm.vmMgr.Exec(ctx, "sudo", "systemctl", "is-active", "ssh")
+	if statusErr != nil {
+		statusOut, _ = sm.vmMgr.Exec(ctx, "sudo", "systemctl", "is-active", "sshd")
+	}
 	if strings.TrimSpace(statusOut) == "active" {
 		cfg.Enabled = true
 		cfg.Status = "running"
@@ -70,7 +95,7 @@ func (sm *SSHManager) GetConfig(ctx context.Context) (*SSHConfig, error) {
 	}
 
 	// 3. Read 99-macnas.conf if exists
-	confOut, err := sm.vmMgr.Exec(ctx, "bash", "-c", "sudo cat /etc/ssh/sshd_config.d/99-macnas.conf 2>/dev/null")
+	confOut, err := sm.vmMgr.Exec(ctx, "sudo", "cat", "/etc/ssh/sshd_config.d/99-macnas.conf")
 	if err == nil && strings.TrimSpace(confOut) != "" {
 		lines := strings.Split(confOut, "\n")
 		for _, l := range lines {
@@ -98,7 +123,7 @@ func (sm *SSHManager) GetConfig(ctx context.Context) (*SSHConfig, error) {
 		}
 	} else {
 		// Fallback check standard sshd_config
-		defOut, _ := sm.vmMgr.Exec(ctx, "bash", "-c", "sudo grep -E '^(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|Port)' /etc/ssh/sshd_config 2>/dev/null")
+		defOut, _ := sm.vmMgr.Exec(ctx, "sudo", "grep", "-E", "^(PermitRootLogin|PasswordAuthentication|PubkeyAuthentication|Port)", "/etc/ssh/sshd_config")
 		for _, l := range strings.Split(defOut, "\n") {
 			parts := strings.Fields(strings.TrimSpace(l))
 			if len(parts) >= 2 {
@@ -121,7 +146,7 @@ func (sm *SSHManager) GetConfig(ctx context.Context) (*SSHConfig, error) {
 	}
 
 	// 4. Count root authorized keys
-	keysOut, _ := sm.vmMgr.Exec(ctx, "bash", "-c", "sudo cat /root/.ssh/authorized_keys 2>/dev/null")
+	keysOut, _ := sm.vmMgr.Exec(ctx, "sudo", "cat", "/root/.ssh/authorized_keys")
 	keyCount := 0
 	for _, l := range strings.Split(keysOut, "\n") {
 		l = strings.TrimSpace(l)
@@ -163,17 +188,15 @@ PubkeyAuthentication %s
 AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2
 `, newCfg.Port, permitRoot, passwordAuth, pubkeyAuth)
 
-	encoded := base64.StdEncoding.EncodeToString([]byte(confContent))
-	writeCmd := fmt.Sprintf("echo '%s' | base64 -d | sudo tee /etc/ssh/sshd_config.d/99-macnas.conf >/dev/null", encoded)
-
-	if out, err := sm.vmMgr.Exec(ctx, "bash", "-c", writeCmd); err != nil {
+	if out, err := sm.vmMgr.ExecWithInput(ctx, strings.NewReader(confContent), "sudo", "tee", "/etc/ssh/sshd_config.d/99-macnas.conf"); err != nil {
 		return fmt.Errorf("写入 SSH 配置失败: %s (%w)", out, err)
 	}
 
 	// Restart or reload ssh service
-	restartCmd := "sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null"
-	if out, err := sm.vmMgr.Exec(ctx, "bash", "-c", restartCmd); err != nil {
-		return fmt.Errorf("重启 SSH 服务失败: %s (%w)", out, err)
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "systemctl", "restart", "ssh"); err != nil {
+		if restartOut, restartErr := sm.vmMgr.Exec(ctx, "sudo", "systemctl", "restart", "sshd"); restartErr != nil {
+			return fmt.Errorf("重启 SSH 服务失败: %s; sshd 重启失败: %s (%w)", out, restartOut, restartErr)
+		}
 	}
 
 	return nil
@@ -181,17 +204,20 @@ AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2
 
 // ToggleService starts or stops the SSH service
 func (sm *SSHManager) ToggleService(ctx context.Context, enable bool) error {
-	var cmd string
 	if enable {
-		cmd = "sudo systemctl unmask ssh 2>/dev/null; sudo systemctl start ssh 2>/dev/null || sudo systemctl start sshd 2>/dev/null"
-	} else {
-		cmd = "sudo systemctl stop ssh 2>/dev/null || sudo systemctl stop sshd 2>/dev/null"
+		_, _ = sm.vmMgr.Exec(ctx, "sudo", "systemctl", "unmask", "ssh")
+		if out, err := sm.vmMgr.Exec(ctx, "sudo", "systemctl", "start", "ssh"); err != nil {
+			if fallbackOut, fallbackErr := sm.vmMgr.Exec(ctx, "sudo", "systemctl", "start", "sshd"); fallbackErr != nil {
+				return fmt.Errorf("控制 SSH 服务状态失败: %s; sshd 启动失败: %s (%w)", out, fallbackOut, fallbackErr)
+			}
+		}
+		return nil
 	}
-
-	if out, err := sm.vmMgr.Exec(ctx, "bash", "-c", cmd); err != nil {
-		return fmt.Errorf("控制 SSH 服务状态失败: %s (%w)", out, err)
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "systemctl", "stop", "ssh"); err != nil {
+		if fallbackOut, fallbackErr := sm.vmMgr.Exec(ctx, "sudo", "systemctl", "stop", "sshd"); fallbackErr != nil {
+			return fmt.Errorf("控制 SSH 服务状态失败: %s; sshd 停止失败: %s (%w)", out, fallbackOut, fallbackErr)
+		}
 	}
-
 	return nil
 }
 
@@ -201,33 +227,35 @@ func (sm *SSHManager) GenerateRootKey(ctx context.Context, comment string) (*SSH
 	if strings.TrimSpace(comment) == "" {
 		comment = fmt.Sprintf("macnas-root-%s", time.Now().Format("20060102-150405"))
 	}
+	if hasSSHControlChars(comment) || len(comment) > 256 {
+		return nil, fmt.Errorf("SSH 密钥备注格式无效")
+	}
 
 	keyPath := fmt.Sprintf("/tmp/macnas_root_key_%d", time.Now().UnixNano())
 
 	// 1. Generate ED25519 keypair in VM
-	genCmd := fmt.Sprintf("ssh-keygen -t ed25519 -N '' -C '%s' -f %s", comment, keyPath)
-	if out, err := sm.vmMgr.Exec(ctx, "bash", "-c", genCmd); err != nil {
+	if out, err := sm.vmMgr.Exec(ctx, "ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", keyPath); err != nil {
 		return nil, fmt.Errorf("生成 ED25519 密钥对失败: %s (%w)", out, err)
 	}
 
 	// 2. Read private key, public key, and fingerprint
-	readCmd := fmt.Sprintf("cat %s && echo '---DIVIDER---' && cat %s.pub && echo '---DIVIDER---' && ssh-keygen -lf %s.pub", keyPath, keyPath, keyPath)
-	contentOut, err := sm.vmMgr.Exec(ctx, "bash", "-c", readCmd)
-	if err != nil {
+	privKey, privErr := sm.vmMgr.Exec(ctx, "cat", keyPath)
+	pubKey, pubErr := sm.vmMgr.Exec(ctx, "cat", keyPath+".pub")
+	fpOutput, fpErr := sm.vmMgr.Exec(ctx, "ssh-keygen", "-lf", keyPath+".pub")
+	if privErr != nil || pubErr != nil || fpErr != nil {
 		// Clean up
-		_, _ = sm.vmMgr.Exec(ctx, "bash", "-c", fmt.Sprintf("rm -f %s %s.pub", keyPath, keyPath))
-		return nil, fmt.Errorf("读取生成密钥失败: %s (%w)", contentOut, err)
+		_, _ = sm.vmMgr.Exec(ctx, "rm", "-f", keyPath, keyPath+".pub")
+		if privErr != nil {
+			return nil, fmt.Errorf("读取生成私钥失败: %w", privErr)
+		}
+		if pubErr != nil {
+			return nil, fmt.Errorf("读取生成公钥失败: %w", pubErr)
+		}
+		return nil, fmt.Errorf("读取生成密钥指纹失败: %w", fpErr)
 	}
-
-	parts := strings.Split(contentOut, "---DIVIDER---")
-	if len(parts) < 3 {
-		_, _ = sm.vmMgr.Exec(ctx, "bash", "-c", fmt.Sprintf("rm -f %s %s.pub", keyPath, keyPath))
-		return nil, fmt.Errorf("解析生成密钥失败: 输出格式不符合预期")
-	}
-
-	privKey := strings.TrimSpace(parts[0])
-	pubKey := strings.TrimSpace(parts[1])
-	fpOutput := strings.TrimSpace(parts[2])
+	privKey = strings.TrimSpace(privKey)
+	pubKey = strings.TrimSpace(pubKey)
+	fpOutput = strings.TrimSpace(fpOutput)
 
 	fingerprint := ""
 	fpFields := strings.Fields(fpOutput)
@@ -238,24 +266,38 @@ func (sm *SSHManager) GenerateRootKey(ctx context.Context, comment string) (*SSH
 	}
 
 	// 3. Append public key to /root/.ssh/authorized_keys
-	installCmd := fmt.Sprintf("sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh && echo '%s' | sudo tee -a /root/.ssh/authorized_keys >/dev/null && sudo chmod 600 /root/.ssh/authorized_keys", pubKey)
-	if out, err := sm.vmMgr.Exec(ctx, "bash", "-c", installCmd); err != nil {
-		_, _ = sm.vmMgr.Exec(ctx, "bash", "-c", fmt.Sprintf("rm -f %s %s.pub", keyPath, keyPath))
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "mkdir", "-p", "/root/.ssh"); err != nil {
+		_, _ = sm.vmMgr.Exec(ctx, "rm", "-f", keyPath, keyPath+".pub")
+		return nil, fmt.Errorf("准备 root authorized_keys 目录失败: %s (%w)", out, err)
+	}
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "chmod", "700", "/root/.ssh"); err != nil {
+		_, _ = sm.vmMgr.Exec(ctx, "rm", "-f", keyPath, keyPath+".pub")
+		return nil, fmt.Errorf("设置 root SSH 目录权限失败: %s (%w)", out, err)
+	}
+	if out, err := sm.vmMgr.ExecWithInput(ctx, strings.NewReader(pubKey+"\n"), "sudo", "tee", "-a", "/root/.ssh/authorized_keys"); err != nil {
+		_, _ = sm.vmMgr.Exec(ctx, "rm", "-f", keyPath, keyPath+".pub")
 		return nil, fmt.Errorf("将公钥安装到 root authorized_keys 失败: %s (%w)", out, err)
+	}
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "chmod", "600", "/root/.ssh/authorized_keys"); err != nil {
+		_, _ = sm.vmMgr.Exec(ctx, "rm", "-f", keyPath, keyPath+".pub")
+		return nil, fmt.Errorf("设置 root authorized_keys 权限失败: %s (%w)", out, err)
 	}
 
 	// 4. Clean up temporary files inside VM
-	_, _ = sm.vmMgr.Exec(ctx, "bash", "-c", fmt.Sprintf("rm -f %s %s.pub", keyPath, keyPath))
+	_, _ = sm.vmMgr.Exec(ctx, "rm", "-f", keyPath, keyPath+".pub")
 
 	// 5. Ensure SSH config has PermitRootLogin=yes and PubkeyAuthentication=yes
-	cfg, _ := sm.GetConfig(ctx)
+	cfg, err := sm.GetConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("读取 SSH 配置失败: %w", err)
+	}
 	if cfg == nil {
 		cfg = &SSHConfig{Port: 22, PasswordAuthentication: true}
 	}
 	cfg.PermitRootLogin = true
 	cfg.PubkeyAuthentication = true
 	if err := sm.UpdateConfig(ctx, *cfg); err != nil {
-		fmt.Printf("警告: 自动更新 SSH PermitRootLogin 配置失败: %v\n", err)
+		return nil, fmt.Errorf("自动更新 SSH root 登录配置失败: %w", err)
 	}
 
 	return &SSHKeyGenerationResult{
@@ -270,9 +312,9 @@ func (sm *SSHManager) GenerateRootKey(ctx context.Context, comment string) (*SSH
 
 // GetRootAuthorizedKeys lists public keys from /root/.ssh/authorized_keys
 func (sm *SSHManager) GetRootAuthorizedKeys(ctx context.Context) ([]string, error) {
-	out, err := sm.vmMgr.Exec(ctx, "bash", "-c", "sudo cat /root/.ssh/authorized_keys 2>/dev/null")
+	out, err := sm.vmMgr.Exec(ctx, "sudo", "cat", "/root/.ssh/authorized_keys")
 	if err != nil {
-		return []string{}, nil
+		return nil, fmt.Errorf("读取 root authorized_keys 失败: %w", err)
 	}
 
 	var keys []string
@@ -287,26 +329,36 @@ func (sm *SSHManager) GetRootAuthorizedKeys(ctx context.Context) ([]string, erro
 
 // AddRootAuthorizedKey adds an existing public key to /root/.ssh/authorized_keys
 func (sm *SSHManager) AddRootAuthorizedKey(ctx context.Context, pubKey string) error {
-	pubKey = strings.TrimSpace(pubKey)
-	if pubKey == "" {
-		return fmt.Errorf("公钥内容不能为空")
+	var err error
+	pubKey, err = normalizeAuthorizedKey(pubKey)
+	if err != nil {
+		return err
 	}
 
-	if !strings.HasPrefix(pubKey, "ssh-") && !strings.HasPrefix(pubKey, "ecdsa-") {
-		return fmt.Errorf("无效的 SSH 公钥格式 (应以 ssh-ed25519, ssh-rsa, ecdsa-... 开头)")
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "mkdir", "-p", "/root/.ssh"); err != nil {
+		return fmt.Errorf("准备 root authorized_keys 目录失败: %s (%w)", out, err)
 	}
-
-	installCmd := fmt.Sprintf("sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh && echo '%s' | sudo tee -a /root/.ssh/authorized_keys >/dev/null && sudo chmod 600 /root/.ssh/authorized_keys", pubKey)
-	if out, err := sm.vmMgr.Exec(ctx, "bash", "-c", installCmd); err != nil {
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "chmod", "700", "/root/.ssh"); err != nil {
+		return fmt.Errorf("设置 root SSH 目录权限失败: %s (%w)", out, err)
+	}
+	if out, err := sm.vmMgr.ExecWithInput(ctx, strings.NewReader(pubKey+"\n"), "sudo", "tee", "-a", "/root/.ssh/authorized_keys"); err != nil {
 		return fmt.Errorf("添加公钥失败: %s (%w)", out, err)
+	}
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "chmod", "600", "/root/.ssh/authorized_keys"); err != nil {
+		return fmt.Errorf("设置 root authorized_keys 权限失败: %s (%w)", out, err)
 	}
 
 	// Ensure PermitRootLogin=yes & PubkeyAuthentication=yes
-	cfg, _ := sm.GetConfig(ctx)
+	cfg, err := sm.GetConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("读取 SSH 配置失败: %w", err)
+	}
 	if cfg != nil {
 		cfg.PermitRootLogin = true
 		cfg.PubkeyAuthentication = true
-		_ = sm.UpdateConfig(ctx, *cfg)
+		if err := sm.UpdateConfig(ctx, *cfg); err != nil {
+			return fmt.Errorf("自动更新 SSH root 登录配置失败: %w", err)
+		}
 	}
 
 	return nil
@@ -314,8 +366,13 @@ func (sm *SSHManager) AddRootAuthorizedKey(ctx context.Context, pubKey string) e
 
 // ClearRootAuthorizedKeys removes all keys from /root/.ssh/authorized_keys
 func (sm *SSHManager) ClearRootAuthorizedKeys(ctx context.Context) error {
-	cmd := "sudo mkdir -p /root/.ssh && sudo truncate -s 0 /root/.ssh/authorized_keys 2>/dev/null && sudo chmod 600 /root/.ssh/authorized_keys"
-	if out, err := sm.vmMgr.Exec(ctx, "bash", "-c", cmd); err != nil {
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "mkdir", "-p", "/root/.ssh"); err != nil {
+		return fmt.Errorf("清空公钥失败: %s (%w)", out, err)
+	}
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "truncate", "-s", "0", "/root/.ssh/authorized_keys"); err != nil {
+		return fmt.Errorf("清空公钥失败: %s (%w)", out, err)
+	}
+	if out, err := sm.vmMgr.Exec(ctx, "sudo", "chmod", "600", "/root/.ssh/authorized_keys"); err != nil {
 		return fmt.Errorf("清空公钥失败: %s (%w)", out, err)
 	}
 	return nil

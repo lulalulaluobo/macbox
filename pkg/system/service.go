@@ -149,7 +149,12 @@ func (sm *ServiceManager) Install(port int) error {
 		return err
 	}
 	macnasDir := filepath.Join(home, ".macnas")
-	_ = os.MkdirAll(macnasDir, 0755)
+	if err := os.MkdirAll(macnasDir, 0700); err != nil {
+		return fmt.Errorf("failed to create MacNAS data dir: %w", err)
+	}
+	if err := os.Chmod(macnasDir, 0700); err != nil {
+		return fmt.Errorf("failed to secure MacNAS data dir: %w", err)
+	}
 
 	logPath := filepath.Join(macnasDir, "macnas.log")
 	errLogPath := filepath.Join(macnasDir, "macnas.err.log")
@@ -174,12 +179,16 @@ func (sm *ServiceManager) Install(port int) error {
 	}
 
 	// Write plist file
-	if err := os.WriteFile(plistPath, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(plistPath, buf.Bytes(), 0600); err != nil {
 		return fmt.Errorf("failed to write plist: %w", err)
 	}
 
 	// If already loaded, unload first
-	_ = exec.Command("launchctl", "unload", "-w", plistPath).Run()
+	if err := exec.Command("launchctl", "unload", "-w", plistPath).Run(); err != nil {
+		// launchctl returns an error when the label was not loaded yet. The
+		// plist is still valid, so continue with load.
+		log.Printf("[MacNAS Service] existing LaunchAgent unload skipped: %v", err)
+	}
 
 	// Load service
 	cmd := exec.Command("launchctl", "load", "-w", plistPath)
@@ -188,8 +197,17 @@ func (sm *ServiceManager) Install(port int) error {
 		return fmt.Errorf("launchctl load failed: %s (%w)", string(output), err)
 	}
 
-	sm.cfg.System.AutoStart = true
-	_ = config.SaveConfig(sm.cfg)
+	if err := config.Update(sm.cfg, func(updated *config.Config) error {
+		updated.System.AutoStart = true
+		return nil
+	}); err != nil {
+		// Do not leave a running service behind when its durable configuration
+		// could not be updated.
+		if rollbackErr := exec.Command("launchctl", "unload", "-w", plistPath).Run(); rollbackErr != nil {
+			return fmt.Errorf("service loaded but failed to save configuration: %v; rollback failed: %w", err, rollbackErr)
+		}
+		return fmt.Errorf("service loaded but failed to save configuration: %w", err)
+	}
 
 	log.Printf("[MacNAS Service] 🚀 LaunchAgent 服务已安装并激活: %s", plistPath)
 	return nil
@@ -201,14 +219,38 @@ func (sm *ServiceManager) Uninstall() error {
 		return err
 	}
 
+	var plistData []byte
+	hadPlist := false
 	if _, err := os.Stat(plistPath); err == nil {
+		plistData, err = os.ReadFile(plistPath)
+		if err != nil {
+			return fmt.Errorf("failed to read service plist before uninstall: %w", err)
+		}
+		hadPlist = true
 		cmd := exec.Command("launchctl", "unload", "-w", plistPath)
-		_ = cmd.Run()
-		_ = os.Remove(plistPath)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("launchctl unload failed: %s (%w)", strings.TrimSpace(string(output)), err)
+		}
+		if err := os.Remove(plistPath); err != nil {
+			return fmt.Errorf("failed to remove service plist: %w", err)
+		}
 	}
 
-	sm.cfg.System.AutoStart = false
-	_ = config.SaveConfig(sm.cfg)
+	if err := config.Update(sm.cfg, func(updated *config.Config) error {
+		updated.System.AutoStart = false
+		return nil
+	}); err != nil {
+		if hadPlist {
+			if restoreErr := os.WriteFile(plistPath, plistData, 0600); restoreErr == nil {
+				if loadErr := exec.Command("launchctl", "load", "-w", plistPath).Run(); loadErr != nil {
+					return fmt.Errorf("failed to save service configuration: %v; service restore failed: %w", err, loadErr)
+				}
+			} else {
+				return fmt.Errorf("failed to save service configuration: %v; plist restore failed: %w", err, restoreErr)
+			}
+		}
+		return fmt.Errorf("failed to save service configuration: %w", err)
+	}
 
 	log.Printf("[MacNAS Service] LaunchAgent 服务已卸载")
 	return nil

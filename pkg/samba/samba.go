@@ -2,12 +2,14 @@ package samba
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
+	"log"
+	"path"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/luluen/mac-nas/pkg/config"
 	"github.com/luluen/mac-nas/pkg/vm"
@@ -40,10 +42,9 @@ type SambaStatus struct {
 }
 
 type Manager struct {
-	cfg      *config.Config
-	vmMgr    *vm.Manager
-	mu       sync.Mutex
-	syncOnce sync.Once
+	cfg   *config.Config
+	vmMgr *vm.Manager
+	mu    sync.Mutex
 }
 
 func NewManager(cfg *config.Config, vmMgr *vm.Manager) *Manager {
@@ -51,16 +52,22 @@ func NewManager(cfg *config.Config, vmMgr *vm.Manager) *Manager {
 		cfg:   cfg,
 		vmMgr: vmMgr,
 	}
-	m.ensureDefaultShares()
+	if err := m.ensureDefaultShares(); err != nil {
+		log.Printf("[MacNAS Samba] 保存默认共享配置失败: %v", err)
+	}
 	return m
 }
 
-func (m *Manager) ensureDefaultShares() {
+func (m *Manager) ensureDefaultShares() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if len(m.cfg.Samba.Shares) > 0 {
-		return
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return fmt.Errorf("读取 Samba 配置失败: %w", err)
+	}
+	if len(cfgSnapshot.Samba.Shares) > 0 {
+		return nil
 	}
 
 	shares := []config.SMBShare{
@@ -70,15 +77,15 @@ func (m *Manager) ensureDefaultShares() {
 			Path:       "/data",
 			Comment:    "主硬盘 1 完整存储池",
 			Writable:   true,
-			GuestOk:    true,
+			GuestOk:    false,
 			Enabled:    true,
 			DiskSource: "primary",
 		},
 	}
 
 	// If secondary disk or volume2-ssd mount exists, add secondary disk share
-	hasSecondary := m.cfg.Storage.SecondaryDisk != "" || m.cfg.Storage.SecondaryMount != ""
-	for _, lm := range m.cfg.Storage.LocalMounts {
+	hasSecondary := cfgSnapshot.Storage.SecondaryDisk != "" || cfgSnapshot.Storage.SecondaryMount != ""
+	for _, lm := range cfgSnapshot.Storage.LocalMounts {
 		if lm.ID == "volume2-ssd" || lm.Category == "volume2" {
 			hasSecondary = true
 			break
@@ -92,14 +99,14 @@ func (m *Manager) ensureDefaultShares() {
 			Path:       "/data/volume2-ssd",
 			Comment:    "第二硬盘 256GB 本机高速盘",
 			Writable:   true,
-			GuestOk:    true,
+			GuestOk:    false,
 			Enabled:    true,
 			DiskSource: "secondary",
 		})
 	}
 
 	// If downloads passthrough exists
-	for _, lm := range m.cfg.Storage.LocalMounts {
+	for _, lm := range cfgSnapshot.Storage.LocalMounts {
 		if lm.ID == "mac-downloads" {
 			shares = append(shares, config.SMBShare{
 				ID:         "share-downloads",
@@ -107,7 +114,7 @@ func (m *Manager) ensureDefaultShares() {
 				Path:       "/data/downloads/MacDownloads",
 				Comment:    "Mac 直通下载目录",
 				Writable:   true,
-				GuestOk:    true,
+				GuestOk:    false,
 				Enabled:    true,
 				DiskSource: "passthrough",
 			})
@@ -115,8 +122,13 @@ func (m *Manager) ensureDefaultShares() {
 		}
 	}
 
-	m.cfg.Samba.Shares = shares
-	_ = config.SaveConfig(m.cfg)
+	if err := config.Update(m.cfg, func(updated *config.Config) error {
+		updated.Samba.Shares = shares
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (m *Manager) GetStatus(ctx context.Context, hostIP string) (*SambaStatus, error) {
@@ -124,26 +136,26 @@ func (m *Manager) GetStatus(ctx context.Context, hostIP string) (*SambaStatus, e
 		hostIP = "127.0.0.1"
 	}
 
-	m.ensureDefaultShares()
-
-	m.syncOnce.Do(func() {
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			_ = m.ApplyConfig(context.Background())
-		}()
-	})
-
-	vmStat, _ := m.vmMgr.GetStatus()
+	vmStat, _ := m.vmMgr.GetStatusContext(ctx)
 	statusStr := "stopped"
 
-	if vmStat.Status == "Running" {
+	if vmStat != nil && vmStat.Status == "Running" {
 		out, err := m.vmMgr.Exec(ctx, "systemctl", "is-active", "smbd")
 		if err == nil && strings.TrimSpace(out) == "active" {
 			statusStr = "running"
 		}
 	}
 
-	port := m.cfg.Samba.Port
+	m.mu.Lock()
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	m.mu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("读取 Samba 配置失败: %w", err)
+	}
+	shareName := cfgSnapshot.Samba.ShareName
+	user := cfgSnapshot.Samba.User
+	port := cfgSnapshot.Samba.Port
+	shares := append([]config.SMBShare(nil), cfgSnapshot.Samba.Shares...)
 	if port <= 0 {
 		port = 4455
 	}
@@ -155,7 +167,7 @@ func (m *Manager) GetStatus(ctx context.Context, hostIP string) (*SambaStatus, e
 
 	// Construct list of shares with resolved addresses
 	var shareItems []SMBShareItem
-	for _, s := range m.cfg.Samba.Shares {
+	for _, s := range shares {
 		addr := fmt.Sprintf("smb://%s/%s", hostIP, s.Name)
 		if port != 445 {
 			addr = fmt.Sprintf("smb://%s:%d/%s", hostIP, port, s.Name)
@@ -167,10 +179,10 @@ func (m *Manager) GetStatus(ctx context.Context, hostIP string) (*SambaStatus, e
 	}
 
 	return &SambaStatus{
-		ShareName:        m.cfg.Samba.ShareName,
+		ShareName:        shareName,
 		Path:             "/data",
 		Address:          defaultAddr,
-		User:             m.cfg.Samba.User,
+		User:             user,
 		Port:             port,
 		Status:           statusStr,
 		HasConflict:      false,
@@ -181,6 +193,17 @@ func (m *Manager) GetStatus(ctx context.Context, hostIP string) (*SambaStatus, e
 }
 
 func (m *Manager) GetAvailableTargets(ctx context.Context) []AvailableTarget {
+	m.mu.Lock()
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	m.mu.Unlock()
+	if err != nil {
+		log.Printf("[MacNAS Samba] 读取可用共享目录失败: %v", err)
+		return nil
+	}
+	secondaryDisk := cfgSnapshot.Storage.SecondaryDisk
+	secondaryMount := cfgSnapshot.Storage.SecondaryMount
+	localMounts := append([]config.LocalMount(nil), cfgSnapshot.Storage.LocalMounts...)
+
 	targets := []AvailableTarget{
 		{
 			Name:        "主硬盘 1 完整存储池 (/data)",
@@ -192,8 +215,8 @@ func (m *Manager) GetAvailableTargets(ctx context.Context) []AvailableTarget {
 	}
 
 	// Check for secondary disk
-	hasSecondary := m.cfg.Storage.SecondaryDisk != "" || m.cfg.Storage.SecondaryMount != ""
-	for _, lm := range m.cfg.Storage.LocalMounts {
+	hasSecondary := secondaryDisk != "" || secondaryMount != ""
+	for _, lm := range localMounts {
 		if lm.ID == "volume2-ssd" || lm.Category == "volume2" {
 			hasSecondary = true
 			break
@@ -210,7 +233,7 @@ func (m *Manager) GetAvailableTargets(ctx context.Context) []AvailableTarget {
 	}
 
 	// Local mounts
-	for _, lm := range m.cfg.Storage.LocalMounts {
+	for _, lm := range localMounts {
 		if lm.ID == "volume2-ssd" {
 			continue
 		}
@@ -255,6 +278,17 @@ func (m *Manager) GetAvailableTargets(ctx context.Context) []AvailableTarget {
 func (m *Manager) ApplyConfig(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.applyConfigLocked(ctx)
+}
+
+// applyConfigLocked renders and applies the current Samba configuration. The
+// caller must hold m.mu. Keeping the lock across the external commands makes
+// config mutation and service reload a single serialized operation.
+func (m *Manager) applyConfigLocked(ctx context.Context) error {
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return fmt.Errorf("读取 Samba 配置失败: %w", err)
+	}
 
 	var sb strings.Builder
 	sb.WriteString("[global]\n")
@@ -262,14 +296,14 @@ func (m *Manager) ApplyConfig(ctx context.Context) error {
 	sb.WriteString("   server string = MacNAS\n")
 	sb.WriteString("   server role = standalone server\n")
 	sb.WriteString("   security = user\n")
-	sb.WriteString("   map to guest = Bad User\n")
+	sb.WriteString("   map to guest = Never\n")
 	sb.WriteString("   dns proxy = no\n")
 	sb.WriteString("   log file = /var/log/samba/log.%m\n")
 	sb.WriteString("   max log size = 50\n\n")
 
 	var dirsToCreate []string
 
-	for _, s := range m.cfg.Samba.Shares {
+	for _, s := range cfgSnapshot.Samba.Shares {
 		if !s.Enabled {
 			continue
 		}
@@ -278,10 +312,13 @@ func (m *Manager) ApplyConfig(ctx context.Context) error {
 		if cleanName == "" {
 			continue
 		}
+		if !shareNameRegex.MatchString(cleanName) || hasControlChars(cleanName) {
+			return fmt.Errorf("共享名称格式无效: %s", cleanName)
+		}
 
-		cleanPath := strings.TrimSpace(s.Path)
-		if cleanPath == "" {
-			cleanPath = "/data"
+		cleanPath, pathErr := normalizeSharePath(s.Path)
+		if pathErr != nil || hasControlChars(s.Comment) || len([]byte(s.Comment)) > 512 {
+			return fmt.Errorf("共享配置包含非法控制字符: %s", cleanName)
 		}
 		dirsToCreate = append(dirsToCreate, cleanPath)
 
@@ -308,39 +345,85 @@ func (m *Manager) ApplyConfig(ctx context.Context) error {
 			sb.WriteString("   guest ok = no\n")
 		}
 
-		sb.WriteString("   create mask = 0777\n")
-		sb.WriteString("   directory mask = 0777\n")
-		sb.WriteString("   force user = root\n\n")
+		sb.WriteString("   create mask = 0660\n")
+		sb.WriteString("   directory mask = 0770\n")
+		sb.WriteString("   force user = macnas\n")
+		sb.WriteString("   force group = macnas\n\n")
 	}
 
 	confContent := sb.String()
-	encoded := base64.StdEncoding.EncodeToString([]byte(confContent))
 
 	// 1. Ensure target dirs exist
 	if len(dirsToCreate) > 0 {
-		var mkdirCmds []string
 		for _, d := range dirsToCreate {
-			mkdirCmds = append(mkdirCmds, fmt.Sprintf("mkdir -p '%s'", d))
+			if _, err := m.vmMgr.Exec(ctx, "sudo", "mkdir", "-p", d); err != nil {
+				return fmt.Errorf("创建共享目录失败: %s (%w)", d, err)
+			}
 		}
-		_, _ = m.vmMgr.Exec(ctx, "sudo", "bash", "-c", strings.Join(mkdirCmds, " && "))
 	}
 
 	// 2. Write /etc/samba/smb.conf
-	writeCmd := fmt.Sprintf("echo '%s' | base64 -d | sudo tee /etc/samba/smb.conf > /dev/null", encoded)
-	if out, err := m.vmMgr.Exec(ctx, "bash", "-c", writeCmd); err != nil {
+	if out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(confContent), "sudo", "tee", "/etc/samba/smb.conf"); err != nil {
 		return fmt.Errorf("写入 smb.conf 失败: %s (%w)", out, err)
 	}
 
 	// 3. Reload or restart Samba
-	reloadCmd := "sudo systemctl reload smbd || sudo systemctl restart smbd"
-	if out, err := m.vmMgr.Exec(ctx, "bash", "-c", reloadCmd); err != nil {
-		return fmt.Errorf("重载 Samba 服务失败: %s (%w)", out, err)
+	if out, err := m.vmMgr.Exec(ctx, "sudo", "systemctl", "reload", "smbd"); err != nil {
+		if restartOut, restartErr := m.vmMgr.Exec(ctx, "sudo", "systemctl", "restart", "smbd"); restartErr != nil {
+			return fmt.Errorf("重载 Samba 服务失败: %s; 重启失败: %s (%w)", out, restartOut, restartErr)
+		}
 	}
 
 	return nil
 }
 
+// rollbackSharesLocked restores the previous share list after an apply
+// failure. Without this, the YAML file could contain a configuration that the
+// running Samba service rejected (or that was only partially written), so a
+// later restart would unexpectedly apply a change the user was told had
+// failed. The caller must hold m.mu.
+func (m *Manager) rollbackSharesLocked(previous []config.SMBShare, operationErr error) error {
+	if err := config.Update(m.cfg, func(updated *config.Config) error {
+		updated.Samba.Shares = append([]config.SMBShare(nil), previous...)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("应用 Samba 配置失败: %v；回滚共享配置失败: %w", operationErr, err)
+	}
+
+	rollbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := m.applyConfigLocked(rollbackCtx); err != nil {
+		return fmt.Errorf("应用 Samba 配置失败: %v；共享配置已回滚但恢复服务失败: %w", operationErr, err)
+	}
+	return operationErr
+}
+
 var shareNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
+var shareIDRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
+func normalizeSharePath(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		value = "/data"
+	}
+	if len([]byte(value)) > 4096 || hasControlChars(value) || !strings.HasPrefix(value, "/") {
+		return "", fmt.Errorf("共享目录必须是 /data 下的绝对路径")
+	}
+	clean := path.Clean(value)
+	if clean != "/data" && !strings.HasPrefix(clean, "/data/") {
+		return "", fmt.Errorf("共享目录必须位于 /data 下")
+	}
+	return clean, nil
+}
+
+func hasControlChars(value string) bool {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
 
 func (m *Manager) AddOrUpdateShare(ctx context.Context, share config.SMBShare) (*config.SMBShare, error) {
 	share.Name = strings.TrimSpace(share.Name)
@@ -352,21 +435,31 @@ func (m *Manager) AddOrUpdateShare(ctx context.Context, share config.SMBShare) (
 	}
 
 	share.Path = strings.TrimSpace(share.Path)
-	if share.Path == "" {
-		return nil, fmt.Errorf("共享目录路径不能为空")
+	cleanPath, err := normalizeSharePath(share.Path)
+	if err != nil {
+		return nil, err
 	}
-	if !strings.HasPrefix(share.Path, "/") {
-		return nil, fmt.Errorf("共享目录必须为绝对路径 (以 / 开头)")
+	share.Path = cleanPath
+	if hasControlChars(share.Comment) || len([]byte(share.Comment)) > 512 {
+		return nil, fmt.Errorf("共享备注格式无效")
 	}
 
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return nil, fmt.Errorf("读取共享配置失败: %w", err)
+	}
+	currentShares := append([]config.SMBShare(nil), cfgSnapshot.Samba.Shares...)
 	if share.ID == "" {
 		share.ID = fmt.Sprintf("share-%d", time.Now().UnixNano())
+	} else if !shareIDRegex.MatchString(share.ID) {
+		return nil, fmt.Errorf("共享 ID 格式无效")
 	}
 
 	// Check if updating existing or inserting
 	foundIndex := -1
-	for i, s := range m.cfg.Samba.Shares {
+	for i, s := range currentShares {
 		if s.ID == share.ID {
 			foundIndex = i
 			break
@@ -374,24 +467,28 @@ func (m *Manager) AddOrUpdateShare(ctx context.Context, share config.SMBShare) (
 	}
 
 	// Check duplicate name on other shares
-	for i, s := range m.cfg.Samba.Shares {
+	for i, s := range currentShares {
 		if s.Name == share.Name && i != foundIndex {
-			m.mu.Unlock()
 			return nil, fmt.Errorf("共享服务名称 '%s' 已被其他共享项占用，请使用其他名称", share.Name)
 		}
 	}
 
+	updatedShares := append([]config.SMBShare(nil), currentShares...)
 	if foundIndex >= 0 {
-		m.cfg.Samba.Shares[foundIndex] = share
+		updatedShares[foundIndex] = share
 	} else {
-		m.cfg.Samba.Shares = append(m.cfg.Samba.Shares, share)
+		updatedShares = append(updatedShares, share)
 	}
 
-	_ = config.SaveConfig(m.cfg)
-	m.mu.Unlock()
+	if err := config.Update(m.cfg, func(updated *config.Config) error {
+		updated.Samba.Shares = updatedShares
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("保存共享配置失败: %w", err)
+	}
 
-	if err := m.ApplyConfig(ctx); err != nil {
-		return nil, err
+	if err := m.applyConfigLocked(ctx); err != nil {
+		return nil, m.rollbackSharesLocked(currentShares, err)
 	}
 
 	return &share, nil
@@ -399,34 +496,50 @@ func (m *Manager) AddOrUpdateShare(ctx context.Context, share config.SMBShare) (
 
 func (m *Manager) ToggleShare(ctx context.Context, id string) (bool, error) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return false, fmt.Errorf("读取共享配置失败: %w", err)
+	}
 	found := false
 	var newState bool
-	for i, s := range m.cfg.Samba.Shares {
+	updatedShares := append([]config.SMBShare(nil), cfgSnapshot.Samba.Shares...)
+	for i, s := range updatedShares {
 		if s.ID == id {
-			m.cfg.Samba.Shares[i].Enabled = !s.Enabled
-			newState = m.cfg.Samba.Shares[i].Enabled
+			updatedShares[i].Enabled = !s.Enabled
+			newState = updatedShares[i].Enabled
 			found = true
 			break
 		}
 	}
 	if !found {
-		m.mu.Unlock()
 		return false, fmt.Errorf("未找到 ID 为 %s 的共享项", id)
 	}
-	_ = config.SaveConfig(m.cfg)
-	m.mu.Unlock()
+	previousShares := append([]config.SMBShare(nil), cfgSnapshot.Samba.Shares...)
+	if err := config.Update(m.cfg, func(updated *config.Config) error {
+		updated.Samba.Shares = updatedShares
+		return nil
+	}); err != nil {
+		return false, fmt.Errorf("保存共享状态失败: %w", err)
+	}
 
-	if err := m.ApplyConfig(ctx); err != nil {
-		return newState, err
+	if err := m.applyConfigLocked(ctx); err != nil {
+		return newState, m.rollbackSharesLocked(previousShares, err)
 	}
 	return newState, nil
 }
 
 func (m *Manager) DeleteShare(ctx context.Context, id string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return fmt.Errorf("读取共享配置失败: %w", err)
+	}
+	previousShares := append([]config.SMBShare(nil), cfgSnapshot.Samba.Shares...)
 	var newShares []config.SMBShare
 	found := false
-	for _, s := range m.cfg.Samba.Shares {
+	for _, s := range cfgSnapshot.Samba.Shares {
 		if s.ID == id {
 			found = true
 			continue
@@ -434,15 +547,20 @@ func (m *Manager) DeleteShare(ctx context.Context, id string) error {
 		newShares = append(newShares, s)
 	}
 	if !found {
-		m.mu.Unlock()
 		return fmt.Errorf("未找到 ID 为 %s 的共享项", id)
 	}
 
-	m.cfg.Samba.Shares = newShares
-	_ = config.SaveConfig(m.cfg)
-	m.mu.Unlock()
+	if err := config.Update(m.cfg, func(updated *config.Config) error {
+		updated.Samba.Shares = newShares
+		return nil
+	}); err != nil {
+		return fmt.Errorf("保存共享配置失败: %w", err)
+	}
 
-	return m.ApplyConfig(ctx)
+	if err := m.applyConfigLocked(ctx); err != nil {
+		return m.rollbackSharesLocked(previousShares, err)
+	}
+	return nil
 }
 
 func (m *Manager) ToggleService(ctx context.Context, enable bool) error {
@@ -458,32 +576,77 @@ func (m *Manager) ToggleService(ctx context.Context, enable bool) error {
 }
 
 func (m *Manager) UpdatePassword(ctx context.Context, newPassword string) error {
-	if newPassword == "" {
-		return fmt.Errorf("密码不能为空")
+	if err := config.ValidateSambaPassword(newPassword); err != nil {
+		return err
 	}
 
-	cmd := fmt.Sprintf("(echo '%s'; echo '%s') | smbpasswd -a macnas -s && smbpasswd -e macnas", newPassword, newPassword)
-	out, err := m.vmMgr.Exec(ctx, "bash", "-c", cmd)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	previousConfig, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return fmt.Errorf("读取旧 Samba 密码配置失败: %w", err)
+	}
+	previousPassword := previousConfig.Samba.Password
+	rollback := func(operationErr error) error {
+		if strings.TrimSpace(previousPassword) == "" {
+			return operationErr
+		}
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if rollbackOut, rollbackErr := m.vmMgr.ExecWithInput(rollbackCtx, strings.NewReader(previousPassword+"\n"+previousPassword+"\n"), "sudo", "smbpasswd", "-a", "macnas", "-s"); rollbackErr != nil {
+			return fmt.Errorf("%v；恢复旧 Samba 密码失败: %s (%w)", operationErr, rollbackOut, rollbackErr)
+		}
+		if rollbackOut, rollbackErr := m.vmMgr.Exec(rollbackCtx, "sudo", "smbpasswd", "-e", "macnas"); rollbackErr != nil {
+			return fmt.Errorf("%v；重新启用旧 Samba 密码失败: %s (%w)", operationErr, rollbackOut, rollbackErr)
+		}
+		return operationErr
+	}
+
+	out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(newPassword+"\n"+newPassword+"\n"), "sudo", "smbpasswd", "-a", "macnas", "-s")
 	if err != nil {
 		return fmt.Errorf("修改密码失败: %s (%w)", out, err)
 	}
+	if out, err = m.vmMgr.Exec(ctx, "sudo", "smbpasswd", "-e", "macnas"); err != nil {
+		return rollback(fmt.Errorf("启用 Samba 用户失败: %s (%w)", out, err))
+	}
 
-	m.cfg.Samba.Password = newPassword
-	return config.SaveConfig(m.cfg)
+	err = config.Update(m.cfg, func(updated *config.Config) error {
+		updated.Samba.Password = newPassword
+		return nil
+	})
+	if err != nil {
+		return rollback(fmt.Errorf("保存 Samba 密码失败: %w", err))
+	}
+	return nil
 }
 
 func (m *Manager) EnsurePassword(ctx context.Context) error {
-	pwd := m.cfg.Samba.Password
-	if pwd == "" {
-		pwd = "macnas"
+	m.mu.Lock()
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	m.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("读取 Samba 密码配置失败: %w", err)
 	}
-	cmd := fmt.Sprintf("id -u macnas &>/dev/null || useradd -M -s /usr/sbin/nologin macnas; (echo '%s'; echo '%s') | smbpasswd -a macnas -s && smbpasswd -e macnas", pwd, pwd)
-	_, err := m.vmMgr.Exec(ctx, "sudo", "bash", "-c", cmd)
+	pwd := cfgSnapshot.Samba.Password
+	if err := config.ValidateSambaPassword(pwd); err != nil {
+		return fmt.Errorf("Samba 密码未初始化或不符合安全要求，请先设置至少 12 个字符的密码: %w", err)
+	}
+	if _, err := m.vmMgr.Exec(ctx, "id", "-u", "macnas"); err != nil {
+		if _, userErr := m.vmMgr.Exec(ctx, "sudo", "useradd", "-M", "-s", "/usr/sbin/nologin", "macnas"); userErr != nil {
+			return userErr
+		}
+	}
+	if _, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(pwd+"\n"+pwd+"\n"), "sudo", "smbpasswd", "-a", "macnas", "-s"); err != nil {
+		return err
+	}
+	_, err = m.vmMgr.Exec(ctx, "sudo", "smbpasswd", "-e", "macnas")
 	return err
 }
 
 func (m *Manager) Restart(ctx context.Context) error {
-	_ = m.ApplyConfig(ctx)
+	if err := m.ApplyConfig(ctx); err != nil {
+		return err
+	}
 	out, err := m.vmMgr.Exec(ctx, "sudo", "systemctl", "restart", "smbd", "nmbd")
 	if err != nil {
 		return fmt.Errorf("重启 Samba 失败: %s (%w)", out, err)

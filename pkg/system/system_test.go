@@ -1,10 +1,14 @@
 package system
 
 import (
+	"os"
 	"testing"
 )
 
 func TestGetSystemStats(t *testing.T) {
+	if os.Getenv("MACNAS_INTEGRATION") != "1" {
+		t.Skip("host statistics integration test; set MACNAS_INTEGRATION=1 to run")
+	}
 	stats, err := GetSystemStats()
 	if err != nil {
 		t.Fatalf("GetSystemStats error: %v", err)

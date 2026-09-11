@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,7 +18,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/luluen/mac-nas/pkg/apps"
 	"github.com/luluen/mac-nas/pkg/auth"
 	"github.com/luluen/mac-nas/pkg/config"
@@ -26,13 +27,8 @@ import (
 	"github.com/luluen/mac-nas/pkg/system"
 	"github.com/luluen/mac-nas/pkg/terminal"
 	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/shirou/gopsutil/v3/mem"
 )
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for local NAS management
-	},
-}
 
 type Server struct {
 	cfg             *config.Config
@@ -46,13 +42,85 @@ type Server struct {
 	sshMgr          *system.SSHManager
 	termSettingsMgr *system.TerminalSettingsManager
 	authMgr         *auth.Manager
+	authInitErr     error
 	projectRoot     string
+	allowedOrigins  map[string]struct{}
+	uploadSlots     chan struct{}
 	mux             *http.ServeMux
+	serverCtx       context.Context
+	serverCancel    context.CancelFunc
+	closeOnce       sync.Once
+	backgroundMu    sync.Mutex
+	backgroundWG    sync.WaitGroup
+	closing         bool
+	mountSyncMu     sync.Mutex
+	mountSyncActive bool
+	storageOpMu     sync.Mutex
+	storageOpActive bool
+	dockerOpMu      sync.Mutex
+	dockerOpActive  bool
 }
 
 type contextKey string
 
 const userContextKey contextKey = "macnas-user"
+
+// JSON requests are control-plane operations. Keep them small so malformed
+// or hostile payloads cannot make every handler allocate unbounded memory.
+// Multipart file uploads use their own, much larger limit in the upload
+// handler and are deliberately not covered by this cap.
+const maxJSONBodyBytes = 8 << 20
+
+const sessionCookieName = "macnas_session"
+
+func configuredOrigins(raw string) map[string]struct{} {
+	origins := make(map[string]struct{})
+	for _, origin := range strings.Split(raw, ",") {
+		origin = strings.TrimSpace(origin)
+		if origin != "" {
+			origins[origin] = struct{}{}
+		}
+	}
+	return origins
+}
+
+func (s *Server) originAllowed(r *http.Request, origin string) bool {
+	// Same-origin requests are always allowed. Cross-origin development or
+	// reverse-proxy deployments must opt in via MACNAS_ALLOWED_ORIGINS.
+	if origin == "http://"+r.Host || origin == "https://"+r.Host {
+		return true
+	}
+	_, ok := s.allowedOrigins[origin]
+	return ok
+}
+
+func (s *Server) websocketUpgrader() websocket.Upgrader {
+	return websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return s.originAllowed(r, strings.TrimSpace(r.Header.Get("Origin")))
+		},
+	}
+}
+
+func requestIP(r *http.Request) string {
+	host := r.RemoteAddr
+	if parsedHost, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		host = parsedHost
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return "unknown"
+}
+
+func isLoopbackRequest(r *http.Request) bool {
+	host := r.RemoteAddr
+	if parsedHost, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		host = parsedHost
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
 
 func (s *Server) authenticateRequest(r *http.Request) (*auth.User, error) {
 	if s.authMgr == nil {
@@ -62,8 +130,8 @@ func (s *Server) authenticateRequest(r *http.Request) (*auth.User, error) {
 	token := ""
 	if strings.HasPrefix(authHeader, "Bearer ") {
 		token = strings.TrimPrefix(authHeader, "Bearer ")
-	} else if qToken := r.URL.Query().Get("token"); qToken != "" {
-		token = qToken
+	} else if sessionCookie, err := r.Cookie(sessionCookieName); err == nil {
+		token = sessionCookie.Value
 	}
 	return s.authMgr.ValidateToken(token)
 }
@@ -88,22 +156,66 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) *auth.User
 	return u
 }
 
+// adminOnly protects state-changing and privileged operations at the routing
+// boundary. Handlers should not rely on the frontend hiding a button as an
+// authorization mechanism.
+func (s *Server) adminOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.requireAdmin(w, r) == nil {
+			return
+		}
+		next(w, r)
+	}
+}
+
 func NewServer(cfg *config.Config, projectRoot string) *Server {
-	system.StartCPUMonitor()
+	return newServer(cfg, projectRoot, nil)
+}
+
+// NewServerWithPowerManager lets the process owner share one explicitly
+// managed power assertion with the API without reintroducing a global
+// singleton. NewServer remains source-compatible for embedded callers.
+func NewServerWithPowerManager(cfg *config.Config, projectRoot string, powerMgr *system.PowerManager) *Server {
+	return newServer(cfg, projectRoot, powerMgr)
+}
+
+// NewServerWithPowerManagerChecked is the startup-safe constructor used by the
+// executable. Authentication storage is required for a usable server; callers
+// that can surface an initialization error should use this variant.
+func NewServerWithPowerManagerChecked(cfg *config.Config, projectRoot string, powerMgr *system.PowerManager) (*Server, error) {
+	s := newServer(cfg, projectRoot, powerMgr)
+	if s.authInitErr != nil {
+		return nil, s.authInitErr
+	}
+	return s, nil
+}
+
+func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.PowerManager) *Server {
+	serverCtx, serverCancel := context.WithCancel(context.Background())
 	vmMgr := vm.NewManager(cfg)
 	dockerClient := docker.NewClient(vmMgr, projectRoot)
 	appMgr := apps.NewManager(vmMgr, dockerClient, projectRoot)
 	sambaMgr := samba.NewManager(cfg, vmMgr)
-	powerMgr := system.GetPowerManager(cfg)
+	powerMgr := sharedPowerMgr
+	if powerMgr == nil {
+		powerMgr = system.GetPowerManager(cfg)
+	}
 	serviceMgr := system.NewServiceManager(cfg, projectRoot)
 	userMgr := system.NewUserManager(vmMgr)
 	sshMgr := system.NewSSHManager(vmMgr)
-	cfgDir, _ := config.ConfigDir()
-	termSettingsMgr := system.NewTerminalSettingsManager(cfgDir)
+	cfgDir, cfgDirErr := config.ConfigDir()
+	var termSettingsMgr *system.TerminalSettingsManager
+	if cfgDirErr == nil {
+		termSettingsMgr = system.NewTerminalSettingsManager(cfgDir)
+	}
 
-	authMgr, err := auth.NewManager(cfgDir)
-	if err != nil {
-		log.Printf("[Auth] Warning: failed to init auth manager: %v", err)
+	var authMgr *auth.Manager
+	authInitErr := cfgDirErr
+	if authInitErr == nil {
+		authMgr, authInitErr = auth.NewManager(cfgDir)
+	}
+	if authInitErr != nil {
+		log.Printf("[Auth] failed to init auth manager: %v", authInitErr)
 	}
 
 	s := &Server{
@@ -118,30 +230,193 @@ func NewServer(cfg *config.Config, projectRoot string) *Server {
 		sshMgr:          sshMgr,
 		termSettingsMgr: termSettingsMgr,
 		authMgr:         authMgr,
+		authInitErr:     authInitErr,
 		projectRoot:     projectRoot,
+		allowedOrigins:  configuredOrigins(os.Getenv("MACNAS_ALLOWED_ORIGINS")),
+		uploadSlots:     make(chan struct{}, 2),
 		mux:             http.NewServeMux(),
+		serverCtx:       serverCtx,
+		serverCancel:    serverCancel,
 	}
 
 	s.registerRoutes()
 	return s
 }
 
+// Close cancels server-owned background work. HTTP handlers that submit
+// long-running VM or mount operations derive their contexts from this root,
+// so process shutdown does not leave limactl jobs running indefinitely.
+func (s *Server) Close() {
+	if s == nil {
+		return
+	}
+	s.closeOnce.Do(func() {
+		s.backgroundMu.Lock()
+		s.closing = true
+		s.backgroundMu.Unlock()
+		if s.serverCancel != nil {
+			s.serverCancel()
+		}
+		done := make(chan struct{})
+		go func() {
+			s.backgroundWG.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			log.Printf("[MacNAS API] timed out waiting for background operations to stop")
+		}
+	})
+}
+
+func (s *Server) beginBackgroundWork() bool {
+	s.backgroundMu.Lock()
+	defer s.backgroundMu.Unlock()
+	if s.closing {
+		return false
+	}
+	s.backgroundWG.Add(1)
+	return true
+}
+
+func (s *Server) endBackgroundWork() {
+	s.backgroundWG.Done()
+}
+
+func (s *Server) operationContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	base := s.serverCtx
+	if base == nil {
+		base = context.Background()
+	}
+	return context.WithTimeout(base, timeout)
+}
+
+func (s *Server) scheduleMountSync() {
+	s.mountSyncMu.Lock()
+	if s.mountSyncActive {
+		s.mountSyncMu.Unlock()
+		return
+	}
+	s.mountSyncActive = true
+	base := s.serverCtx
+	if base == nil {
+		base = context.Background()
+	}
+	s.mountSyncMu.Unlock()
+	if !s.beginBackgroundWork() {
+		s.mountSyncMu.Lock()
+		s.mountSyncActive = false
+		s.mountSyncMu.Unlock()
+		return
+	}
+
+	go func() {
+		defer s.endBackgroundWork()
+		defer func() {
+			s.mountSyncMu.Lock()
+			s.mountSyncActive = false
+			s.mountSyncMu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(base, 2*time.Minute)
+		defer cancel()
+		if err := s.vmMgr.SyncMounts(ctx); err != nil {
+			log.Printf("[MacNAS API] mount sync failed: %v", err)
+		}
+	}()
+}
+
+// beginStorageOperation serializes storage mutations that update both the
+// persisted configuration and the generated Lima configuration. Blocking on
+// an in-flight disk operation would make a disconnected client hold another
+// request open indefinitely, so conflicting writes fail fast with 409.
+func (s *Server) beginStorageOperation(w http.ResponseWriter) bool {
+	s.storageOpMu.Lock()
+	if s.storageOpActive {
+		s.storageOpMu.Unlock()
+		writeError(w, http.StatusConflict, "已有存储操作正在执行，请稍后重试")
+		return false
+	}
+	s.storageOpActive = true
+	s.storageOpMu.Unlock()
+	return true
+}
+
+func (s *Server) endStorageOperation() {
+	s.storageOpMu.Lock()
+	s.storageOpActive = false
+	s.storageOpMu.Unlock()
+}
+
+// beginDockerOperation serializes mutations that share the VM Docker daemon.
+// A second long-running install or compose action should fail fast instead of
+// racing the first operation and leaving containers, images, or config files
+// in an indeterminate state.
+func (s *Server) beginDockerOperation(w http.ResponseWriter) bool {
+	s.dockerOpMu.Lock()
+	if s.dockerOpActive {
+		s.dockerOpMu.Unlock()
+		writeError(w, http.StatusConflict, "已有 Docker 操作正在执行，请稍后重试")
+		return false
+	}
+	s.dockerOpActive = true
+	s.dockerOpMu.Unlock()
+	return true
+}
+
+func (s *Server) endDockerOperation() {
+	s.dockerOpMu.Lock()
+	s.dockerOpActive = false
+	s.dockerOpMu.Unlock()
+	if s.dockerClient != nil {
+		s.dockerClient.InvalidateContainerCaches()
+	}
+}
+
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Enable CORS
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		// Keep browser defaults restrictive for both the SPA and API responses.
+		// These headers are deliberately set before any early return (CORS,
+		// OPTIONS, or authentication failure).
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
+		if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+			if !s.originAllowed(r, origin) {
+				writeError(w, http.StatusForbidden, "跨域来源不被允许")
+				return
+			}
+			w.Header().Set("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Max-Age", "600")
+		}
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusNoContent)
 			return
+		}
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0])), "application/json") && r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 		}
 
 		// API Authentication Interceptor
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			// Whitelisted unauthenticated endpoints
-			if r.URL.Path == "/api/auth/login" {
+			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" {
 				s.mux.ServeHTTP(w, r)
+				return
+			}
+			if s.authMgr == nil {
+				if s.authInitErr != nil {
+					writeError(w, http.StatusServiceUnavailable, "认证服务暂不可用")
+				} else {
+					writeError(w, http.StatusUnauthorized, "请先登录")
+				}
 				return
 			}
 
@@ -169,126 +444,128 @@ func (s *Server) registerRoutes() {
 	// 1. System
 	s.mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
 	s.mux.HandleFunc("GET /api/system/power", s.handleSystemPower)
-	s.mux.HandleFunc("POST /api/system/power/toggle", s.handleSystemPowerToggle)
+	s.mux.HandleFunc("POST /api/system/power/toggle", s.adminOnly(s.handleSystemPowerToggle))
 	s.mux.HandleFunc("GET /api/system/service", s.handleSystemServiceStatus)
-	s.mux.HandleFunc("POST /api/system/service/install", s.handleSystemServiceInstall)
-	s.mux.HandleFunc("POST /api/system/service/uninstall", s.handleSystemServiceUninstall)
+	s.mux.HandleFunc("POST /api/system/service/install", s.adminOnly(s.handleSystemServiceInstall))
+	s.mux.HandleFunc("POST /api/system/service/uninstall", s.adminOnly(s.handleSystemServiceUninstall))
 
 	// 2. VM lifecycle & Specs
-	s.mux.HandleFunc("POST /api/vm/start", s.handleVMStart)
-	s.mux.HandleFunc("POST /api/vm/stop", s.handleVMStop)
-	s.mux.HandleFunc("POST /api/vm/restart", s.handleVMRestart)
+	s.mux.HandleFunc("POST /api/vm/start", s.adminOnly(s.handleVMStart))
+	s.mux.HandleFunc("POST /api/vm/stop", s.adminOnly(s.handleVMStop))
+	s.mux.HandleFunc("POST /api/vm/restart", s.adminOnly(s.handleVMRestart))
 	s.mux.HandleFunc("GET /api/vm/config", s.handleVMConfigGet)
-	s.mux.HandleFunc("POST /api/vm/config", s.handleVMConfigUpdate)
+	s.mux.HandleFunc("POST /api/vm/config", s.adminOnly(s.handleVMConfigUpdate))
 
 	// 3. Storage
 	s.mux.HandleFunc("GET /api/storage/disks", s.handleStorageDisks)
-	s.mux.HandleFunc("POST /api/storage/select", s.handleStorageSelect)
-	s.mux.HandleFunc("POST /api/storage/bind", s.handleStorageBind)
-	s.mux.HandleFunc("POST /api/storage/unbind", s.handleStorageUnbind)
-	s.mux.HandleFunc("POST /api/storage/bind-secondary", s.handleStorageBindSecondary)
-	s.mux.HandleFunc("POST /api/storage/unbind-secondary", s.handleStorageUnbindSecondary)
+	s.mux.HandleFunc("POST /api/storage/select", s.adminOnly(s.handleStorageSelect))
+	s.mux.HandleFunc("POST /api/storage/bind", s.adminOnly(s.handleStorageBind))
+	s.mux.HandleFunc("POST /api/storage/unbind", s.adminOnly(s.handleStorageUnbind))
+	s.mux.HandleFunc("POST /api/storage/bind-secondary", s.adminOnly(s.handleStorageBindSecondary))
+	s.mux.HandleFunc("POST /api/storage/unbind-secondary", s.adminOnly(s.handleStorageUnbindSecondary))
 	s.mux.HandleFunc("GET /api/storage/mounts", s.handleStorageMountsList)
-	s.mux.HandleFunc("POST /api/storage/mounts", s.handleStorageMountsAdd)
-	s.mux.HandleFunc("POST /api/storage/mounts/{id}/toggle", s.handleStorageMountsToggle)
-	s.mux.HandleFunc("POST /api/storage/mounts/{id}/writable", s.handleStorageMountsWritable)
-	s.mux.HandleFunc("DELETE /api/storage/mounts/{id}", s.handleStorageMountsDelete)
+	s.mux.HandleFunc("POST /api/storage/mounts", s.adminOnly(s.handleStorageMountsAdd))
+	s.mux.HandleFunc("POST /api/storage/mounts/{id}/toggle", s.adminOnly(s.handleStorageMountsToggle))
+	s.mux.HandleFunc("POST /api/storage/mounts/{id}/writable", s.adminOnly(s.handleStorageMountsWritable))
+	s.mux.HandleFunc("DELETE /api/storage/mounts/{id}", s.adminOnly(s.handleStorageMountsDelete))
 
 	// 4. Docker Overview & Containers
 	s.mux.HandleFunc("GET /api/docker/overview", s.handleDockerOverview)
 	s.mux.HandleFunc("GET /api/docker/containers", s.handleDockerContainers)
-	s.mux.HandleFunc("POST /api/docker/containers/{id}/action", s.handleDockerContainerAction)
-	s.mux.HandleFunc("POST /api/docker/containers/{id}/start", s.handleDockerStart)
-	s.mux.HandleFunc("POST /api/docker/containers/{id}/stop", s.handleDockerStop)
-	s.mux.HandleFunc("POST /api/docker/containers/{id}/restart", s.handleDockerRestart)
-	s.mux.HandleFunc("DELETE /api/docker/containers/{id}", s.handleDockerRemoveContainer)
-	s.mux.HandleFunc("GET /api/docker/containers/{id}/logs", s.handleDockerLogs)
+	s.mux.HandleFunc("POST /api/docker/containers/{id}/action", s.adminOnly(s.handleDockerContainerAction))
+	s.mux.HandleFunc("POST /api/docker/containers/{id}/start", s.adminOnly(s.handleDockerStart))
+	s.mux.HandleFunc("POST /api/docker/containers/{id}/stop", s.adminOnly(s.handleDockerStop))
+	s.mux.HandleFunc("POST /api/docker/containers/{id}/restart", s.adminOnly(s.handleDockerRestart))
+	s.mux.HandleFunc("DELETE /api/docker/containers/{id}", s.adminOnly(s.handleDockerRemoveContainer))
+	s.mux.HandleFunc("GET /api/docker/containers/{id}/logs", s.adminOnly(s.handleDockerLogs))
 
 	// Docker Images
 	s.mux.HandleFunc("GET /api/docker/images", s.handleDockerImages)
-	s.mux.HandleFunc("POST /api/docker/images/pull", s.handleDockerPullImage)
-	s.mux.HandleFunc("POST /api/docker/images/pull/stream", s.handleDockerPullImageStream)
-	s.mux.HandleFunc("DELETE /api/docker/images/{id}", s.handleDockerRemoveImage)
-	s.mux.HandleFunc("POST /api/docker/images/prune", s.handleDockerPruneImages)
+	s.mux.HandleFunc("POST /api/docker/images/pull", s.adminOnly(s.handleDockerPullImage))
+	s.mux.HandleFunc("POST /api/docker/images/pull/stream", s.adminOnly(s.handleDockerPullImageStream))
+	s.mux.HandleFunc("DELETE /api/docker/images/{id}", s.adminOnly(s.handleDockerRemoveImage))
+	s.mux.HandleFunc("POST /api/docker/images/prune", s.adminOnly(s.handleDockerPruneImages))
 
 	// Docker Compose
 	s.mux.HandleFunc("GET /api/docker/compose", s.handleDockerComposeList)
 	s.mux.HandleFunc("GET /api/docker/compose/{name}", s.handleDockerComposeGetYaml)
-	s.mux.HandleFunc("POST /api/docker/compose/deploy", s.handleDockerComposeDeploy)
-	s.mux.HandleFunc("POST /api/docker/compose/deploy/stream", s.handleDockerComposeDeployStream)
-	s.mux.HandleFunc("POST /api/docker/compose/{name}/action", s.handleDockerComposeAction)
-	s.mux.HandleFunc("DELETE /api/docker/compose/{name}", s.handleDockerComposeDelete)
+	s.mux.HandleFunc("POST /api/docker/compose/deploy", s.adminOnly(s.handleDockerComposeDeploy))
+	s.mux.HandleFunc("POST /api/docker/compose/deploy/stream", s.adminOnly(s.handleDockerComposeDeployStream))
+	s.mux.HandleFunc("POST /api/docker/compose/{name}/action", s.adminOnly(s.handleDockerComposeAction))
+	s.mux.HandleFunc("DELETE /api/docker/compose/{name}", s.adminOnly(s.handleDockerComposeDelete))
 
 	// Docker Networks & Mirrors
 	s.mux.HandleFunc("GET /api/docker/networks", s.handleDockerNetworks)
 	s.mux.HandleFunc("GET /api/docker/mirrors", s.handleDockerGetMirrors)
-	s.mux.HandleFunc("POST /api/docker/mirrors", s.handleDockerSetMirrors)
+	s.mux.HandleFunc("POST /api/docker/mirrors", s.adminOnly(s.handleDockerSetMirrors))
 
 	// 5. Apps
 	s.mux.HandleFunc("GET /api/apps", s.handleAppsList)
-	s.mux.HandleFunc("GET /api/apps/{id}/config", s.handleAppGetConfig)
-	s.mux.HandleFunc("POST /api/apps/{id}/install", s.handleAppInstall)
-	s.mux.HandleFunc("GET /api/apps/{id}/install/stream", s.handleAppInstallStream)
-	s.mux.HandleFunc("POST /api/apps/{id}/install/custom", s.handleAppInstallCustomStream)
-	s.mux.HandleFunc("POST /api/apps/custom", s.handleAppCustomAdd)
-	s.mux.HandleFunc("DELETE /api/apps/custom/{id}", s.handleAppCustomDelete)
-	s.mux.HandleFunc("POST /api/apps/sync", s.handleAppStoreSync)
-	s.mux.HandleFunc("POST /api/apps/{id}/start", s.handleAppStart)
-	s.mux.HandleFunc("POST /api/apps/{id}/stop", s.handleAppStop)
-	s.mux.HandleFunc("POST /api/apps/{id}/restart", s.handleAppRestart)
-	s.mux.HandleFunc("POST /api/apps/{id}/uninstall", s.handleAppUninstall)
-	s.mux.HandleFunc("GET /api/apps/{id}/logs", s.handleAppLogs)
+	s.mux.HandleFunc("GET /api/apps/{id}/config", s.adminOnly(s.handleAppGetConfig))
+	s.mux.HandleFunc("POST /api/apps/{id}/install", s.adminOnly(s.handleAppInstall))
+	s.mux.HandleFunc("GET /api/apps/{id}/install/stream", s.adminOnly(s.handleAppInstallStream))
+	s.mux.HandleFunc("POST /api/apps/{id}/install/custom", s.adminOnly(s.handleAppInstallCustomStream))
+	s.mux.HandleFunc("POST /api/apps/custom", s.adminOnly(s.handleAppCustomAdd))
+	s.mux.HandleFunc("DELETE /api/apps/custom/{id}", s.adminOnly(s.handleAppCustomDelete))
+	s.mux.HandleFunc("POST /api/apps/sync", s.adminOnly(s.handleAppStoreSync))
+	s.mux.HandleFunc("POST /api/apps/{id}/start", s.adminOnly(s.handleAppStart))
+	s.mux.HandleFunc("POST /api/apps/{id}/stop", s.adminOnly(s.handleAppStop))
+	s.mux.HandleFunc("POST /api/apps/{id}/restart", s.adminOnly(s.handleAppRestart))
+	s.mux.HandleFunc("POST /api/apps/{id}/uninstall", s.adminOnly(s.handleAppUninstall))
+	s.mux.HandleFunc("GET /api/apps/{id}/logs", s.adminOnly(s.handleAppLogs))
 
 	// 6. Samba
 	s.mux.HandleFunc("GET /api/samba/status", s.handleSambaStatus)
-	s.mux.HandleFunc("POST /api/samba/shares", s.handleSambaShareAddOrUpdate)
-	s.mux.HandleFunc("PUT /api/samba/shares/{id}", s.handleSambaShareAddOrUpdate)
-	s.mux.HandleFunc("POST /api/samba/shares/{id}/toggle", s.handleSambaShareToggle)
-	s.mux.HandleFunc("DELETE /api/samba/shares/{id}", s.handleSambaShareDelete)
-	s.mux.HandleFunc("POST /api/samba/service/toggle", s.handleSambaServiceToggle)
-	s.mux.HandleFunc("POST /api/samba/service/restart", s.handleSambaServiceRestart)
-	s.mux.HandleFunc("POST /api/samba/password", s.handleSambaPassword)
+	s.mux.HandleFunc("POST /api/samba/shares", s.adminOnly(s.handleSambaShareAddOrUpdate))
+	s.mux.HandleFunc("PUT /api/samba/shares/{id}", s.adminOnly(s.handleSambaShareAddOrUpdate))
+	s.mux.HandleFunc("POST /api/samba/shares/{id}/toggle", s.adminOnly(s.handleSambaShareToggle))
+	s.mux.HandleFunc("DELETE /api/samba/shares/{id}", s.adminOnly(s.handleSambaShareDelete))
+	s.mux.HandleFunc("POST /api/samba/service/toggle", s.adminOnly(s.handleSambaServiceToggle))
+	s.mux.HandleFunc("POST /api/samba/service/restart", s.adminOnly(s.handleSambaServiceRestart))
+	s.mux.HandleFunc("POST /api/samba/password", s.adminOnly(s.handleSambaPassword))
 
 	// 7. WebSocket logs
-	s.mux.HandleFunc("GET /api/ws/logs", s.handleWSLogs)
+	s.mux.HandleFunc("GET /api/ws/logs", s.adminOnly(s.handleWSLogs))
 
 	// 8. Web Terminal & File System
-	s.mux.HandleFunc("GET /api/terminal/ws", s.handleTerminalWS)
+	s.mux.HandleFunc("GET /api/terminal/ws", s.adminOnly(s.handleTerminalWS))
 	s.mux.HandleFunc("GET /api/terminal/files", s.handleTerminalFilesList)
 	s.mux.HandleFunc("GET /api/terminal/files/read", s.handleTerminalFileRead)
-	s.mux.HandleFunc("POST /api/terminal/files/write", s.handleTerminalFileWrite)
-	s.mux.HandleFunc("POST /api/terminal/files/mkdir", s.handleTerminalFileMkdir)
-	s.mux.HandleFunc("POST /api/terminal/files/upload", s.handleTerminalFileUpload)
-	s.mux.HandleFunc("POST /api/terminal/files/rename", s.handleTerminalFileRename)
-	s.mux.HandleFunc("DELETE /api/terminal/files", s.handleTerminalFileDelete)
+	s.mux.HandleFunc("POST /api/terminal/files/write", s.adminOnly(s.handleTerminalFileWrite))
+	s.mux.HandleFunc("POST /api/terminal/files/mkdir", s.adminOnly(s.handleTerminalFileMkdir))
+	s.mux.HandleFunc("POST /api/terminal/files/upload", s.adminOnly(s.handleTerminalFileUpload))
+	s.mux.HandleFunc("POST /api/terminal/files/rename", s.adminOnly(s.handleTerminalFileRename))
+	s.mux.HandleFunc("DELETE /api/terminal/files", s.adminOnly(s.handleTerminalFileDelete))
 	s.mux.HandleFunc("GET /api/terminal/files/download", s.handleTerminalFileDownload)
 	s.mux.HandleFunc("GET /api/terminal/files/raw", s.handleTerminalFileRaw)
-	s.mux.HandleFunc("POST /api/terminal/files/copy", s.handleTerminalFilesCopy)
-	s.mux.HandleFunc("POST /api/terminal/files/move", s.handleTerminalFilesMove)
-	s.mux.HandleFunc("POST /api/terminal/files/trash", s.handleTerminalFilesTrash)
+	s.mux.HandleFunc("POST /api/terminal/files/copy", s.adminOnly(s.handleTerminalFilesCopy))
+	s.mux.HandleFunc("POST /api/terminal/files/move", s.adminOnly(s.handleTerminalFilesMove))
+	s.mux.HandleFunc("POST /api/terminal/files/trash", s.adminOnly(s.handleTerminalFilesTrash))
 	s.mux.HandleFunc("GET /api/terminal/files/trash", s.handleTerminalFilesTrashList)
-	s.mux.HandleFunc("POST /api/terminal/files/restore", s.handleTerminalFilesRestore)
-	s.mux.HandleFunc("POST /api/terminal/files/trash/delete", s.handleTerminalFilesTrashDelete)
-	s.mux.HandleFunc("POST /api/terminal/files/empty-trash", s.handleTerminalFilesEmptyTrash)
+	s.mux.HandleFunc("POST /api/terminal/files/restore", s.adminOnly(s.handleTerminalFilesRestore))
+	s.mux.HandleFunc("POST /api/terminal/files/trash/delete", s.adminOnly(s.handleTerminalFilesTrashDelete))
+	s.mux.HandleFunc("POST /api/terminal/files/empty-trash", s.adminOnly(s.handleTerminalFilesEmptyTrash))
 
 	// 9. System Security, Users & SSH
-	s.mux.HandleFunc("GET /api/system/users", s.handleListUsers)
-	s.mux.HandleFunc("POST /api/system/users", s.handleCreateUser)
-	s.mux.HandleFunc("POST /api/system/users/{username}/password", s.handleUpdateUserPassword)
-	s.mux.HandleFunc("DELETE /api/system/users/{username}", s.handleDeleteUser)
-	s.mux.HandleFunc("POST /api/system/root/password", s.handleUpdateRootPassword)
-	s.mux.HandleFunc("GET /api/system/ssh", s.handleGetSSHConfig)
-	s.mux.HandleFunc("POST /api/system/ssh", s.handleUpdateSSHConfig)
-	s.mux.HandleFunc("POST /api/system/ssh/toggle", s.handleToggleSSH)
-	s.mux.HandleFunc("POST /api/system/ssh/keys/generate", s.handleGenerateSSHRootKey)
-	s.mux.HandleFunc("GET /api/system/ssh/keys", s.handleGetSSHAuthorizedKeys)
-	s.mux.HandleFunc("POST /api/system/ssh/keys/add", s.handleAddSSHAuthorizedKey)
-	s.mux.HandleFunc("DELETE /api/system/ssh/keys", s.handleClearSSHAuthorizedKeys)
+	s.mux.HandleFunc("GET /api/system/users", s.adminOnly(s.handleListUsers))
+	s.mux.HandleFunc("POST /api/system/users", s.adminOnly(s.handleCreateUser))
+	s.mux.HandleFunc("POST /api/system/users/{username}/password", s.adminOnly(s.handleUpdateUserPassword))
+	s.mux.HandleFunc("DELETE /api/system/users/{username}", s.adminOnly(s.handleDeleteUser))
+	s.mux.HandleFunc("POST /api/system/root/password", s.adminOnly(s.handleUpdateRootPassword))
+	s.mux.HandleFunc("GET /api/system/ssh", s.adminOnly(s.handleGetSSHConfig))
+	s.mux.HandleFunc("POST /api/system/ssh", s.adminOnly(s.handleUpdateSSHConfig))
+	s.mux.HandleFunc("POST /api/system/ssh/toggle", s.adminOnly(s.handleToggleSSH))
+	s.mux.HandleFunc("POST /api/system/ssh/keys/generate", s.adminOnly(s.handleGenerateSSHRootKey))
+	s.mux.HandleFunc("GET /api/system/ssh/keys", s.adminOnly(s.handleGetSSHAuthorizedKeys))
+	s.mux.HandleFunc("POST /api/system/ssh/keys/add", s.adminOnly(s.handleAddSSHAuthorizedKey))
+	s.mux.HandleFunc("DELETE /api/system/ssh/keys", s.adminOnly(s.handleClearSSHAuthorizedKeys))
 	s.mux.HandleFunc("GET /api/system/terminal/settings", s.handleGetTerminalSettings)
-	s.mux.HandleFunc("POST /api/system/terminal/settings", s.handleUpdateTerminalSettings)
+	s.mux.HandleFunc("POST /api/system/terminal/settings", s.adminOnly(s.handleUpdateTerminalSettings))
 
 	// 10. Web Console Authentication & User Management
 	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	s.mux.HandleFunc("POST /api/auth/setup", s.handleAuthSetup)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("GET /api/auth/me", s.handleAuthMe)
 	s.mux.HandleFunc("POST /api/auth/change-pwd", s.handleAuthChangePassword)
@@ -305,19 +582,69 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
+	if status >= http.StatusInternalServerError {
+		// Service errors can contain host paths, command output, or other
+		// implementation details. Keep those in server logs only and expose a
+		// stable response to clients.
+		logMsg := strings.NewReplacer("\r", "\\r", "\n", "\\n").Replace(msg)
+		if len(logMsg) > 2048 {
+			logMsg = logMsg[:2048] + "…"
+		}
+		log.Printf("[MacNAS API] internal error: %s", logMsg)
+		msg = "服务器内部错误"
+	}
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func setSessionCookie(w http.ResponseWriter, r *http.Request, token string, rememberMe bool) {
+	maxAge := int((24 * time.Hour) / time.Second)
+	if rememberMe {
+		maxAge = int((30 * 24 * time.Hour) / time.Second)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   maxAge,
+		Expires:  time.Now().Add(time.Duration(maxAge) * time.Second),
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteStrictMode,
+	})
 }
 
 // System Status Overview (Parallelized for low latency)
 func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
+	cfgSnapshot, cfgErr := config.Snapshot(s.cfg)
+	if cfgErr != nil {
+		log.Printf("[MacNAS] system status config snapshot failed: %v", cfgErr)
+		writeError(w, http.StatusInternalServerError, "读取系统配置失败")
+		return
+	}
 	var (
 		sysStats           *system.SystemStats
 		sysErr             error
 		vmStat             *vm.VMStatus
+		vmErr              error
 		containers         []docker.ContainerInfo
+		dockerErr          error
 		dockerRunningCount int
 		selectedDisk       *storage.DiskInfo
 		disks              []storage.DiskInfo
+		storageErr         error
 		wg                 sync.WaitGroup
 	)
 
@@ -332,13 +659,16 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	// 2. VM status
 	go func() {
 		defer wg.Done()
-		vmStat, _ = s.vmMgr.GetStatus()
+		vmStat, vmErr = s.vmMgr.GetStatusContext(r.Context())
 	}()
 
 	// 3. Docker containers
 	go func() {
 		defer wg.Done()
-		containers, _ = s.dockerClient.ListContainers(r.Context())
+		containers, dockerErr = s.dockerClient.ListContainers(r.Context())
+		if dockerErr != nil {
+			return
+		}
 		for _, c := range containers {
 			if c.State == "running" {
 				dockerRunningCount++
@@ -349,7 +679,10 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	// 4. Storage overview
 	go func() {
 		defer wg.Done()
-		disks, _ = storage.ListDisks(s.cfg.Storage.SelectedDisk)
+		disks, storageErr = storage.ListDisksContext(r.Context(), cfgSnapshot.Storage.SelectedDisk, cfgSnapshot.Storage.SecondaryDisk)
+		if storageErr != nil {
+			return
+		}
 		for _, d := range disks {
 			if d.IsSelected {
 				diskCopy := d
@@ -366,6 +699,20 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	statusErrors := make(map[string]string)
+	if vmErr != nil {
+		log.Printf("[MacNAS] system status VM error: %v", vmErr)
+		statusErrors["vm"] = "unavailable"
+	}
+	if dockerErr != nil {
+		log.Printf("[MacNAS] system status Docker error: %v", dockerErr)
+		statusErrors["docker"] = "unavailable"
+	}
+	if storageErr != nil {
+		log.Printf("[MacNAS] system status storage error: %v", storageErr)
+		statusErrors["storage"] = "unavailable"
+	}
+
 	resp := map[string]interface{}{
 		"system":      sysStats,
 		"power":       s.powerMgr.GetStatus(),
@@ -374,18 +721,22 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"vmAction":    s.vmMgr.GetVMAction(),
 		"configDirty": s.vmMgr.IsConfigDirty(),
 		"docker": map[string]interface{}{
-			"ready":        vmStat.DockerReady,
+			"ready":        vmStat != nil && vmStat.DockerReady,
 			"total":        len(containers),
 			"runningCount": dockerRunningCount,
 		},
 		"storage": map[string]interface{}{
 			"selectedDisk":     selectedDisk,
 			"diskCount":        len(disks),
-			"isExternalActive": s.cfg.Storage.DataPath != "",
-			"dataPath":         s.cfg.Storage.DataPath,
-			"mountPoint":       s.cfg.Storage.MountPoint,
+			"isExternalActive": cfgSnapshot.Storage.DataPath != "",
+			"dataPath":         cfgSnapshot.Storage.DataPath,
+			"mountPoint":       cfgSnapshot.Storage.MountPoint,
 		},
 		"timestamp": time.Now(),
+	}
+	if len(statusErrors) > 0 {
+		resp["degraded"] = true
+		resp["errors"] = statusErrors
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -421,7 +772,12 @@ func (s *Server) handleSystemServiceStatus(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleSystemServiceInstall(w http.ResponseWriter, r *http.Request) {
-	port := s.cfg.Port
+	cfgSnapshot, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取系统配置失败")
+		return
+	}
+	port := cfgSnapshot.Port
 	if port <= 0 {
 		port = 19808
 	}
@@ -442,73 +798,142 @@ func (s *Server) handleSystemServiceUninstall(w http.ResponseWriter, r *http.Req
 
 // VM Handlers
 func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
-	s.vmMgr.SetVMAction("starting")
+	if !s.vmMgr.BeginVMAction("starting") {
+		writeError(w, http.StatusConflict, "已有虚拟机操作正在进行")
+		return
+	}
+	if !s.beginBackgroundWork() {
+		s.vmMgr.EndVMAction()
+		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
+		return
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer s.endBackgroundWork()
+		defer s.vmMgr.EndVMAction()
+		ctx, cancel := s.operationContext(10 * time.Minute)
 		defer cancel()
 		if err := s.vmMgr.Start(ctx, s.projectRoot); err != nil {
 			log.Printf("[MacNAS] VM Start error: %v", err)
 		} else {
 			s.vmMgr.SetConfigDirty(false)
-			_ = s.sambaMgr.EnsurePassword(ctx)
+			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
+				log.Printf("[MacNAS] ensure Samba password after VM start failed: %v", err)
+			}
 		}
-		s.vmMgr.SetVMAction("")
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting", "message": "虚拟机启动中..."})
 }
 
 func (s *Server) handleVMStop(w http.ResponseWriter, r *http.Request) {
-	s.vmMgr.SetVMAction("stopping")
+	if !s.vmMgr.BeginVMAction("stopping") {
+		writeError(w, http.StatusConflict, "已有虚拟机操作正在进行")
+		return
+	}
+	if !s.beginBackgroundWork() {
+		s.vmMgr.EndVMAction()
+		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
+		return
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer s.endBackgroundWork()
+		defer s.vmMgr.EndVMAction()
+		ctx, cancel := s.operationContext(2 * time.Minute)
 		defer cancel()
 		if err := s.vmMgr.Stop(ctx); err != nil {
 			log.Printf("[MacNAS] VM Stop error: %v", err)
 		}
-		s.vmMgr.SetVMAction("")
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping", "message": "虚拟机停止中..."})
 }
 
 func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
-	s.vmMgr.SetVMAction("restarting")
+	if !s.vmMgr.BeginVMAction("restarting") {
+		writeError(w, http.StatusConflict, "已有虚拟机操作正在进行")
+		return
+	}
+	if !s.beginBackgroundWork() {
+		s.vmMgr.EndVMAction()
+		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
+		return
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer s.endBackgroundWork()
+		defer s.vmMgr.EndVMAction()
+		ctx, cancel := s.operationContext(10 * time.Minute)
 		defer cancel()
 		if err := s.vmMgr.Restart(ctx, s.projectRoot); err != nil {
 			log.Printf("[MacNAS] VM Restart error: %v", err)
 		} else {
 			s.vmMgr.SetConfigDirty(false)
-			_ = s.sambaMgr.EnsurePassword(ctx)
+			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
+				log.Printf("[MacNAS] ensure Samba password after VM restart failed: %v", err)
+			}
 		}
-		s.vmMgr.SetVMAction("")
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting", "message": "虚拟机重启中..."})
 }
 
 // Storage Handlers
+func (s *Server) regenerateVMConfig() error {
+	cfgDir, err := config.ConfigDir()
+	if err != nil {
+		return err
+	}
+	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	return s.vmMgr.GenerateConfigFile(tmplPath, filepath.Join(cfgDir, "macnas.yaml"))
+}
+
+func (s *Server) restoreConfigSnapshot(snapshot *config.Config) error {
+	if snapshot == nil {
+		return fmt.Errorf("配置快照为空")
+	}
+	return config.Update(s.cfg, func(updated *config.Config) error {
+		*updated = *snapshot
+		return nil
+	})
+}
+
 func (s *Server) handleStorageDisks(w http.ResponseWriter, r *http.Request) {
-	disks, err := storage.ListDisks(s.cfg.Storage.SelectedDisk, s.cfg.Storage.SecondaryDisk)
+	cfgSnapshot, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取存储配置失败")
+		return
+	}
+	disks, err := storage.ListDisksContext(r.Context(), cfgSnapshot.Storage.SelectedDisk, cfgSnapshot.Storage.SecondaryDisk)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	managed, _ := storage.ListManagedDisks()
+	managed, managedErr := storage.ListManagedDisksContext(r.Context())
+	if managedErr != nil {
+		if r.Context().Err() != nil {
+			writeError(w, http.StatusRequestTimeout, "读取存储状态已取消")
+			return
+		}
+		log.Printf("[MacNAS Storage] managed disk discovery failed: %v", managedErr)
+		writeError(w, http.StatusInternalServerError, "读取 Lima 磁盘列表失败")
+		return
+	}
 
-	isExternal := (s.cfg.Storage.DataPath != "")
+	isExternal := (cfgSnapshot.Storage.DataPath != "")
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"disks":            disks,
 		"managedDisks":     managed,
-		"selectedDisk":     s.cfg.Storage.SelectedDisk,
-		"secondaryDisk":    s.cfg.Storage.SecondaryDisk,
-		"secondaryMount":   s.cfg.Storage.SecondaryMount,
+		"selectedDisk":     cfgSnapshot.Storage.SelectedDisk,
+		"secondaryDisk":    cfgSnapshot.Storage.SecondaryDisk,
+		"secondaryMount":   cfgSnapshot.Storage.SecondaryMount,
 		"isExternalActive": isExternal,
-		"dataPath":         s.cfg.Storage.DataPath,
-		"mountPoint":       s.cfg.Storage.MountPoint,
+		"dataPath":         cfgSnapshot.Storage.DataPath,
+		"mountPoint":       cfgSnapshot.Storage.MountPoint,
 	})
 }
 
 func (s *Server) handleStorageSelect(w http.ResponseWriter, r *http.Request) {
+	if !s.beginStorageOperation(w) {
+		return
+	}
+	defer s.endStorageOperation()
+
 	var body struct {
 		Identifier string `json:"identifier"` // e.g. "disk4" or "/dev/disk4"
 	}
@@ -516,21 +941,33 @@ func (s *Server) handleStorageSelect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	s.cfg.Storage.SelectedDisk = body.Identifier
-	storage.InvalidateDisksCache()
-	if err := config.SaveConfig(s.cfg); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	identifier, err := storage.NormalizeDiskIdentifier(body.Identifier)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
+	if err := config.Update(s.cfg, func(updated *config.Config) error {
+		updated.Storage.SelectedDisk = identifier
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	storage.InvalidateDisksCache()
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":       "success",
-		"selectedDisk": body.Identifier,
+		"selectedDisk": identifier,
 	})
 }
 
 func (s *Server) handleStorageBind(w http.ResponseWriter, r *http.Request) {
+	if !s.beginStorageOperation(w) {
+		return
+	}
+	defer s.endStorageOperation()
+
 	var req struct {
 		Identifier string `json:"identifier"`
 		MountPoint string `json:"mountPoint"`
@@ -541,7 +978,7 @@ func (s *Server) handleStorageBind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	imgPath, err := storage.BindExternalDisk(s.cfg, req.Identifier, req.MountPoint, req.SizeGB)
+	imgPath, err := storage.BindExternalDiskContext(r.Context(), s.cfg, req.Identifier, req.MountPoint, req.SizeGB)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -556,6 +993,11 @@ func (s *Server) handleStorageBind(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStorageUnbind(w http.ResponseWriter, r *http.Request) {
+	if !s.beginStorageOperation(w) {
+		return
+	}
+	defer s.endStorageOperation()
+
 	if err := storage.UnbindExternalDisk(s.cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -569,6 +1011,11 @@ func (s *Server) handleStorageUnbind(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStorageBindSecondary(w http.ResponseWriter, r *http.Request) {
+	if !s.beginStorageOperation(w) {
+		return
+	}
+	defer s.endStorageOperation()
+
 	var req struct {
 		DiskID      string `json:"diskId"`
 		MountPoint  string `json:"mountPoint"`
@@ -579,37 +1026,57 @@ func (s *Server) handleStorageBindSecondary(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	previousConfig, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取当前存储配置失败")
+		return
+	}
 
-	res, err := storage.BindSecondaryDisk(s.cfg, req.DiskID, req.MountPoint, req.TargetDir, req.GuestTarget, s.projectRoot, s.cfg.VM.Name)
+	res, err := storage.BindSecondaryDiskContext(r.Context(), s.cfg, req.DiskID, req.MountPoint, req.TargetDir, req.GuestTarget, s.projectRoot, s.vmMgr.InstanceName())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// Also regenerate lima config
-	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
-	home, _ := os.UserHomeDir()
-	outputPath := filepath.Join(home, ".macnas", "macnas.yaml")
-	_ = s.vmMgr.GenerateConfigFile(tmplPath, outputPath)
+	if err := s.regenerateVMConfig(); err != nil {
+		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
+			log.Printf("[MacNAS Storage] 回滚第二存储卷配置失败: %v", restoreErr)
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
+		return
+	}
 	s.vmMgr.SetConfigDirty(true)
-	go s.vmMgr.SyncMounts(context.Background())
+	s.scheduleMountSync()
 
 	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleStorageUnbindSecondary(w http.ResponseWriter, r *http.Request) {
-	err := storage.UnbindSecondaryDisk(s.cfg, s.projectRoot, s.cfg.VM.Name)
+	if !s.beginStorageOperation(w) {
+		return
+	}
+	defer s.endStorageOperation()
+
+	previousConfig, snapshotErr := config.Snapshot(s.cfg)
+	if snapshotErr != nil {
+		writeError(w, http.StatusInternalServerError, "读取当前存储配置失败")
+		return
+	}
+	err := storage.UnbindSecondaryDisk(s.cfg, s.projectRoot, s.vmMgr.InstanceName())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
-	home, _ := os.UserHomeDir()
-	outputPath := filepath.Join(home, ".macnas", "macnas.yaml")
-	_ = s.vmMgr.GenerateConfigFile(tmplPath, outputPath)
+	if err := s.regenerateVMConfig(); err != nil {
+		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
+			log.Printf("[MacNAS Storage] 回滚第二存储卷配置失败: %v", restoreErr)
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
+		return
+	}
 	s.vmMgr.SetConfigDirty(true)
-	go s.vmMgr.SyncMounts(context.Background())
+	s.scheduleMountSync()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
@@ -627,9 +1094,19 @@ func (s *Server) handleStorageMountsList(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleStorageMountsAdd(w http.ResponseWriter, r *http.Request) {
+	if !s.beginStorageOperation(w) {
+		return
+	}
+	defer s.endStorageOperation()
+
 	var mount config.LocalMount
 	if err := json.NewDecoder(r.Body).Decode(&mount); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	previousConfig, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取当前存储配置失败")
 		return
 	}
 
@@ -638,13 +1115,16 @@ func (s *Server) handleStorageMountsAdd(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cfgDir, _ := config.ConfigDir()
-	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
-	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
-	_ = s.vmMgr.GenerateConfigFile(tmplPath, renderedYAML)
+	if err := s.regenerateVMConfig(); err != nil {
+		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
+			log.Printf("[MacNAS Storage] 回滚直通目录配置失败: %v", restoreErr)
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
+		return
+	}
 
 	s.vmMgr.SetConfigDirty(true)
-	go s.vmMgr.SyncMounts(context.Background())
+	s.scheduleMountSync()
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
@@ -656,20 +1136,33 @@ func (s *Server) handleStorageMountsAdd(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleStorageMountsToggle(w http.ResponseWriter, r *http.Request) {
+	if !s.beginStorageOperation(w) {
+		return
+	}
+	defer s.endStorageOperation()
+
 	id := r.PathValue("id")
+	previousConfig, snapshotErr := config.Snapshot(s.cfg)
+	if snapshotErr != nil {
+		writeError(w, http.StatusInternalServerError, "读取当前存储配置失败")
+		return
+	}
 	enabled, err := storage.ToggleLocalMount(s.cfg, id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
-	cfgDir, _ := config.ConfigDir()
-	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
-	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
-	_ = s.vmMgr.GenerateConfigFile(tmplPath, renderedYAML)
+	if err := s.regenerateVMConfig(); err != nil {
+		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
+			log.Printf("[MacNAS Storage] 回滚直通目录配置失败: %v", restoreErr)
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
+		return
+	}
 
 	s.vmMgr.SetConfigDirty(true)
-	go s.vmMgr.SyncMounts(context.Background())
+	s.scheduleMountSync()
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	msg := "已开启该直通目录，重启虚拟机后生效"
 	if !enabled {
@@ -686,19 +1179,32 @@ func (s *Server) handleStorageMountsToggle(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleStorageMountsDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.beginStorageOperation(w) {
+		return
+	}
+	defer s.endStorageOperation()
+
 	id := r.PathValue("id")
+	previousConfig, snapshotErr := config.Snapshot(s.cfg)
+	if snapshotErr != nil {
+		writeError(w, http.StatusInternalServerError, "读取当前存储配置失败")
+		return
+	}
 	if err := storage.DeleteLocalMount(s.cfg, id); err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
-	cfgDir, _ := config.ConfigDir()
-	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
-	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
-	_ = s.vmMgr.GenerateConfigFile(tmplPath, renderedYAML)
+	if err := s.regenerateVMConfig(); err != nil {
+		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
+			log.Printf("[MacNAS Storage] 回滚直通目录配置失败: %v", restoreErr)
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
+		return
+	}
 
 	s.vmMgr.SetConfigDirty(true)
-	go s.vmMgr.SyncMounts(context.Background())
+	s.scheduleMountSync()
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
@@ -710,7 +1216,17 @@ func (s *Server) handleStorageMountsDelete(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleStorageMountsWritable(w http.ResponseWriter, r *http.Request) {
+	if !s.beginStorageOperation(w) {
+		return
+	}
+	defer s.endStorageOperation()
+
 	id := r.PathValue("id")
+	previousConfig, snapshotErr := config.Snapshot(s.cfg)
+	if snapshotErr != nil {
+		writeError(w, http.StatusInternalServerError, "读取当前存储配置失败")
+		return
+	}
 	var req struct {
 		Writable bool `json:"writable"`
 	}
@@ -731,22 +1247,36 @@ func (s *Server) handleStorageMountsWritable(w http.ResponseWriter, r *http.Requ
 		mode = "rw"
 	}
 	var target string
-	for _, m := range s.cfg.Storage.LocalMounts {
+	currentConfig, configErr := config.Snapshot(s.cfg)
+	if configErr != nil {
+		writeError(w, http.StatusInternalServerError, "读取当前存储配置失败")
+		return
+	}
+	for _, m := range currentConfig.Storage.LocalMounts {
 		if m.ID == id {
 			target = m.GuestTarget
 			break
 		}
 	}
-	remountCmd := fmt.Sprintf("sudo mount -o remount,%s /mnt/macnas-mounts/%s 2>/dev/null || true; sudo mount -o remount,%s /data/%s 2>/dev/null || true", mode, id, mode, target)
-	_, _ = s.vmMgr.Exec(r.Context(), "bash", "-c", remountCmd)
+	if out, remountErr := s.vmMgr.Exec(r.Context(), "sudo", "mount", "-o", "remount,"+mode, "/mnt/macnas-mounts/"+id); remountErr != nil {
+		log.Printf("[MacNAS Storage] 直通目录 remount 未立即生效: %s (%v)", out, remountErr)
+	}
+	if target != "" {
+		if out, remountErr := s.vmMgr.Exec(r.Context(), "sudo", "mount", "-o", "remount,"+mode, "/data/"+target); remountErr != nil {
+			log.Printf("[MacNAS Storage] 数据目录 remount 未立即生效: %s (%v)", out, remountErr)
+		}
+	}
 
-	cfgDir, _ := config.ConfigDir()
-	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
-	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
-	_ = s.vmMgr.GenerateConfigFile(tmplPath, renderedYAML)
+	if err := s.regenerateVMConfig(); err != nil {
+		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
+			log.Printf("[MacNAS Storage] 回滚直通目录配置失败: %v", restoreErr)
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
+		return
+	}
 
 	s.vmMgr.SetConfigDirty(true)
-	go s.vmMgr.SyncMounts(context.Background())
+	s.scheduleMountSync()
 
 	configured, recommended := storage.ListLocalMounts(s.cfg)
 	msg := "已切换为只读保护模式，请重启虚拟机以完全同步权限"
@@ -792,6 +1322,10 @@ func (s *Server) handleDockerContainerAction(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 
 	var err error
 	switch req.Action {
@@ -816,6 +1350,10 @@ func (s *Server) handleDockerContainerAction(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleDockerRemoveContainer(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	force := r.URL.Query().Get("force") == "true"
 	if err := s.dockerClient.RemoveContainer(r.Context(), id, force); err != nil {
@@ -826,6 +1364,10 @@ func (s *Server) handleDockerRemoveContainer(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleDockerStart(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	if err := s.dockerClient.StartContainer(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -835,6 +1377,10 @@ func (s *Server) handleDockerStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerStop(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	if err := s.dockerClient.StopContainer(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -844,6 +1390,10 @@ func (s *Server) handleDockerStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerRestart(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	if err := s.dockerClient.RestartContainer(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -855,9 +1405,9 @@ func (s *Server) handleDockerRestart(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDockerLogs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	tailStr := r.URL.Query().Get("tail")
-	tail := 100
+	tail := docker.NormalizeLogTail(0)
 	if n, err := strconv.Atoi(tailStr); err == nil && n > 0 {
-		tail = n
+		tail = docker.NormalizeLogTail(n)
 	}
 	logs, err := s.dockerClient.GetLogs(r.Context(), id, tail)
 	if err != nil {
@@ -885,8 +1435,12 @@ func (s *Server) handleDockerPullImage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "镜像名称不能为空")
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 
-	var buf bytes.Buffer
+	var buf cappedBuffer
 	if err := s.dockerClient.PullImage(r.Context(), req.Image, &buf); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -911,24 +1465,34 @@ func (s *Server) handleDockerPullImageStream(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "镜像名称不能为空", http.StatusBadRequest)
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	flusher.Flush()
 
 	sw := &appSSEWriter{w: w, flusher: flusher}
 	err := s.dockerClient.PullImage(r.Context(), req.Image, sw)
 	if err != nil {
-		fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+		log.Printf("[MacNAS] Docker image pull stream failed: %v", err)
+		_ = writeSSEEvent(w, flusher, "error", map[string]string{"error": "镜像拉取失败"})
 	} else {
-		fmt.Fprintf(w, "event: done\ndata: {\"status\":\"success\",\"image\":\"%s\"}\n\n", req.Image)
+		_ = writeSSEEvent(w, flusher, "done", map[string]string{
+			"status": "success",
+			"image":  strings.TrimSpace(req.Image),
+		})
 	}
-	flusher.Flush()
 }
 
 func (s *Server) handleDockerRemoveImage(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	force := r.URL.Query().Get("force") == "true"
 	if err := s.dockerClient.RemoveImage(r.Context(), id, force); err != nil {
@@ -939,6 +1503,10 @@ func (s *Server) handleDockerRemoveImage(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleDockerPruneImages(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	out, err := s.dockerClient.PruneImages(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -982,8 +1550,12 @@ func (s *Server) handleDockerComposeDeploy(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 
-	var buf bytes.Buffer
+	var buf cappedBuffer
 	if err := s.dockerClient.DeployCompose(r.Context(), req.Name, req.YAML, &buf); err != nil {
 		detail := buf.String()
 		if detail != "" {
@@ -1014,21 +1586,27 @@ func (s *Server) handleDockerComposeDeployStream(w http.ResponseWriter, r *http.
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	flusher.Flush()
 
 	sw := &appSSEWriter{w: w, flusher: flusher}
 	err := s.dockerClient.DeployCompose(r.Context(), req.Name, req.YAML, sw)
 	if err != nil {
-		fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+		log.Printf("[MacNAS] Compose deploy stream failed: %v", err)
+		_ = writeSSEEvent(w, flusher, "error", map[string]string{"error": "Compose 部署失败"})
 	} else {
-		fmt.Fprintf(w, "event: done\ndata: {\"status\":\"success\",\"name\":\"%s\"}\n\n", req.Name)
+		_ = writeSSEEvent(w, flusher, "done", map[string]string{
+			"status": "success",
+			"name":   strings.TrimSpace(req.Name),
+		})
 	}
-	flusher.Flush()
 }
 
 func (s *Server) handleDockerComposeAction(w http.ResponseWriter, r *http.Request) {
@@ -1040,8 +1618,12 @@ func (s *Server) handleDockerComposeAction(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 
-	var buf bytes.Buffer
+	var buf cappedBuffer
 	if err := s.dockerClient.ComposeAction(r.Context(), name, req.Action, &buf); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1053,8 +1635,16 @@ func (s *Server) handleDockerComposeAction(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleDockerComposeDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	name := r.PathValue("name")
 	deleteVolumes := r.URL.Query().Get("volumes") == "true"
+	if deleteVolumes && r.URL.Query().Get("confirm") != "DELETE_DATA" {
+		writeError(w, http.StatusBadRequest, "删除 Compose 数据卷需要显式确认")
+		return
+	}
 	if err := s.dockerClient.DeleteComposeProject(r.Context(), name, deleteVolumes); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1089,6 +1679,10 @@ func (s *Server) handleDockerSetMirrors(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	if err := s.dockerClient.SetRegistryMirrors(r.Context(), req.Mirrors); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1113,6 +1707,10 @@ func (s *Server) handleAppsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	if err := s.appMgr.Install(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1122,20 +1720,104 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 }
 
 type appSSEWriter struct {
-	w       http.ResponseWriter
-	flusher http.Flusher
+	mu        sync.Mutex
+	w         http.ResponseWriter
+	flusher   http.Flusher
+	bytesSent int64
+	truncated bool
 }
 
+const maxSSEOutputBytes int64 = 4 << 20
+
 func (sw *appSSEWriter) Write(p []byte) (n int, err error) {
-	lines := strings.Split(string(p), "\n")
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+
+	if sw.bytesSent >= maxSSEOutputBytes {
+		if !sw.truncated {
+			sw.truncated = true
+			if _, err := fmt.Fprint(sw.w, "data: [输出已截断，日志超过 4 MiB 上限]\n\n"); err != nil {
+				return 0, err
+			}
+			sw.flusher.Flush()
+		}
+		return len(p), nil
+	}
+
+	visible := p
+	if remaining := maxSSEOutputBytes - sw.bytesSent; int64(len(visible)) > remaining {
+		visible = visible[:remaining]
+		sw.truncated = true
+	}
+	sw.bytesSent += int64(len(visible))
+	lines := strings.Split(string(visible), "\n")
 	for _, line := range lines {
 		trimmed := strings.TrimRight(line, "\r")
 		if trimmed != "" {
-			fmt.Fprintf(sw.w, "data: %s\n\n", trimmed)
+			if _, err := fmt.Fprintf(sw.w, "data: %s\n\n", trimmed); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if sw.truncated && int64(len(visible)) < int64(len(p)) {
+		if _, err := fmt.Fprint(sw.w, "data: [输出已截断，日志超过 4 MiB 上限]\n\n"); err != nil {
+			return 0, err
 		}
 	}
 	sw.flusher.Flush()
 	return len(p), nil
+}
+
+const maxBufferedCommandOutputBytes = 4 << 20
+
+type cappedBuffer struct {
+	mu        sync.Mutex
+	buf       bytes.Buffer
+	truncated bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	remaining := maxBufferedCommandOutputBytes - b.buf.Len()
+	if remaining > 0 {
+		if len(p) <= remaining {
+			_, _ = b.buf.Write(p)
+		} else {
+			_, _ = b.buf.Write(p[:remaining])
+			b.truncated = true
+		}
+	} else {
+		b.truncated = true
+	}
+	return len(p), nil
+}
+
+func (b *cappedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	result := b.buf.String()
+	if b.truncated {
+		result += "\n[输出已截断，日志超过 4 MiB 上限]\n"
+	}
+	return result
+}
+
+// writeSSEEvent serializes event payloads as JSON so command output or user
+// input cannot break the SSE framing with newlines or unescaped quotes.
+func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, payload interface{}) error {
+	if event == "" || strings.ContainsAny(event, "\r\n") {
+		return fmt.Errorf("invalid SSE event name")
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 func (s *Server) handleAppInstallStream(w http.ResponseWriter, r *http.Request) {
@@ -1144,6 +1826,10 @@ func (s *Server) handleAppInstallStream(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 
 	id := r.PathValue("id")
 	portStr := r.URL.Query().Get("port")
@@ -1155,7 +1841,6 @@ func (s *Server) handleAppInstallStream(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	flusher.Flush()
 
 	sw := &appSSEWriter{w: w, flusher: flusher}
@@ -1163,11 +1848,11 @@ func (s *Server) handleAppInstallStream(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	err := s.appMgr.InstallStream(ctx, id, port, sw)
 	if err != nil {
-		fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+		log.Printf("[MacNAS] app install stream failed for %q: %v", id, err)
+		_ = writeSSEEvent(w, flusher, "error", map[string]string{"error": "应用安装失败"})
 	} else {
-		fmt.Fprintf(w, "event: done\ndata: {\"status\":\"success\",\"id\":\"%s\"}\n\n", id)
+		_ = writeSSEEvent(w, flusher, "done", map[string]string{"status": "success", "id": id})
 	}
-	flusher.Flush()
 }
 
 func (s *Server) handleAppGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -1186,6 +1871,10 @@ func (s *Server) handleAppInstallCustomStream(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 
 	id := r.PathValue("id")
 
@@ -1198,7 +1887,6 @@ func (s *Server) handleAppInstallCustomStream(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	flusher.Flush()
 
 	sw := &appSSEWriter{w: w, flusher: flusher}
@@ -1206,11 +1894,11 @@ func (s *Server) handleAppInstallCustomStream(w http.ResponseWriter, r *http.Req
 	ctx := r.Context()
 	err := s.appMgr.InstallStreamCustom(ctx, id, cfg, sw)
 	if err != nil {
-		fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
+		log.Printf("[MacNAS] custom app install stream failed for %q: %v", id, err)
+		_ = writeSSEEvent(w, flusher, "error", map[string]string{"error": "应用安装失败"})
 	} else {
-		fmt.Fprintf(w, "event: done\ndata: {\"status\":\"success\",\"id\":\"%s\"}\n\n", id)
+		_ = writeSSEEvent(w, flusher, "done", map[string]string{"status": "success", "id": id})
 	}
-	flusher.Flush()
 }
 
 func (s *Server) handleAppCustomAdd(w http.ResponseWriter, r *http.Request) {
@@ -1219,6 +1907,10 @@ func (s *Server) handleAppCustomAdd(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 
 	meta, err := s.appMgr.AddCustomApp(req)
 	if err != nil {
@@ -1229,6 +1921,10 @@ func (s *Server) handleAppCustomAdd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAppCustomDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	if err := s.appMgr.DeleteCustomApp(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1238,6 +1934,10 @@ func (s *Server) handleAppCustomDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAppStoreSync(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	count, err := s.appMgr.SyncCommunityStore(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1250,6 +1950,10 @@ func (s *Server) handleAppStoreSync(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	if err := s.appMgr.Start(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1259,6 +1963,10 @@ func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAppStop(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	if err := s.appMgr.Stop(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1268,6 +1976,10 @@ func (s *Server) handleAppStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAppRestart(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	if err := s.appMgr.Restart(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1277,6 +1989,10 @@ func (s *Server) handleAppRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAppUninstall(w http.ResponseWriter, r *http.Request) {
+	if !s.beginDockerOperation(w) {
+		return
+	}
+	defer s.endDockerOperation()
 	id := r.PathValue("id")
 	if err := s.appMgr.Uninstall(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -1288,9 +2004,9 @@ func (s *Server) handleAppUninstall(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAppLogs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	tailStr := r.URL.Query().Get("tail")
-	tail := 100
+	tail := docker.NormalizeLogTail(0)
 	if n, err := strconv.Atoi(tailStr); err == nil && n > 0 {
-		tail = n
+		tail = docker.NormalizeLogTail(n)
 	}
 	logs, err := s.appMgr.GetLogs(r.Context(), id, tail)
 	if err != nil {
@@ -1410,11 +2126,13 @@ func (s *Server) handleWSLogs(w http.ResponseWriter, r *http.Request) {
 	appOrContainer := r.URL.Query().Get("target") // e.g. "jellyfin" or container ID
 	isApp := r.URL.Query().Get("type") == "app"
 
+	upgrader := s.websocketUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
+	conn.SetReadLimit(64 << 10)
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -1437,6 +2155,7 @@ func (s *Server) handleWSLogs(w http.ResponseWriter, r *http.Request) {
 					"timestamp": time.Now().Format("15:04:05"),
 					"logs":      logs,
 				}
+				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				if err := conn.WriteJSON(msg); err != nil {
 					return
 				}
@@ -1447,20 +2166,29 @@ func (s *Server) handleWSLogs(w http.ResponseWriter, r *http.Request) {
 
 // VM Hardware Specs Configuration Handlers
 func (s *Server) handleVMConfigGet(w http.ResponseWriter, r *http.Request) {
+	cfgSnapshot, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取虚拟机配置失败")
+		return
+	}
 	totalMemGB := 16
 	if vMem, err := mem.VirtualMemory(); err == nil && vMem.Total > 0 {
 		totalMemGB = int(vMem.Total / 1024 / 1024 / 1024)
 	}
 
-	vmStat, _ := s.vmMgr.GetStatus()
+	vmStat, _ := s.vmMgr.GetStatusContext(r.Context())
+	vmStatus := "unknown"
+	if vmStat != nil {
+		vmStatus = vmStat.Status
+	}
 
 	resp := map[string]interface{}{
-		"cpus":               s.cfg.VM.CPUs,
-		"memory":             s.cfg.VM.Memory,
-		"diskSize":           s.cfg.VM.DiskSize,
+		"cpus":               cfgSnapshot.VM.CPUs,
+		"memory":             cfgSnapshot.VM.Memory,
+		"diskSize":           cfgSnapshot.VM.DiskSize,
 		"hostCpus":           runtime.NumCPU(),
 		"hostMemoryGB":       totalMemGB,
-		"vmStatus":           vmStat.Status,
+		"vmStatus":           vmStatus,
 		"isDynamicMemory":    true,
 		"balloonDescription": "基于 Apple Virtualization.framework (vz) 原生 Virtio-Balloon 气球驱动。配置的内存为 VM 最大使用配额，系统按需动态分水，闲置内存由 macOS 自动回收。",
 		"diskDescription":    "系统根盘用于存储 Ubuntu 核心系统与 Docker 运行层。支持安全在线/重启扩容（只增不减以保障分区文件完整性）。",
@@ -1480,6 +2208,11 @@ func (s *Server) handleVMConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "请求参数解析失败")
 		return
 	}
+	cfgSnapshot, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取虚拟机配置失败")
+		return
+	}
 
 	if req.CPUs < 1 || req.CPUs > runtime.NumCPU() {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("CPU 核心数必须在 1 到 %d 之间", runtime.NumCPU()))
@@ -1491,8 +2224,8 @@ func (s *Server) handleVMConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.DiskSize < s.cfg.VM.DiskSize {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("系统盘容量只支持扩容（当前为 %d GiB，不能缩减）", s.cfg.VM.DiskSize))
+	if req.DiskSize < cfgSnapshot.VM.DiskSize {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("系统盘容量只支持扩容（当前为 %d GiB，不能缩减）", cfgSnapshot.VM.DiskSize))
 		return
 	}
 
@@ -1500,14 +2233,19 @@ func (s *Server) handleVMConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	updatedConfig, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取更新后的虚拟机配置失败")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
 		"requiresRestart": true,
 		"message":         "虚拟机硬件规格已更新！请重启虚拟机以加载新配置生效。",
-		"cpus":            s.cfg.VM.CPUs,
-		"memory":          s.cfg.VM.Memory,
-		"diskSize":        s.cfg.VM.DiskSize,
+		"cpus":            updatedConfig.VM.CPUs,
+		"memory":          updatedConfig.VM.Memory,
+		"diskSize":        updatedConfig.VM.DiskSize,
 	})
 }
 
@@ -1521,7 +2259,7 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			r.URL.RawQuery = q.Encode()
 		}
 	}
-	terminal.HandleTerminalWS(w, r, s.cfg.VM.Name)
+	terminal.HandleTerminalWS(w, r, s.vmMgr.InstanceName(), s.allowedOrigins)
 }
 
 // File System Handlers
@@ -1531,7 +2269,7 @@ func (s *Server) handleTerminalFilesList(w http.ResponseWriter, r *http.Request)
 		targetPath = "/data"
 	}
 
-	items, err := terminal.ListFiles(s.cfg.VM.Name, targetPath)
+	items, err := terminal.ListFilesContext(r.Context(), s.vmMgr.InstanceName(), targetPath)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1551,7 +2289,7 @@ func (s *Server) handleTerminalFileRead(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	content, err := terminal.ReadFile(s.cfg.VM.Name, filePath)
+	content, err := terminal.ReadFileContext(r.Context(), s.vmMgr.InstanceName(), filePath)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1580,7 +2318,7 @@ func (s *Server) handleTerminalFileWrite(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := terminal.WriteFile(s.cfg.VM.Name, req.Path, req.Content); err != nil {
+	if err := terminal.WriteFileContext(r.Context(), s.vmMgr.InstanceName(), req.Path, req.Content); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1603,7 +2341,7 @@ func (s *Server) handleTerminalFileMkdir(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := terminal.CreateDir(s.cfg.VM.Name, req.Path); err != nil {
+	if err := terminal.CreateDirContext(r.Context(), s.vmMgr.InstanceName(), req.Path); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1612,13 +2350,35 @@ func (s *Server) handleTerminalFileMkdir(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleTerminalFileUpload(w http.ResponseWriter, r *http.Request) {
-	targetDir := r.FormValue("targetDir")
+	const maxUploadSize int64 = 10 << 30
+	if r.ContentLength > maxUploadSize {
+		writeError(w, http.StatusRequestEntityTooLarge, "上传文件不能超过 10 GiB")
+		return
+	}
+	if s.uploadSlots != nil {
+		select {
+		case s.uploadSlots <- struct{}{}:
+			defer func() { <-s.uploadSlots }()
+		default:
+			writeError(w, http.StatusTooManyRequests, "当前已有多个文件在上传，请稍后重试")
+			return
+		}
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	// Keep the destination outside the multipart body so the upload can be
+	// streamed directly to the VM without ParseMultipartForm spooling it to
+	// the host's temporary directory.
+	targetDir := r.URL.Query().Get("targetDir")
 	if targetDir == "" {
 		targetDir = "/data"
 	}
 
-	if err := terminal.UploadFile(w, r, s.cfg.VM.Name, targetDir); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	if err := terminal.UploadFile(w, r, s.vmMgr.InstanceName(), targetDir); err != nil {
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "request body too large") {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 
@@ -1632,7 +2392,7 @@ func (s *Server) handleTerminalFileDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := terminal.DeletePath(s.cfg.VM.Name, targetPath); err != nil {
+	if err := terminal.DeletePathContext(r.Context(), s.vmMgr.InstanceName(), targetPath); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1647,7 +2407,7 @@ func (s *Server) handleTerminalFileDownload(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	terminal.DownloadFile(w, r, s.cfg.VM.Name, targetPath)
+	terminal.DownloadFile(w, r, s.vmMgr.InstanceName(), targetPath)
 }
 
 func (s *Server) handleTerminalFileRename(w http.ResponseWriter, r *http.Request) {
@@ -1666,7 +2426,7 @@ func (s *Server) handleTerminalFileRename(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := terminal.RenamePath(s.cfg.VM.Name, req.OldPath, req.NewPath); err != nil {
+	if err := terminal.RenamePathContext(r.Context(), s.vmMgr.InstanceName(), req.OldPath, req.NewPath); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1681,7 +2441,7 @@ func (s *Server) handleTerminalFileRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	terminal.StreamMediaFile(w, r, s.cfg.VM.Name, targetPath)
+	terminal.StreamMediaFile(w, r, s.vmMgr.InstanceName(), targetPath)
 }
 
 func (s *Server) handleTerminalFilesCopy(w http.ResponseWriter, r *http.Request) {
@@ -1698,7 +2458,7 @@ func (s *Server) handleTerminalFilesCopy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := terminal.CopyPaths(s.cfg.VM.Name, req.SrcPaths, req.DestDir); err != nil {
+	if err := terminal.CopyPathsContext(r.Context(), s.vmMgr.InstanceName(), req.SrcPaths, req.DestDir); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1722,7 +2482,7 @@ func (s *Server) handleTerminalFilesMove(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := terminal.MovePaths(s.cfg.VM.Name, req.SrcPaths, req.DestDir); err != nil {
+	if err := terminal.MovePathsContext(r.Context(), s.vmMgr.InstanceName(), req.SrcPaths, req.DestDir); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1745,7 +2505,7 @@ func (s *Server) handleTerminalFilesTrash(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := terminal.MoveToTrash(s.cfg.VM.Name, req.Paths); err != nil {
+	if err := terminal.MoveToTrashContext(r.Context(), s.vmMgr.InstanceName(), req.Paths); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1756,7 +2516,7 @@ func (s *Server) handleTerminalFilesTrash(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleTerminalFilesTrashList(w http.ResponseWriter, r *http.Request) {
-	items, err := terminal.ListTrash(s.cfg.VM.Name)
+	items, err := terminal.ListTrashContext(r.Context(), s.vmMgr.InstanceName())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1780,7 +2540,7 @@ func (s *Server) handleTerminalFilesRestore(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := terminal.RestoreTrash(s.cfg.VM.Name, req.IDs); err != nil {
+	if err := terminal.RestoreTrashContext(r.Context(), s.vmMgr.InstanceName(), req.IDs); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1803,7 +2563,7 @@ func (s *Server) handleTerminalFilesTrashDelete(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	count, err := terminal.DeleteTrashItems(s.cfg.VM.Name, req.IDs)
+	count, err := terminal.DeleteTrashItemsContext(r.Context(), s.vmMgr.InstanceName(), req.IDs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1816,7 +2576,7 @@ func (s *Server) handleTerminalFilesTrashDelete(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) handleTerminalFilesEmptyTrash(w http.ResponseWriter, r *http.Request) {
-	count, err := terminal.EmptyTrash(s.cfg.VM.Name)
+	count, err := terminal.EmptyTrashContext(r.Context(), s.vmMgr.InstanceName())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1995,7 +2755,10 @@ func (s *Server) handleGenerateSSHRootKey(w http.ResponseWriter, r *http.Request
 	var req struct {
 		Comment string `json:"comment"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析失败")
+		return
+	}
 
 	res, err := s.sshMgr.GenerateRootKey(r.Context(), req.Comment)
 	if err != nil {
@@ -2059,6 +2822,10 @@ func (s *Server) handleClearSSHAuthorizedKeys(w http.ResponseWriter, r *http.Req
 // -------------------------------------------------------------
 
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if s.authMgr == nil {
+		writeError(w, http.StatusServiceUnavailable, "认证服务暂不可用")
+		return
+	}
 	var req struct {
 		Username   string `json:"username"`
 		Password   string `json:"password"`
@@ -2069,24 +2836,69 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, user, err := s.authMgr.Login(req.Username, req.Password, req.RememberMe)
+	token, user, err := s.authMgr.LoginFrom(req.Username, req.Password, req.RememberMe, requestIP(r))
 	if err != nil {
+		if errors.Is(err, auth.ErrTooManyLoginAttempts) {
+			w.Header().Set("Retry-After", "60")
+			writeError(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 
+	setSessionCookie(w, r, token, req.RememberMe)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"token": token,
-		"user":  user,
+		"user": user,
+	})
+}
+
+func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	if s.authMgr == nil {
+		writeError(w, http.StatusServiceUnavailable, "认证服务暂不可用")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"setupRequired": s.authMgr.NeedsSetup()})
+}
+
+func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
+	if !isLoopbackRequest(r) {
+		writeError(w, http.StatusForbidden, "首次管理员初始化仅允许在 MacNAS 主机本机执行")
+		return
+	}
+	if s.authMgr == nil {
+		writeError(w, http.StatusServiceUnavailable, "认证服务暂不可用")
+		return
+	}
+	var req auth.CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求数据格式错误")
+		return
+	}
+	req.Role = "admin"
+	user, err := s.authMgr.CreateInitialAdmin(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"status": "ok",
+		"user":   user,
 	})
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if token == "" {
+		if sessionCookie, err := r.Cookie(sessionCookieName); err == nil {
+			token = sessionCookie.Value
+		}
+	}
 	if token != "" && s.authMgr != nil {
 		s.authMgr.Logout(token)
 	}
+	clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -2213,5 +3025,3 @@ func (s *Server) handleAuthDeleteUser(w http.ResponseWriter, r *http.Request) {
 		"message": "用户已成功删除",
 	})
 }
-
-

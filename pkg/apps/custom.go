@@ -2,12 +2,16 @@ package apps
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"gopkg.in/yaml.v3"
 )
 
 type CustomAppRecord struct {
@@ -20,9 +24,25 @@ type CustomAppManager struct {
 	storageDir string
 }
 
+const maxCustomRecordBytes = maxComposeYAMLBytes + 1<<20
+
+var generatedAppIDSanitizer = regexp.MustCompile(`[^a-z0-9_-]`)
+
+func validateCustomAppText(field, value string, maxBytes int, required bool) error {
+	value = strings.TrimSpace(value)
+	if required && value == "" {
+		return fmt.Errorf("%s 不能为空", field)
+	}
+	if len([]byte(value)) > maxBytes || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return fmt.Errorf("%s 过长或包含控制字符", field)
+	}
+	return nil
+}
+
 func NewCustomAppManager(dataDir string) *CustomAppManager {
 	dir := filepath.Join(dataDir, "custom_apps")
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0700)
+	_ = os.Chmod(dir, 0700)
 	return &CustomAppManager{
 		storageDir: dir,
 	}
@@ -35,44 +55,105 @@ func (cm *CustomAppManager) List() ([]CustomAppRecord, error) {
 	}
 
 	var results []CustomAppRecord
+	var listErrors []error
 	for _, f := range files {
-		if !f.IsDir() && strings.HasSuffix(f.Name(), ".json") {
-			path := filepath.Join(cm.storageDir, f.Name())
-			data, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-			var rec CustomAppRecord
-			if err := json.Unmarshal(data, &rec); err == nil {
-				rec.Metadata.Source = "custom"
-				results = append(results, rec)
-			}
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") || strings.HasPrefix(f.Name(), ".") {
+			continue
 		}
+		filePath := filepath.Join(cm.storageDir, f.Name())
+		info, err := f.Info()
+		if err != nil {
+			listErrors = append(listErrors, fmt.Errorf("读取自定义应用文件 %s 元数据失败: %w", f.Name(), err))
+			continue
+		}
+		if f.Type()&os.ModeSymlink != 0 || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			listErrors = append(listErrors, fmt.Errorf("自定义应用文件 %s 不是普通文件", f.Name()))
+			continue
+		}
+		if info.Size() < 0 || info.Size() > maxCustomRecordBytes {
+			listErrors = append(listErrors, fmt.Errorf("自定义应用文件 %s 超过大小限制", f.Name()))
+			continue
+		}
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			listErrors = append(listErrors, fmt.Errorf("读取自定义应用文件 %s 失败: %w", f.Name(), err))
+			continue
+		}
+		var rec CustomAppRecord
+		if err := json.Unmarshal(data, &rec); err != nil {
+			listErrors = append(listErrors, fmt.Errorf("解析自定义应用文件 %s 失败: %w", f.Name(), err))
+			continue
+		}
+		if !validAppID.MatchString(rec.Metadata.ID) || len([]byte(rec.YAML)) > maxComposeYAMLBytes {
+			listErrors = append(listErrors, fmt.Errorf("自定义应用文件 %s 内容不合规", f.Name()))
+			continue
+		}
+		rec.Metadata.Source = "custom"
+		results = append(results, rec)
 	}
-	return results, nil
+	return results, errors.Join(listErrors...)
 }
 
 func (cm *CustomAppManager) Save(input CustomAppInput) (*AppMetadata, error) {
-	id := strings.ToLower(strings.TrimSpace(input.ID))
+	rawID := strings.ToLower(strings.TrimSpace(input.ID))
+	id := rawID
 	if id == "" {
 		// Generate id from name
 		id = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(input.Name), " ", "-"))
+		id = generatedAppIDSanitizer.ReplaceAllString(id, "")
+	} else if !validAppID.MatchString(id) {
+		return nil, fmt.Errorf("应用标识格式无效")
 	}
-	id = regexp.MustCompile(`[^a-z0-9_-]`).ReplaceAllString(id, "")
-	if id == "" {
-		return nil, fmt.Errorf("应用标识 ID 不能为空")
+	if !validAppID.MatchString(id) {
+		return nil, fmt.Errorf("应用标识格式无效")
+	}
+	if err := validateCustomAppText("应用名称", input.Name, 256, true); err != nil {
+		return nil, err
+	}
+	if err := validateCustomAppText("应用描述", input.Description, 2048, false); err != nil {
+		return nil, err
+	}
+	if err := validateCustomAppText("应用分类", input.Category, 128, false); err != nil {
+		return nil, err
+	}
+	if err := validateCustomAppText("应用图标", input.Icon, 128, false); err != nil {
+		return nil, err
+	}
+	if input.Port < 0 || input.Port > 65535 {
+		return nil, fmt.Errorf("应用端口无效: %d", input.Port)
 	}
 
-	if strings.TrimSpace(input.ComposeYAML) == "" {
+	composeYAML := strings.TrimSpace(input.ComposeYAML)
+	if composeYAML == "" {
 		return nil, fmt.Errorf("Docker Compose YAML 内容不能为空")
+	}
+	if len([]byte(composeYAML)) > maxComposeYAMLBytes {
+		return nil, fmt.Errorf("Docker Compose YAML 内容不能超过 8 MB")
+	}
+	var composeDocument struct {
+		Services map[string]yaml.Node `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(composeYAML), &composeDocument); err != nil {
+		return nil, fmt.Errorf("Docker Compose YAML 格式无效: %w", err)
+	}
+	if len(composeDocument.Services) == 0 {
+		return nil, fmt.Errorf("Docker Compose YAML 缺少 services")
 	}
 
 	// Parse ports, volumes, env from yaml if not provided
-	parsedPorts, parsedVolumes, parsedEnv := parseComposeYaml(input.ComposeYAML)
+	parsedPorts, parsedVolumes, parsedEnv := parseComposeYaml(composeYAML)
 
 	mainPort := input.Port
 	if mainPort <= 0 && len(parsedPorts) > 0 {
 		mainPort = parsedPorts[0].HostPort
+	}
+	if mainPort < 0 || mainPort > 65535 {
+		return nil, fmt.Errorf("应用端口无效: %d", mainPort)
+	}
+	for _, port := range parsedPorts {
+		if port.HostPort < 1 || port.HostPort > 65535 || port.ContainerPort < 1 || port.ContainerPort > 65535 {
+			return nil, fmt.Errorf("Compose 端口映射无效")
+		}
 	}
 
 	category := input.Category
@@ -97,12 +178,12 @@ func (cm *CustomAppManager) Save(input CustomAppInput) (*AppMetadata, error) {
 		Volumes:         parsedVolumes,
 		Env:             parsedEnv,
 		Source:          "custom",
-		ComposeTemplate: input.ComposeYAML,
+		ComposeTemplate: composeYAML,
 	}
 
 	rec := CustomAppRecord{
 		Metadata: meta,
-		YAML:     input.ComposeYAML,
+		YAML:     composeYAML,
 	}
 
 	data, err := json.MarshalIndent(rec, "", "  ")
@@ -111,7 +192,31 @@ func (cm *CustomAppManager) Save(input CustomAppInput) (*AppMetadata, error) {
 	}
 
 	filePath := filepath.Join(cm.storageDir, fmt.Sprintf("%s.json", id))
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	tmpFile, err := os.CreateTemp(cm.storageDir, ".custom-app-*.json")
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := tmpFile.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmpFile.Chmod(0600); err != nil {
+		_ = tmpFile.Close()
+		return nil, err
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return nil, err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return nil, err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(filePath, 0600); err != nil {
 		return nil, err
 	}
 
@@ -119,11 +224,19 @@ func (cm *CustomAppManager) Save(input CustomAppInput) (*AppMetadata, error) {
 }
 
 func (cm *CustomAppManager) Delete(id string) error {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if !validAppID.MatchString(id) {
+		return fmt.Errorf("应用标识格式无效")
+	}
 	filePath := filepath.Join(cm.storageDir, fmt.Sprintf("%s.json", id))
 	return os.Remove(filePath)
 }
 
 func (cm *CustomAppManager) Get(id string) (*CustomAppRecord, error) {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if !validAppID.MatchString(id) {
+		return nil, fmt.Errorf("应用标识格式无效")
+	}
 	filePath := filepath.Join(cm.storageDir, fmt.Sprintf("%s.json", id))
 	data, err := os.ReadFile(filePath)
 	if err != nil {

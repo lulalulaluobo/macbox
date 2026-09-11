@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,7 +36,27 @@ type CommunityStoreManager struct {
 	cached    []BuiltinAppDefinition
 }
 
+const maxCommunityCatalogBytes = 16 << 20
+
+func boundedCommunityText(value string, maxBytes int) string {
+	value = strings.TrimSpace(value)
+	if len([]byte(value)) <= maxBytes {
+		return value
+	}
+	runes := []rune(value)
+	end := maxBytes
+	if end > len(runes) {
+		end = len(runes)
+	}
+	for end > 0 && len([]byte(string(runes[:end]))) > maxBytes {
+		end--
+	}
+	return strings.TrimSpace(string(runes[:end]))
+}
+
 func NewCommunityStoreManager(dataDir string) *CommunityStoreManager {
+	_ = os.MkdirAll(dataDir, 0700)
+	_ = os.Chmod(dataDir, 0700)
 	cachePath := filepath.Join(dataDir, "appstore_cache.json")
 	mgr := &CommunityStoreManager{
 		cachePath: cachePath,
@@ -44,7 +65,9 @@ func NewCommunityStoreManager(dataDir string) *CommunityStoreManager {
 	if len(mgr.cached) == 0 {
 		// Populate initial extensive community catalog
 		mgr.cached = GetExtensiveCommunityPresets()
-		_ = mgr.saveCache()
+		if err := mgr.saveCache(); err != nil {
+			log.Printf("[AppStore] failed to save initial catalog cache: %v", err)
+		}
 	}
 	return mgr
 }
@@ -54,6 +77,7 @@ func (sm *CommunityStoreManager) loadCache() {
 	if err != nil {
 		return
 	}
+	_ = os.Chmod(sm.cachePath, 0600)
 	var list []BuiltinAppDefinition
 	if err := json.Unmarshal(data, &list); err == nil && len(list) > 0 {
 		sm.cached = list
@@ -65,13 +89,37 @@ func (sm *CommunityStoreManager) saveCache() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(sm.cachePath, data, 0644)
+	tmpFile, err := os.CreateTemp(filepath.Dir(sm.cachePath), ".appstore_cache-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmpFile.Chmod(0600); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, sm.cachePath); err != nil {
+		return err
+	}
+	return os.Chmod(sm.cachePath, 0600)
 }
 
 func (sm *CommunityStoreManager) GetApps() []BuiltinAppDefinition {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	return sm.cached
+	return append([]BuiltinAppDefinition(nil), sm.cached...)
 }
 
 // Sync fetches the latest community app catalog from fnOS third-party repos & mirrors
@@ -92,13 +140,14 @@ func (sm *CommunityStoreManager) Sync(ctx context.Context) (int, error) {
 		}
 		req.Header.Set("User-Agent", "MacNAS-AppStore/1.0")
 		resp, err := client.Do(req)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			data, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if readErr == nil && len(data) > 0 {
-				fetchedData = data
-				break
-			}
+		if err != nil {
+			continue
+		}
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxCommunityCatalogBytes+1))
+		closeErr := resp.Body.Close()
+		if resp.StatusCode == http.StatusOK && readErr == nil && closeErr == nil && len(data) > 0 && len(data) <= maxCommunityCatalogBytes {
+			fetchedData = data
+			break
 		}
 	}
 
@@ -113,10 +162,14 @@ func (sm *CommunityStoreManager) Sync(ctx context.Context) (int, error) {
 		var fnosResp FNOSAppsResponse
 		if err := json.Unmarshal(fetchedData, &fnosResp); err == nil && len(fnosResp.Apps) > 0 {
 			for _, item := range fnosResp.Apps {
+				item.AppName = boundedCommunityText(item.AppName, 64)
 				if item.AppName == "" {
 					continue
 				}
 				id := strings.ToLower(strings.TrimSpace(item.AppName))
+				if !validAppID.MatchString(id) {
+					continue
+				}
 				// Skip if already in built-in core (e.g. jellyfin, alist)
 				if id == "jellyfin" || id == "filebrowser" || id == "syncthing" || id == "qbittorrent" {
 					continue
@@ -124,21 +177,21 @@ func (sm *CommunityStoreManager) Sync(ctx context.Context) (int, error) {
 
 				cat := mapFNOSCategory(item.Category)
 				port := item.ServicePort
-				if port <= 0 {
+				if port <= 0 || port > 65535 {
 					port = 8080
 				}
 
-				displayName := item.DisplayName
+				displayName := boundedCommunityText(item.DisplayName, 256)
 				if displayName == "" {
 					displayName = item.AppName
 				}
 
-				desc := item.Description
+				desc := boundedCommunityText(item.Description, 2048)
 				if desc == "" {
-					desc = fmt.Sprintf("飞牛社区第三方开源 NAS 应用: %s", displayName)
+					desc = fmt.Sprintf("开源社区精选 NAS 应用: %s", displayName)
 				}
 
-				icon := mapFNOSIcon(item.Category, id)
+				icon := mapFNOSIcon(boundedCommunityText(item.Category, 64), id)
 
 				// Infer docker image
 				imageName := inferDockerImage(id)
@@ -160,7 +213,7 @@ func (sm *CommunityStoreManager) Sync(ctx context.Context) (int, error) {
 					ID:          id,
 					Name:        displayName,
 					Description: desc,
-					Version:     item.Version,
+					Version:     boundedCommunityText(item.Version, 64),
 					Icon:        icon,
 					Category:    cat,
 					Port:        port,
@@ -201,9 +254,16 @@ func (sm *CommunityStoreManager) Sync(ctx context.Context) (int, error) {
 	}
 
 	sm.mu.Lock()
+	previous := sm.cached
 	sm.cached = merged
-	_ = sm.saveCache()
+	saveErr := sm.saveCache()
+	if saveErr != nil {
+		sm.cached = previous
+	}
 	sm.mu.Unlock()
+	if saveErr != nil {
+		return 0, fmt.Errorf("保存应用商店缓存失败: %w", saveErr)
+	}
 
 	return len(merged), nil
 }
@@ -639,7 +699,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
       - /data/appdata/aria2/config:/config
       - /data/downloads:/downloads
     environment:
-      - RPC_SECRET=macnas123
+      - RPC_SECRET=__GENERATED_AT_INSTALL__
       - RPC_PORT=6800
       - LISTEN_PORT=6888
   ariang:
@@ -861,7 +921,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 				Category:    "网络工具",
 				Port:        81,
 				Ports: []AppPort{
-					{HostPort: 81, ContainerPort: 81, Protocol: "tcp", Description: "管理后台端口 (默认: admin@example.com / changeme)"},
+					{HostPort: 81, ContainerPort: 81, Protocol: "tcp", Description: "管理后台端口，请在首次启动后立即完成初始化"},
 					{HostPort: 80, ContainerPort: 80, Protocol: "tcp", Description: "标准 HTTP 80 端口"},
 					{HostPort: 443, ContainerPort: 443, Protocol: "tcp", Description: "标准 HTTPS 443 端口"},
 				},

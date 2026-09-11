@@ -13,11 +13,11 @@ import (
 )
 
 type PowerStatus struct {
-	PreventSleep   bool     `json:"preventSleep"`   // Configured setting
-	Active         bool     `json:"active"`         // Currently running caffeinate process
-	Assertions     []string `json:"assertions"`     // Active macOS power assertions
-	DisplayCanOff  bool     `json:"displayCanOff"`  // Screen allowed to turn off for energy saving
-	Description    string   `json:"description"`    // Human-friendly description
+	PreventSleep  bool     `json:"preventSleep"`  // Configured setting
+	Active        bool     `json:"active"`        // Currently running caffeinate process
+	Assertions    []string `json:"assertions"`    // Active macOS power assertions
+	DisplayCanOff bool     `json:"displayCanOff"` // Screen allowed to turn off for energy saving
+	Description   string   `json:"description"`   // Human-friendly description
 }
 
 type PowerManager struct {
@@ -26,19 +26,11 @@ type PowerManager struct {
 	cmd *exec.Cmd
 }
 
-var globalPowerMgr *PowerManager
-var powerOnce sync.Once
-
 func GetPowerManager(cfg *config.Config) *PowerManager {
-	powerOnce.Do(func() {
-		globalPowerMgr = &PowerManager{cfg: cfg}
-		if cfg.System.PreventSleep {
-			if err := globalPowerMgr.Start(); err != nil {
-				log.Printf("[MacNAS Power] Warning: failed to start caffeinate: %v", err)
-			}
-		}
-	})
-	return globalPowerMgr
+	// Construction is deliberately side-effect free. The process owner must
+	// explicitly call Start and Stop so tests and embedded callers cannot leak a
+	// caffeinate process or share mutable global state.
+	return &PowerManager{cfg: cfg}
 }
 
 // Start launches caffeinate with -s (AC sleep), -i (idle sleep), -m (disk sleep)
@@ -95,19 +87,45 @@ func (pm *PowerManager) IsActive() bool {
 
 // SetPreventSleep updates configuration and applies change
 func (pm *PowerManager) SetPreventSleep(enable bool) error {
-	pm.cfg.System.PreventSleep = enable
-	_ = config.SaveConfig(pm.cfg)
-
-	if enable {
-		return pm.Start()
+	cfgSnapshot, err := config.Snapshot(pm.cfg)
+	if err != nil {
+		return fmt.Errorf("读取防休眠配置失败: %w", err)
 	}
-	return pm.Stop()
+	previous := cfgSnapshot.System.PreventSleep
+	if enable {
+		if err := pm.Start(); err != nil {
+			return err
+		}
+	} else if err := pm.Stop(); err != nil {
+		return err
+	}
+
+	if err := config.Update(pm.cfg, func(updated *config.Config) error {
+		updated.System.PreventSleep = enable
+		return nil
+	}); err != nil {
+		if previous {
+			if restoreErr := pm.Start(); restoreErr != nil {
+				log.Printf("[MacNAS Power] 回滚防休眠进程失败: %v", restoreErr)
+			}
+		} else {
+			if restoreErr := pm.Stop(); restoreErr != nil {
+				log.Printf("[MacNAS Power] 回滚防休眠进程失败: %v", restoreErr)
+			}
+		}
+		return fmt.Errorf("保存防休眠配置失败: %w", err)
+	}
+	return nil
 }
 
 // GetStatus checks active assertions and returns full power status
 func (pm *PowerManager) GetStatus() PowerStatus {
 	assertions := queryPowerAssertions()
 	active := pm.IsActive()
+	preventSleep := false
+	if cfgSnapshot, err := config.Snapshot(pm.cfg); err == nil {
+		preventSleep = cfgSnapshot.System.PreventSleep
+	}
 
 	desc := "未开启防休眠守护，系统可能在长时间闲置时进入睡眠"
 	if active {
@@ -115,7 +133,7 @@ func (pm *PowerManager) GetStatus() PowerStatus {
 	}
 
 	return PowerStatus{
-		PreventSleep:  pm.cfg.System.PreventSleep,
+		PreventSleep:  preventSleep,
 		Active:        active,
 		Assertions:    assertions,
 		DisplayCanOff: true,

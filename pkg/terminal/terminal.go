@@ -2,23 +2,23 @@ package terminal
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+	"github.com/luluen/mac-nas/pkg/config"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for local NAS management
-	},
-}
+var validContainerRef = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+const maxTerminalMessageBytes = 256 << 10
 
 type resizeMessage struct {
 	Type string `json:"type"`
@@ -28,33 +28,61 @@ type resizeMessage struct {
 
 // HandleTerminalWS upgrades an HTTP connection to WebSocket and connects it to a live PTY session
 // running limactl shell <instanceName>
-func HandleTerminalWS(w http.ResponseWriter, r *http.Request, instanceName string) {
+func HandleTerminalWS(w http.ResponseWriter, r *http.Request, instanceName string, allowedOrigins ...map[string]struct{}) {
+	normalizedInstanceName, err := config.NormalizeVMName(instanceName)
+	if err != nil {
+		http.Error(w, "虚拟机名称无效", http.StatusBadRequest)
+		return
+	}
+	instanceName = normalizedInstanceName
+
+	allowed := map[string]struct{}{}
+	if len(allowedOrigins) > 0 && allowedOrigins[0] != nil {
+		allowed = allowedOrigins[0]
+	}
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(req *http.Request) bool {
+			origin := strings.TrimSpace(req.Header.Get("Origin"))
+			if origin == "" || origin == "http://"+req.Host || origin == "https://"+req.Host {
+				return true
+			}
+			_, ok := allowed[origin]
+			return ok
+		},
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("[MacNAS Terminal] WebSocket upgrade error: %v", err)
 		return
 	}
 	defer conn.Close()
-
-	if instanceName == "" {
-		instanceName = "macnas"
-	}
+	// A terminal keystroke is small, but pasted content can be large. Bound
+	// each frame so a client cannot make the WebSocket implementation allocate
+	// unbounded memory before the PTY sees the input.
+	conn.SetReadLimit(maxTerminalMessageBytes)
 
 	container := r.URL.Query().Get("container")
 	loginUser := r.URL.Query().Get("user") // "root" or "default"
+	if loginUser != "root" && loginUser != "default" && loginUser != "" {
+		loginUser = "default"
+	}
 
 	var cmd *exec.Cmd
 	if container != "" {
+		if !validContainerRef.MatchString(container) {
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[MacNAS Error] 容器名称无效\x1b[0m\r\n"))
+			return
+		}
 		if loginUser == "root" {
-			cmd = exec.Command("limactl", "shell", instanceName, "bash", "-c", fmt.Sprintf("docker exec -u 0 -it %s sh -c 'bash || sh'", container))
+			cmd = exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "docker", "exec", "-u", "0", "-it", container, "sh")
 		} else {
-			cmd = exec.Command("limactl", "shell", instanceName, "bash", "-c", fmt.Sprintf("docker exec -it %s sh -c 'bash || sh'", container))
+			cmd = exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "docker", "exec", "-it", container, "sh")
 		}
 	} else {
 		if loginUser == "root" {
-			cmd = exec.Command("limactl", "shell", instanceName, "sudo", "-i")
+			cmd = exec.CommandContext(r.Context(), "limactl", "shell", instanceName, "sudo", "-i")
 		} else {
-			cmd = exec.Command("limactl", "shell", instanceName)
+			cmd = exec.CommandContext(r.Context(), "limactl", "shell", instanceName)
 		}
 	}
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
@@ -62,7 +90,7 @@ func HandleTerminalWS(w http.ResponseWriter, r *http.Request, instanceName strin
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		log.Printf("[MacNAS Terminal] PTY start error: %v", err)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31m[MacNAS Error] 启动终端会话失败: %v\x1b[0m\r\n", err)))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[MacNAS Error] 启动终端会话失败，请检查虚拟机状态。\x1b[0m\r\n"))
 		return
 	}
 	defer func() {

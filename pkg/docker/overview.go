@@ -7,7 +7,8 @@ import (
 )
 
 func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
-	vmStatus, _ := c.vmMgr.GetStatus()
+	vmStatus, vmStatusErr := c.vmMgr.GetStatusContext(ctx)
+	dockerReady := vmStatusErr == nil && vmStatus != nil && vmStatus.DockerReady
 
 	containers, err := c.ListContainers(ctx)
 	if err != nil {
@@ -20,8 +21,14 @@ func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
 		}, nil
 	}
 
-	images, _ := c.ListImages(ctx)
-	projects, _ := c.ListComposeProjects(ctx)
+	images, imagesErr := c.ListImages(ctx)
+	if imagesErr != nil {
+		images = nil
+	}
+	projects, projectsErr := c.ListComposeProjectsWithContainers(ctx, containers)
+	if projectsErr != nil {
+		projects = nil
+	}
 
 	runningContainers := 0
 	stoppedContainers := 0
@@ -88,8 +95,14 @@ func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
 
 	healthy := true
 	healthMsg := "所有服务运行状态健康"
+	if imagesErr != nil || projectsErr != nil {
+		healthy = false
+		healthMsg = "Docker 部分状态暂时不可用"
+	}
 	if len(containers) == 0 {
-		healthMsg = "Docker 引擎运行正常，暂无容器运行"
+		if imagesErr == nil && projectsErr == nil {
+			healthMsg = "Docker 引擎运行正常，暂无容器运行"
+		}
 	} else if stoppedContainers > 0 && runningContainers == 0 {
 		healthy = false
 		healthMsg = "所有容器目前处于停止状态"
@@ -106,13 +119,13 @@ func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
 	verOut, _ := c.runDockerCmd(ctx, "version", "--format", "{{.Server.Version}}")
 	dockerVer := strings.TrimSpace(string(verOut))
 	if dockerVer == "" {
-		dockerVer = "29.8.0"
+		dockerVer = "-"
 	}
 
 	return &DockerOverview{
 		Healthy:           healthy,
 		HealthMessage:     healthMsg,
-		DockerReady:       vmStatus.DockerReady,
+		DockerReady:       dockerReady,
 		DockerVersion:     dockerVer,
 		StorageLocation:   "存储空间 1 (MacNAS 虚拟专有卷)",
 		AutoStart:         true,

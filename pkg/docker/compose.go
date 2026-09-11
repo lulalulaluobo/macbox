@@ -2,17 +2,19 @@ package docker
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-var validProjectName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+var validProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
+const maxComposeYAMLBytes = 8 << 20
 
 type composeLsItem struct {
 	Name        string `json:"Name"`
@@ -21,11 +23,30 @@ type composeLsItem struct {
 }
 
 func (c *Client) ListComposeProjects(ctx context.Context) ([]ComposeProject, error) {
+	containers, err := c.ListContainersSummary(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("读取 Compose 容器列表失败: %w", err)
+	}
+	return c.listComposeProjects(ctx, containers)
+}
+
+// ListComposeProjectsWithContainers builds the project list from a container
+// snapshot that the caller already fetched. This avoids querying Docker for
+// the same container data twice in overview requests.
+func (c *Client) ListComposeProjectsWithContainers(ctx context.Context, containers []ContainerInfo) ([]ComposeProject, error) {
+	return c.listComposeProjects(ctx, containers)
+}
+
+func (c *Client) listComposeProjects(ctx context.Context, containers []ContainerInfo) ([]ComposeProject, error) {
 	// 1. Run docker compose ls -a
 	out, err := c.runDockerCmd(ctx, "compose", "ls", "-a", "--format", "json")
 	var lsItems []composeLsItem
 	if err == nil && len(out) > 0 {
-		_ = json.Unmarshal(out, &lsItems)
+		if err := json.Unmarshal(out, &lsItems); err != nil {
+			return nil, fmt.Errorf("解析 Compose 项目列表失败: %w", err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("读取 Compose 项目列表失败: %w", err)
 	}
 
 	projectMap := make(map[string]*ComposeProject)
@@ -62,8 +83,10 @@ func (c *Client) ListComposeProjects(ctx context.Context) ([]ComposeProject, err
 	}
 
 	// 2. Discover offline projects in /data/appdata/compose/
-	findCmd := "find /data/appdata/compose -maxdepth 2 -name 'compose.yaml' -o -name 'docker-compose.yml' 2>/dev/null"
-	findOut, _ := c.vmMgr.Exec(ctx, "bash", "-c", findCmd)
+	findOut, err := c.vmMgr.Exec(ctx, "find", "/data/appdata/compose", "-maxdepth", "2", "-type", "f", "(", "-name", "compose.yaml", "-o", "-name", "docker-compose.yml", ")")
+	if err != nil {
+		return nil, fmt.Errorf("扫描 Compose 配置目录失败: %w", err)
+	}
 	lines := strings.Split(findOut, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -86,7 +109,6 @@ func (c *Client) ListComposeProjects(ctx context.Context) ([]ComposeProject, err
 	}
 
 	// 3. Associate containers and count services
-	containers, _ := c.ListContainers(ctx)
 	for _, container := range containers {
 		if container.Project != "" {
 			if proj, ok := projectMap[container.Project]; ok {
@@ -105,26 +127,25 @@ func (c *Client) ListComposeProjects(ctx context.Context) ([]ComposeProject, err
 }
 
 func (c *Client) resolveComposeFile(ctx context.Context, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if !validProjectName.MatchString(name) {
+		return "", fmt.Errorf("项目名称只能包含英文字母、数字、下划线或连字符")
+	}
+
 	// Check user compose directory first
-	userPath := fmt.Sprintf("/data/appdata/compose/%s/compose.yaml", name)
-	checkCmd := fmt.Sprintf("[ -f %s ] && echo 'exists'", userPath)
-	out, _ := c.vmMgr.Exec(ctx, "bash", "-c", checkCmd)
-	if strings.Contains(out, "exists") {
+	userPath := path.Join("/data/appdata/compose", name, "compose.yaml")
+	if _, err := c.vmMgr.Exec(ctx, "test", "-f", userPath); err == nil {
 		return userPath, nil
 	}
 
-	userPathYml := fmt.Sprintf("/data/appdata/compose/%s/docker-compose.yml", name)
-	checkCmd2 := fmt.Sprintf("[ -f %s ] && echo 'exists'", userPathYml)
-	out2, _ := c.vmMgr.Exec(ctx, "bash", "-c", checkCmd2)
-	if strings.Contains(out2, "exists") {
+	userPathYml := path.Join("/data/appdata/compose", name, "docker-compose.yml")
+	if _, err := c.vmMgr.Exec(ctx, "test", "-f", userPathYml); err == nil {
 		return userPathYml, nil
 	}
 
 	// Check system appdata directory
-	sysPath := fmt.Sprintf("/data/appdata/%s/compose.yaml", name)
-	checkCmd3 := fmt.Sprintf("[ -f %s ] && echo 'exists'", sysPath)
-	out3, _ := c.vmMgr.Exec(ctx, "bash", "-c", checkCmd3)
-	if strings.Contains(out3, "exists") {
+	sysPath := path.Join("/data/appdata", name, "compose.yaml")
+	if _, err := c.vmMgr.Exec(ctx, "test", "-f", sysPath); err == nil {
 		return sysPath, nil
 	}
 
@@ -132,11 +153,17 @@ func (c *Client) resolveComposeFile(ctx context.Context, name string) (string, e
 	if c.projectRoot != "" {
 		tmplPath := filepath.Join(c.projectRoot, "templates", "apps", name, "compose.yaml")
 		if data, err := os.ReadFile(tmplPath); err == nil {
+			if len(data) > maxComposeYAMLBytes {
+				return "", fmt.Errorf("Compose 模板超过 8 MB 限制")
+			}
 			// Auto sync template compose file into VM /data/appdata/<name>/compose.yaml
-			appDir := fmt.Sprintf("/data/appdata/%s", name)
-			encodedYAML := strings.ReplaceAll(string(data), "'", "'\\''")
-			syncCmd := fmt.Sprintf("mkdir -p %s && cat <<'EOF' > %s/compose.yaml\n%s\nEOF", appDir, appDir, encodedYAML)
-			_, _ = c.vmMgr.Exec(ctx, "bash", "-c", syncCmd)
+			appDir := path.Join("/data/appdata", name)
+			if _, mkdirErr := c.vmMgr.Exec(ctx, "mkdir", "-p", appDir); mkdirErr != nil {
+				return "", fmt.Errorf("同步项目目录失败: %w", mkdirErr)
+			}
+			if _, err := c.vmMgr.ExecWithInput(ctx, strings.NewReader(string(data)), "sudo", "tee", path.Join(appDir, "compose.yaml")); err != nil {
+				return "", fmt.Errorf("同步项目配置失败: %w", err)
+			}
 			return sysPath, nil
 		}
 	}
@@ -150,8 +177,7 @@ func (c *Client) GetComposeYaml(ctx context.Context, name string) (string, error
 		return "", err
 	}
 
-	catCmd := fmt.Sprintf("cat %s", filePath)
-	out, err := c.vmMgr.Exec(ctx, "bash", "-c", catCmd)
+	out, err := c.vmMgr.Exec(ctx, "cat", filePath)
 	if err != nil {
 		return "", fmt.Errorf("读取 compose 文件失败: %w", err)
 	}
@@ -168,21 +194,22 @@ func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent str
 	if yamlContent == "" {
 		return fmt.Errorf("Compose 配置内容不能为空")
 	}
+	if len([]byte(yamlContent)) > maxComposeYAMLBytes {
+		return fmt.Errorf("Compose 配置内容不能超过 8 MB")
+	}
 
 	fmt.Fprintf(out, "🚀 开始部署 Docker Compose 项目: %s\n", name)
 
 	// 1. Prepare directory in VM
-	projectDir := fmt.Sprintf("/data/appdata/compose/%s", name)
-	mkdirCmd := fmt.Sprintf("mkdir -p %s", projectDir)
-	if _, err := c.vmMgr.Exec(ctx, "bash", "-c", mkdirCmd); err != nil {
+	projectDir := path.Join("/data/appdata/compose", name)
+	if _, err := c.vmMgr.Exec(ctx, "mkdir", "-p", projectDir); err != nil {
 		fmt.Fprintf(out, "❌ 创建项目目录失败: %v\n", err)
 		return err
 	}
 
-	// 2. Write compose.yaml safely via base64
-	encoded := base64.StdEncoding.EncodeToString([]byte(yamlContent))
-	writeCmd := fmt.Sprintf("echo '%s' | base64 -d > %s/compose.yaml", encoded, projectDir)
-	if _, err := c.vmMgr.Exec(ctx, "bash", "-c", writeCmd); err != nil {
+	// 2. Stream the YAML as stdin so content cannot be interpreted as shell code.
+	composePath := path.Join(projectDir, "compose.yaml")
+	if _, err := c.vmMgr.ExecWithInput(ctx, strings.NewReader(yamlContent), "sudo", "tee", composePath); err != nil {
 		fmt.Fprintf(out, "❌ 写入 compose.yaml 失败: %v\n", err)
 		return err
 	}
@@ -190,8 +217,7 @@ func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent str
 
 	// 3. Run docker compose up -d with streaming logs
 	fmt.Fprintln(out, "⚙️ 正在执行 docker compose up -d ...")
-	execCmd := fmt.Sprintf("cd %s && docker compose up -d --remove-orphans", projectDir)
-	if err := c.vmMgr.ExecStream(ctx, out, "bash", "-c", execCmd); err != nil {
+	if err := c.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", composePath, "up", "-d", "--remove-orphans"); err != nil {
 		fmt.Fprintf(out, "❌ 部署执行失败: %v\n", err)
 		return err
 	}
@@ -205,30 +231,28 @@ func (c *Client) ComposeAction(ctx context.Context, name string, action string, 
 	if err != nil {
 		return err
 	}
-	workDir := filepath.Dir(filePath)
-
-	var cmd string
+	var composeAction string
 	switch action {
 	case "start":
-		cmd = fmt.Sprintf("cd %s && docker compose start", workDir)
+		composeAction = "start"
 		fmt.Fprintf(out, "▶️ 正在启动项目 [%s]...\n", name)
 	case "stop":
-		cmd = fmt.Sprintf("cd %s && docker compose stop", workDir)
+		composeAction = "stop"
 		fmt.Fprintf(out, "⏹️ 正在停止项目 [%s]...\n", name)
 	case "restart":
-		cmd = fmt.Sprintf("cd %s && docker compose restart", workDir)
+		composeAction = "restart"
 		fmt.Fprintf(out, "🔄 正在重启项目 [%s]...\n", name)
 	case "down":
-		cmd = fmt.Sprintf("cd %s && docker compose down", workDir)
+		composeAction = "down"
 		fmt.Fprintf(out, "🔻 正在停止并下线服务 [%s]...\n", name)
 	case "pull":
-		cmd = fmt.Sprintf("cd %s && docker compose pull", workDir)
+		composeAction = "pull"
 		fmt.Fprintf(out, "📦 正在拉取项目最新镜像 [%s]...\n", name)
 	default:
 		return fmt.Errorf("不支持的项目动作: %s", action)
 	}
 
-	if err := c.vmMgr.ExecStream(ctx, out, "bash", "-c", cmd); err != nil {
+	if err := c.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", filePath, composeAction); err != nil {
 		fmt.Fprintf(out, "❌ 操作失败: %v\n", err)
 		return err
 	}
@@ -241,19 +265,27 @@ func (c *Client) DeleteComposeProject(ctx context.Context, name string, deleteVo
 	if err != nil {
 		return err
 	}
-	workDir := filepath.Dir(filePath)
+	workDir := path.Dir(filePath)
 
 	// Down containers
-	downCmd := fmt.Sprintf("cd %s && docker compose down", workDir)
+	downArgs := []string{"compose", "-f", filePath, "down"}
 	if deleteVolumes {
-		downCmd += " -v"
+		downArgs = append(downArgs, "-v")
 	}
-	_, _ = c.vmMgr.Exec(ctx, "bash", "-c", downCmd)
+	dockerArgs := append([]string{"docker"}, downArgs...)
+	if out, err := c.vmMgr.Exec(ctx, dockerArgs...); err != nil {
+		return fmt.Errorf("停止 Compose 项目失败: %s (%w)", out, err)
+	}
 
-	// If it's a user compose project in /data/appdata/compose/, delete folder
+	// Remove only the compose file we resolved. A project directory may contain
+	// user-managed files, so recursive deletion is intentionally not used.
 	if strings.HasPrefix(workDir, "/data/appdata/compose/") {
-		delCmd := fmt.Sprintf("rm -rf %s", workDir)
-		_, _ = c.vmMgr.Exec(ctx, "bash", "-c", delCmd)
+		if out, err := c.vmMgr.Exec(ctx, "rm", "-f", filePath); err != nil {
+			return fmt.Errorf("删除 Compose 配置文件失败: %s (%w)", out, err)
+		}
+		// Keep the directory only when it still contains user files. rmdir is
+		// non-recursive; failure here is safe and does not invalidate the delete.
+		_, _ = c.vmMgr.Exec(ctx, "rmdir", workDir)
 	}
 
 	return nil

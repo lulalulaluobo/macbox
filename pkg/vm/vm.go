@@ -7,16 +7,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"text/template"
 	"time"
 
 	"github.com/luluen/mac-nas/pkg/config"
 	"github.com/luluen/mac-nas/pkg/storage"
+	"gopkg.in/yaml.v3"
 )
 
 type VMStatus struct {
@@ -50,6 +53,7 @@ type Manager struct {
 	cfg          *config.Config
 	instanceName string
 	mu           sync.RWMutex
+	statusMu     sync.Mutex
 	lastError    string
 	vmAction     string // "starting", "stopping", "restarting", "" (idle)
 	configDirty  bool   // true when config changed and VM needs restart
@@ -83,10 +87,42 @@ func (m *Manager) SetVMAction(action string) {
 	m.cachedStatus = nil
 }
 
+// BeginVMAction atomically reserves the VM lifecycle state. Only one
+// start/stop/restart operation may run at a time; otherwise concurrent
+// requests can race limactl and leave the VM state/configuration ambiguous.
+func (m *Manager) BeginVMAction(action string) bool {
+	if action == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.vmAction != "" {
+		return false
+	}
+	m.vmAction = action
+	m.cachedStatus = nil
+	return true
+}
+
+// EndVMAction releases a lifecycle reservation. It is deliberately
+// idempotent so deferred cleanup remains safe after an operation fails.
+func (m *Manager) EndVMAction() {
+	m.SetVMAction("")
+}
+
 func (m *Manager) GetVMAction() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.vmAction
+}
+
+// InstanceName returns the validated Lima instance identifier. The name is
+// fixed when the manager is constructed, so request handlers do not need to
+// read the shared mutable Config object for every command.
+func (m *Manager) InstanceName() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.instanceName
 }
 
 func (m *Manager) SetConfigDirty(dirty bool) {
@@ -101,9 +137,54 @@ func (m *Manager) IsConfigDirty() bool {
 	return m.configDirty
 }
 
+// AddForwardedPorts records only the host ports explicitly published by an
+// installed Compose application. The next VM restart will render these as
+// individual Lima forwards instead of exposing the entire guest port range.
+func (m *Manager) AddForwardedPorts(ports ...int) error {
+	ports = config.NormalizeForwardedPorts(ports)
+	if len(ports) == 0 {
+		return nil
+	}
+
+	changed := false
+	if err := config.Update(m.cfg, func(updated *config.Config) error {
+		previous := config.NormalizeForwardedPorts(updated.VM.ForwardedPorts)
+		merged := append([]int(nil), previous...)
+		merged = append(merged, ports...)
+		merged = config.NormalizeForwardedPorts(merged)
+		if len(merged) != len(previous) {
+			changed = true
+		} else {
+			for i := range merged {
+				if merged[i] != previous[i] {
+					changed = true
+					break
+				}
+			}
+		}
+		if changed {
+			updated.VM.ForwardedPorts = merged
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("保存端口转发配置失败: %w", err)
+	}
+	if !changed {
+		return nil
+	}
+	m.mu.Lock()
+	m.configDirty = true
+	m.cachedStatus = nil
+	m.mu.Unlock()
+	return nil
+}
+
 func NewManager(cfg *config.Config) *Manager {
-	name := cfg.VM.Name
-	if name == "" {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	name, err := config.NormalizeVMName(cfg.VM.Name)
+	if err != nil {
 		name = "macnas"
 	}
 	return &Manager{
@@ -114,17 +195,40 @@ func NewManager(cfg *config.Config) *Manager {
 
 // GetStatus checks Lima for the current status of the MacNAS instance (cached with 3s TTL)
 func (m *Manager) GetStatus() (*VMStatus, error) {
+	return m.GetStatusContext(context.Background())
+}
+
+// GetStatusContext is the request-aware status query. The short cache avoids
+// starting multiple limactl processes during a dashboard refresh, while the
+// context still cancels a slow probe when its caller disconnects.
+func (m *Manager) GetStatusContext(ctx context.Context) (*VMStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.mu.RLock()
 	if m.cachedStatus != nil && time.Since(m.cachedAt) < 3*time.Second {
-		cpy := *m.cachedStatus
+		cpy := cloneVMStatus(m.cachedStatus)
 		m.mu.RUnlock()
-		return &cpy, nil
+		return cpy, nil
 	}
 	m.mu.RUnlock()
 
-	cmd := exec.Command("limactl", "list", "--json")
-	output, err := cmd.Output()
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
+	// Recheck after waiting for another caller to finish its probe.
+	m.mu.RLock()
+	if m.cachedStatus != nil && time.Since(m.cachedAt) < 3*time.Second {
+		cpy := cloneVMStatus(m.cachedStatus)
+		m.mu.RUnlock()
+		return cpy, nil
+	}
+	m.mu.RUnlock()
+
+	outputText, err := runHostCommand(ctx, "limactl", "list", "--json")
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		// limactl might fail or no instances
 		res := &VMStatus{
 			Name:        m.instanceName,
@@ -136,10 +240,10 @@ func (m *Manager) GetStatus() (*VMStatus, error) {
 		m.cachedStatus = res
 		m.cachedAt = time.Now()
 		m.mu.Unlock()
-		return res, nil
+		return cloneVMStatus(res), nil
 	}
 
-	scanner := bufio.NewScanner(bytes.NewReader(output))
+	scanner := bufio.NewScanner(strings.NewReader(outputText))
 	for scanner.Scan() {
 		line := scanner.Text()
 		var inst LimaInstanceJSON
@@ -148,7 +252,7 @@ func (m *Manager) GetStatus() (*VMStatus, error) {
 				sock := m.GetDockerSocketPath(inst.Dir)
 				ready := m.IsSocketReady(sock)
 
-				errs := inst.Errors
+				errs := append([]string(nil), inst.Errors...)
 				if lastErr := m.GetLastError(); lastErr != "" {
 					errs = append(errs, lastErr)
 				}
@@ -171,9 +275,12 @@ func (m *Manager) GetStatus() (*VMStatus, error) {
 				m.cachedStatus = res
 				m.cachedAt = time.Now()
 				m.mu.Unlock()
-				return res, nil
+				return cloneVMStatus(res), nil
 			}
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("解析 Lima 状态失败: %w", err)
 	}
 
 	var notCreatedErrs []string
@@ -192,7 +299,16 @@ func (m *Manager) GetStatus() (*VMStatus, error) {
 	m.cachedStatus = res
 	m.cachedAt = time.Now()
 	m.mu.Unlock()
-	return res, nil
+	return cloneVMStatus(res), nil
+}
+
+func cloneVMStatus(status *VMStatus) *VMStatus {
+	if status == nil {
+		return nil
+	}
+	clone := *status
+	clone.Errors = append([]string(nil), status.Errors...)
+	return &clone
 }
 
 func (m *Manager) GetDockerSocketPath(instanceDir string) string {
@@ -217,23 +333,35 @@ func (m *Manager) IsSocketReady(sockPath string) bool {
 
 // EnsureDataDisk ensures the Managed Disk exists in Lima
 func (m *Manager) EnsureDataDisk(size string) error {
-	diskName := m.cfg.VM.DataDiskName
-	if diskName == "" {
-		diskName = "macnas-data"
+	return m.EnsureDataDiskContext(context.Background(), size)
+}
+
+func (m *Manager) EnsureDataDiskContext(ctx context.Context, size string) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	disks, err := storage.ListManagedDisks()
-	if err == nil {
-		for _, d := range disks {
-			if d.Name == diskName {
-				return nil // already exists
-			}
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return err
+	}
+	diskName, err := config.NormalizeDataDiskName(cfgSnapshot.VM.DataDiskName)
+	if err != nil {
+		return err
+	}
+	disks, err := storage.ListManagedDisksContext(ctx)
+	if err != nil {
+		return fmt.Errorf("读取 Lima 数据盘列表失败: %w", err)
+	}
+	for _, d := range disks {
+		if d.Name == diskName {
+			return nil // already exists
 		}
 	}
 
 	if size == "" {
 		size = "50GiB"
 	}
-	return storage.CreateManagedDisk(diskName, size)
+	return storage.CreateManagedDiskContext(ctx, diskName, size)
 }
 
 // GenerateConfig renders templates/vm/macnas.yaml.tmpl into ~/.macnas/macnas.yaml
@@ -243,27 +371,66 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		return fmt.Errorf("read vm template error: %w", err)
 	}
 
-	tmpl, err := template.New("macnas-vm").Parse(string(tmplData))
+	tmpl, err := template.New("macnas-vm").Funcs(template.FuncMap{
+		"shellQuote": shellQuote,
+		"yamlQuote":  yamlQuote,
+	}).Parse(string(tmplData))
 	if err != nil {
 		return fmt.Errorf("parse vm template error: %w", err)
 	}
 
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return fmt.Errorf("读取配置快照失败: %w", err)
+	}
+	dataDiskNameValue := cfgSnapshot.VM.DataDiskName
+	cpus := cfgSnapshot.VM.CPUs
+	memory := cfgSnapshot.VM.Memory
+	diskSize := cfgSnapshot.VM.DiskSize
+	sambaPassword := cfgSnapshot.Samba.Password
+	sambaPort := cfgSnapshot.Samba.Port
+	listenAddress := cfgSnapshot.ListenAddress
+	forwardedPorts := append([]int(nil), cfgSnapshot.VM.ForwardedPorts...)
+	localMounts := append([]config.LocalMount(nil), cfgSnapshot.Storage.LocalMounts...)
+	m.mu.RLock()
+	instanceName := m.instanceName
+	m.mu.RUnlock()
+
+	dataDiskName, err := config.NormalizeDataDiskName(dataDiskNameValue)
+	if err != nil {
+		return err
+	}
+	for i := range localMounts {
+		target, err := config.NormalizeGuestTarget(localMounts[i].GuestTarget)
+		if err != nil {
+			return fmt.Errorf("本地挂载 %q 配置无效: %w", localMounts[i].ID, err)
+		}
+		localMounts[i].GuestTarget = target
+		if err := config.ValidateLocalMount(localMounts[i]); err != nil {
+			return fmt.Errorf("本地挂载 %q 配置无效: %w", localMounts[i].ID, err)
+		}
+	}
+
 	data := struct {
-		CPUs          int
-		Memory        int
-		DiskSize      int
-		DataDiskName  string
-		SambaPassword string
-		SambaPort     int
-		LocalMounts   []config.LocalMount
+		CPUs            int
+		Memory          int
+		DiskSize        int
+		DataDiskName    string
+		SambaPassword   string
+		SambaPort       int
+		HostBindAddress string
+		ForwardedPorts  []int
+		LocalMounts     []config.LocalMount
 	}{
-		CPUs:          m.cfg.VM.CPUs,
-		Memory:        m.cfg.VM.Memory,
-		DiskSize:      m.cfg.VM.DiskSize,
-		DataDiskName:  m.cfg.VM.DataDiskName,
-		SambaPassword: m.cfg.Samba.Password,
-		SambaPort:     m.cfg.Samba.Port,
-		LocalMounts:   m.cfg.Storage.LocalMounts,
+		CPUs:            cpus,
+		Memory:          memory,
+		DiskSize:        diskSize,
+		DataDiskName:    dataDiskName,
+		SambaPassword:   sambaPassword,
+		SambaPort:       sambaPort,
+		HostBindAddress: config.NormalizeListenAddress(listenAddress),
+		ForwardedPorts:  config.NormalizeForwardedPorts(forwardedPorts),
+		LocalMounts:     localMounts,
 	}
 
 	var buf bytes.Buffer
@@ -271,23 +438,78 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		return fmt.Errorf("execute vm template error: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0700); err != nil {
 		return err
 	}
 
-	if err := os.WriteFile(outputPath, buf.Bytes(), 0644); err != nil {
+	previousOutput, outputErr := os.ReadFile(outputPath)
+	outputExisted := outputErr == nil
+	if outputErr != nil && !os.IsNotExist(outputErr) {
+		return fmt.Errorf("读取现有虚拟机配置失败: %w", outputErr)
+	}
+	instancePath := ""
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		return fmt.Errorf("读取用户目录失败: %w", homeErr)
+	}
+	instanceDir := filepath.Join(home, ".lima", instanceName)
+	if _, err := os.Stat(instanceDir); err == nil {
+		instancePath = filepath.Join(instanceDir, "lima.yaml")
+	}
+
+	if err := writePrivateFileAtomically(outputPath, buf.Bytes()); err != nil {
 		return err
 	}
 
-	// Also sync to ~/.lima/<instance>/lima.yaml if instance directory exists
-	home, err := os.UserHomeDir()
-	if err == nil {
-		instanceDir := filepath.Join(home, ".lima", m.instanceName)
-		if _, err := os.Stat(instanceDir); err == nil {
-			_ = os.WriteFile(filepath.Join(instanceDir, "lima.yaml"), buf.Bytes(), 0644)
+	// Also sync to ~/.lima/<instance>/lima.yaml if the instance directory exists.
+	// If the second atomic replacement fails, restore the first file so the two
+	// config locations cannot silently describe different VM settings.
+	if instancePath != "" {
+		if err := writePrivateFileAtomically(instancePath, buf.Bytes()); err != nil {
+			var restoreErr error
+			if outputExisted {
+				restoreErr = writePrivateFileAtomically(outputPath, previousOutput)
+			} else {
+				restoreErr = os.Remove(outputPath)
+				if os.IsNotExist(restoreErr) {
+					restoreErr = nil
+				}
+			}
+			if restoreErr != nil {
+				return fmt.Errorf("同步 Lima 实例配置失败: %v；恢复主配置也失败: %w", err, restoreErr)
+			}
+			return fmt.Errorf("同步 Lima 实例配置失败: %w", err)
 		}
 	}
 
+	return nil
+}
+
+func writePrivateFileAtomically(filePath string, data []byte) error {
+	tmpFile, err := os.CreateTemp(filepath.Dir(filePath), ".macnas-private-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+	if err := tmpFile.Chmod(0600); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -303,18 +525,29 @@ func (m *Manager) UpdateSpecs(cpus, memory, diskSize int, projectRoot string) er
 		diskSize = 10
 	}
 
-	m.cfg.VM.CPUs = cpus
-	m.cfg.VM.Memory = memory
-	m.cfg.VM.DiskSize = diskSize
-
-	if err := config.SaveConfig(m.cfg); err != nil {
+	var previousCPUs, previousMemory, previousDiskSize int
+	err := config.Update(m.cfg, func(updated *config.Config) error {
+		previousCPUs = updated.VM.CPUs
+		previousMemory = updated.VM.Memory
+		previousDiskSize = updated.VM.DiskSize
+		updated.VM.CPUs = cpus
+		updated.VM.Memory = memory
+		updated.VM.DiskSize = diskSize
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("保存配置失败: %w", err)
 	}
 
-	cfgDir, _ := config.ConfigDir()
+	cfgDir, err := config.ConfigDir()
+	if err != nil {
+		m.restoreSpecs(previousCPUs, previousMemory, previousDiskSize)
+		return fmt.Errorf("创建配置目录失败: %w", err)
+	}
 	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
 	tmplPath := filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
 	if err := m.GenerateConfigFile(tmplPath, renderedYAML); err != nil {
+		m.restoreSpecs(previousCPUs, previousMemory, previousDiskSize)
 		return fmt.Errorf("重新生成虚拟机配置文件失败: %w", err)
 	}
 
@@ -323,23 +556,46 @@ func (m *Manager) UpdateSpecs(cpus, memory, diskSize int, projectRoot string) er
 	return nil
 }
 
+func (m *Manager) restoreSpecs(cpus, memory, diskSize int) {
+	if err := config.Update(m.cfg, func(updated *config.Config) error {
+		updated.VM.CPUs = cpus
+		updated.VM.Memory = memory
+		updated.VM.DiskSize = diskSize
+		return nil
+	}); err != nil {
+		m.mu.Lock()
+		m.lastError = fmt.Sprintf("回滚虚拟机规格配置失败: %v", err)
+		m.mu.Unlock()
+	}
+}
+
 // Start launches the Lima VM
 func (m *Manager) Start(ctx context.Context, projectRoot string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.InvalidateCache()
 	err := m.startInternal(ctx, projectRoot)
 	if err != nil {
 		m.SetLastError(err.Error())
 	} else {
-		m.SetLastError("")
-		time.Sleep(3 * time.Second)
-		m.SyncMounts(ctx)
+		if waitErr := waitForContext(ctx, 3*time.Second); waitErr != nil {
+			err = waitErr
+			m.SetLastError(waitErr.Error())
+		} else {
+			m.SetLastError("")
+			if syncErr := m.SyncMounts(ctx); syncErr != nil {
+				log.Printf("[MacNAS VM] mount sync failed after start: %v", syncErr)
+				m.SetLastError(syncErr.Error())
+			}
+		}
 	}
 	m.InvalidateCache()
 	return err
 }
 
 func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
-	status, err := m.GetStatus()
+	status, err := m.GetStatusContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -348,10 +604,15 @@ func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 		return nil
 	}
 
-	cfgDir, _ := config.ConfigDir()
+	cfgDir, err := config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("创建配置目录失败: %w", err)
+	}
 	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
 	tmplPath := filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
-	_ = m.GenerateConfigFile(tmplPath, renderedYAML)
+	if err := m.GenerateConfigFile(tmplPath, renderedYAML); err != nil {
+		return fmt.Errorf("生成虚拟机配置文件失败: %w", err)
+	}
 
 	home, _ := os.UserHomeDir()
 	instanceDir := filepath.Join(home, ".lima", m.instanceName)
@@ -361,18 +622,22 @@ func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 	}
 
 	if instanceExists || status.Status != "NotCreated" {
-		cmd := exec.CommandContext(ctx, "limactl", "start", m.instanceName, "--tty=false")
-		out, err := cmd.CombinedOutput()
+		out, err := runHostCommand(ctx, "limactl", "start", m.instanceName, "--tty=false")
 		if err != nil {
-			return fmt.Errorf("limactl start failed: %s (%w)", string(out), err)
+			return fmt.Errorf("limactl start failed: %s (%w)", out, err)
 		}
 		return nil
 	}
 
 	// Not created yet -> Create and Start
-	_ = m.EnsureDataDisk("50GiB")
+	if err := m.EnsureDataDiskContext(ctx, "50GiB"); err != nil {
+		return fmt.Errorf("准备 Lima 数据盘失败: %w", err)
+	}
 
-	cfgDir, _ = config.ConfigDir()
+	cfgDir, err = config.ConfigDir()
+	if err != nil {
+		return fmt.Errorf("创建配置目录失败: %w", err)
+	}
 	renderedYAML = filepath.Join(cfgDir, "macnas.yaml")
 	tmplPath = filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
 
@@ -380,38 +645,65 @@ func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, "limactl", "start", renderedYAML, "--name", m.instanceName, "--tty=false")
-	out, err := cmd.CombinedOutput()
+	out, err := runHostCommand(ctx, "limactl", "start", renderedYAML, "--name", m.instanceName, "--tty=false")
 	if err != nil {
-		return fmt.Errorf("limactl start new instance failed: %s (%w)", string(out), err)
+		return fmt.Errorf("limactl start new instance failed: %s (%w)", out, err)
 	}
 	return nil
 }
 
 // Stop stops the Lima VM
 func (m *Manager) Stop(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.InvalidateCache()
-	cmd := exec.CommandContext(ctx, "limactl", "stop", m.instanceName)
-	out, err := cmd.CombinedOutput()
+	out, err := runHostCommand(ctx, "limactl", "stop", m.instanceName)
 	m.InvalidateCache()
 	if err != nil {
-		return fmt.Errorf("limactl stop failed: %s (%w)", string(out), err)
+		return fmt.Errorf("limactl stop failed: %s (%w)", out, err)
 	}
 	return nil
 }
 
 // Restart restarts the Lima VM
 func (m *Manager) Restart(ctx context.Context, projectRoot string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.InvalidateCache()
-	_ = m.Stop(ctx)
-	time.Sleep(2 * time.Second)
+	if err := m.Stop(ctx); err != nil {
+		return fmt.Errorf("重启前停止虚拟机失败: %w", err)
+	}
+	if err := waitForContext(ctx, 2*time.Second); err != nil {
+		return err
+	}
 	return m.Start(ctx, projectRoot)
 }
 
+func waitForContext(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // SyncMounts regenerates and re-applies VirtioFS bind mount script inside the running VM
-func (m *Manager) SyncMounts(ctx context.Context) {
-	if len(m.cfg.Storage.LocalMounts) == 0 {
-		return
+func (m *Manager) SyncMounts(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return fmt.Errorf("读取本地挂载配置失败: %w", err)
+	}
+	mounts := cfgSnapshot.Storage.LocalMounts
+	if len(mounts) == 0 {
+		return nil
 	}
 
 	// Build the mount script content
@@ -425,7 +717,10 @@ func (m *Manager) SyncMounts(ctx context.Context) {
 		"done\n" +
 		"sleep 1\n"
 
-	for _, mount := range m.cfg.Storage.LocalMounts {
+	for _, mount := range mounts {
+		if _, err := config.NormalizeLocalMountID(mount.ID); err != nil {
+			return fmt.Errorf("本地挂载 %q 配置无效: %w", mount.ID, err)
+		}
 		if !mount.Enabled {
 			continue
 		}
@@ -433,19 +728,24 @@ func (m *Manager) SyncMounts(ctx context.Context) {
 		if mount.Writable {
 			mode = "rw"
 		}
+		sourcePath := "/mnt/macnas-mounts/" + mount.ID
+		guestTarget, err := config.NormalizeGuestTarget(mount.GuestTarget)
+		if err != nil {
+			return fmt.Errorf("本地挂载 %q 配置无效: %w", mount.ID, err)
+		}
 		script += fmt.Sprintf(
-			"if [ -d \"/mnt/macnas-mounts/%s\" ]; then\n"+
-				"  mount -o remount,%s \"/mnt/macnas-mounts/%s\" 2>/dev/null || true\n"+
+			"if [ -d %s ]; then\n"+
+				"  mount -o remount,%s %s 2>/dev/null || true\n"+
 				"  REAL_DATA=\"$(readlink -f /data || echo /data)\"\n"+
-				"  TARGET_DIR=\"${REAL_DATA}/%s\"\n"+
+				"  TARGET_DIR=\"$REAL_DATA\"/%s\n"+
 				"  mkdir -p \"$TARGET_DIR\"\n"+
 				"  if ! grep -qs \" ${TARGET_DIR} \" /proc/mounts; then\n"+
-				"    mount --bind \"/mnt/macnas-mounts/%s\" \"$TARGET_DIR\"\n"+
+				"    mount --bind %s \"$TARGET_DIR\"\n"+
 				"    echo \"[macnas-mounts] mounted %s -> $TARGET_DIR\"\n"+
 				"  fi\n"+
 				"  mount -o remount,%s \"$TARGET_DIR\" 2>/dev/null || true\n"+
 				"fi\n",
-			mount.ID, mode, mount.ID, mount.GuestTarget, mount.ID, mount.ID, mode,
+			shellQuote(sourcePath), mode, shellQuote(sourcePath), shellQuote(guestTarget), shellQuote(sourcePath), shellQuote(mount.ID), mode,
 		)
 	}
 
@@ -462,33 +762,145 @@ ExecStart=/usr/local/bin/macnas-mounts.sh
 [Install]
 WantedBy=multi-user.target`
 
-	// Write script, install systemd service if missing/updated, and execute
-	setupCmd := fmt.Sprintf(
-		"mkdir -p /mnt/macnas-mounts && "+
-			"cat > /usr/local/bin/macnas-mounts.sh << 'SCRIPT_EOF'\n%s\nSCRIPT_EOF\n"+
-			"chmod +x /usr/local/bin/macnas-mounts.sh && "+
-			"cat > /etc/systemd/system/macnas-mounts.service << 'SERVICE_EOF'\n%s\nSERVICE_EOF\n"+
-			"systemctl daemon-reload && "+
-			"systemctl enable macnas-mounts.service && "+
-			"/usr/local/bin/macnas-mounts.sh || true",
-		script, serviceContent,
-	)
-	_, _ = m.Exec(ctx, "sudo", "bash", "-c", setupCmd)
+	// Write each payload through stdin. This keeps both configuration content and
+	// mount values out of shell command interpolation.
+	if _, err := m.Exec(ctx, "sudo", "mkdir", "-p", "/mnt/macnas-mounts"); err != nil {
+		return fmt.Errorf("准备本地挂载目录失败: %w", err)
+	}
+	if _, err := m.ExecWithInput(ctx, strings.NewReader(script), "sudo", "tee", "/usr/local/bin/macnas-mounts.sh"); err != nil {
+		return fmt.Errorf("写入本地挂载脚本失败: %w", err)
+	}
+	if _, err := m.Exec(ctx, "sudo", "chmod", "+x", "/usr/local/bin/macnas-mounts.sh"); err != nil {
+		return fmt.Errorf("设置本地挂载脚本权限失败: %w", err)
+	}
+	if _, err := m.ExecWithInput(ctx, strings.NewReader(serviceContent), "sudo", "tee", "/etc/systemd/system/macnas-mounts.service"); err != nil {
+		return fmt.Errorf("写入本地挂载服务失败: %w", err)
+	}
+	if _, err := m.Exec(ctx, "sudo", "systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("刷新本地挂载服务失败: %w", err)
+	}
+	if _, err := m.Exec(ctx, "sudo", "systemctl", "enable", "macnas-mounts.service"); err != nil {
+		return fmt.Errorf("启用本地挂载服务失败: %w", err)
+	}
+	if out, err := m.Exec(ctx, "sudo", "/usr/local/bin/macnas-mounts.sh"); err != nil {
+		return fmt.Errorf("执行本地挂载脚本失败: %s (%w)", strings.TrimSpace(out), err)
+	}
+	return nil
 }
 
+// shellQuote returns a POSIX single-quoted literal for the generated mount
+// helper script. It is only used while producing the script file; the script
+// itself is delivered via stdin rather than embedded in a command line.
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func yamlQuote(value string) string {
+	data, err := yaml.Marshal(value)
+	if err != nil {
+		return `""`
+	}
+	return strings.TrimSpace(string(data))
+}
+
+const maxVMCommandOutputBytes = 8 << 20
+
+// cappedCommandOutput protects the control plane from commands whose output
+// is unexpectedly large (for example, a noisy Docker/Compose operation). It
+// reports the full write length to exec.Cmd so the child keeps running, while
+// retaining only a bounded diagnostic prefix.
+type cappedCommandOutput struct {
+	mu        sync.Mutex
+	buf       bytes.Buffer
+	truncated bool
+}
+
+func (b *cappedCommandOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	remaining := maxVMCommandOutputBytes - b.buf.Len()
+	if remaining > 0 {
+		if len(p) <= remaining {
+			_, _ = b.buf.Write(p)
+		} else {
+			_, _ = b.buf.Write(p[:remaining])
+			b.truncated = true
+		}
+	} else if len(p) > 0 {
+		b.truncated = true
+	}
+	return len(p), nil
+}
+
+func (b *cappedCommandOutput) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	output := b.buf.String()
+	if b.truncated {
+		output += fmt.Sprintf("\n[MacNAS] 命令输出已截断（超过 %d MiB）\n", maxVMCommandOutputBytes/(1<<20))
+	}
+	return output
+}
+
+func runVMCommand(ctx context.Context, instanceName string, stdin io.Reader, command ...string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	args := append([]string{"shell", instanceName}, command...)
+	cmd := exec.CommandContext(ctx, "limactl", args...)
+	cmd.Stdin = stdin
+	var output cappedCommandOutput
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	err := cmd.Run()
+	return output.String(), err
+}
+
+func runHostCommand(ctx context.Context, name string, args ...string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	var output cappedCommandOutput
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	err := cmd.Run()
+	return output.String(), err
+}
 
 // Exec runs a command inside the Lima VM via limactl shell
 func (m *Manager) Exec(ctx context.Context, command ...string) (string, error) {
-	args := append([]string{"shell", m.instanceName}, command...)
-	cmd := exec.CommandContext(ctx, "limactl", args...)
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	return runVMCommand(ctx, m.InstanceName(), nil, command...)
+}
+
+// ExecWithInput runs a command inside the Lima VM and streams input to its
+// stdin. This is used for passwords and file contents so they never need to
+// be interpolated into a shell command.
+func (m *Manager) ExecWithInput(ctx context.Context, stdin io.Reader, command ...string) (string, error) {
+	return runVMCommand(ctx, m.InstanceName(), stdin, command...)
 }
 
 // ExecStream runs a command inside the Lima VM and streams stdout/stderr to an io.Writer
 func (m *Manager) ExecStream(ctx context.Context, w io.Writer, command ...string) error {
-	args := append([]string{"shell", m.instanceName}, command...)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	args := append([]string{"shell", m.InstanceName()}, command...)
 	cmd := exec.CommandContext(ctx, "limactl", args...)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	return cmd.Run()
+}
+
+// ExecStreamWithInput is the streaming counterpart to ExecWithInput.
+func (m *Manager) ExecStreamWithInput(ctx context.Context, w io.Writer, stdin io.Reader, command ...string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	args := append([]string{"shell", m.InstanceName()}, command...)
+	cmd := exec.CommandContext(ctx, "limactl", args...)
+	cmd.Stdin = stdin
 	cmd.Stdout = w
 	cmd.Stderr = w
 	return cmd.Run()

@@ -6,8 +6,42 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 )
+
+const (
+	maxRegistryMirrors      = 20
+	maxRegistryMirrorLength = 512
+)
+
+func normalizeRegistryMirrors(mirrors []string) ([]string, error) {
+	if len(mirrors) > maxRegistryMirrors {
+		return nil, fmt.Errorf("镜像加速地址不能超过 %d 个", maxRegistryMirrors)
+	}
+	result := make([]string, 0, len(mirrors))
+	seen := make(map[string]struct{}, len(mirrors))
+	for _, mirror := range mirrors {
+		mirror = strings.TrimSpace(mirror)
+		if mirror == "" {
+			continue
+		}
+		if len([]byte(mirror)) > maxRegistryMirrorLength || strings.ContainsAny(mirror, "\r\n\x00") {
+			return nil, fmt.Errorf("镜像加速地址格式无效")
+		}
+		parsed, err := url.Parse(mirror)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, fmt.Errorf("镜像加速地址必须是无账号密码的 HTTP(S) 地址")
+		}
+		mirror = strings.TrimRight(mirror, "/")
+		if _, exists := seen[mirror]; exists {
+			continue
+		}
+		seen[mirror] = struct{}{}
+		result = append(result, mirror)
+	}
+	return result, nil
+}
 
 func (c *Client) ListNetworks(ctx context.Context) ([]DockerNetwork, error) {
 	out, err := c.runDockerCmd(ctx, "network", "ls", "--format", "{{json .}}")
@@ -44,12 +78,18 @@ func (c *Client) ListNetworks(ctx context.Context) ([]DockerNetwork, error) {
 			})
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("读取网络列表失败: %w", err)
+	}
 
 	return networks, nil
 }
 
 func (c *Client) GetRegistryMirrors(ctx context.Context) ([]string, error) {
-	out, _ := c.vmMgr.Exec(ctx, "bash", "-c", "cat /etc/docker/daemon.json 2>/dev/null")
+	out, err := c.vmMgr.Exec(ctx, "cat", "/etc/docker/daemon.json")
+	if err != nil && strings.TrimSpace(out) != "" {
+		return nil, fmt.Errorf("读取 Docker 配置失败: %w", err)
+	}
 	if strings.TrimSpace(out) == "" {
 		return []string{}, nil
 	}
@@ -57,30 +97,44 @@ func (c *Client) GetRegistryMirrors(ctx context.Context) ([]string, error) {
 	var daemonConfig struct {
 		RegistryMirrors []string `json:"registry-mirrors"`
 	}
-	if err := json.Unmarshal([]byte(out), &daemonConfig); err == nil {
-		return daemonConfig.RegistryMirrors, nil
+	if err := json.Unmarshal([]byte(out), &daemonConfig); err != nil {
+		return nil, fmt.Errorf("Docker 配置 JSON 无效: %w", err)
 	}
-	return []string{}, nil
+	return normalizeRegistryMirrors(daemonConfig.RegistryMirrors)
 }
 
 func (c *Client) SetRegistryMirrors(ctx context.Context, mirrors []string) error {
-	out, _ := c.vmMgr.Exec(ctx, "bash", "-c", "cat /etc/docker/daemon.json 2>/dev/null")
+	normalizedMirrors, err := normalizeRegistryMirrors(mirrors)
+	if err != nil {
+		return err
+	}
+
+	out, readErr := c.vmMgr.Exec(ctx, "cat", "/etc/docker/daemon.json")
+	if readErr != nil && strings.TrimSpace(out) != "" {
+		return fmt.Errorf("读取 Docker 配置失败: %w", readErr)
+	}
 	var daemonConfig map[string]interface{}
 	if strings.TrimSpace(out) != "" {
-		_ = json.Unmarshal([]byte(out), &daemonConfig)
+		if err := json.Unmarshal([]byte(out), &daemonConfig); err != nil {
+			return fmt.Errorf("Docker 配置 JSON 无效: %w", err)
+		}
 	}
 	if daemonConfig == nil {
 		daemonConfig = make(map[string]interface{})
 	}
 
-	daemonConfig["registry-mirrors"] = mirrors
+	daemonConfig["registry-mirrors"] = normalizedMirrors
 	data, err := json.MarshalIndent(daemonConfig, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	encoded := strings.ReplaceAll(string(data), "'", "'\\''")
-	writeCmd := fmt.Sprintf("sudo mkdir -p /etc/docker && sudo bash -c \"cat <<'EOF' > /etc/docker/daemon.json\n%s\nEOF\" && sudo systemctl reload docker", encoded)
-	_, err = c.vmMgr.Exec(ctx, "bash", "-c", writeCmd)
+	if _, err = c.vmMgr.Exec(ctx, "sudo", "mkdir", "-p", "/etc/docker"); err != nil {
+		return err
+	}
+	if _, err = c.vmMgr.ExecWithInput(ctx, strings.NewReader(string(data)), "sudo", "tee", "/etc/docker/daemon.json"); err != nil {
+		return err
+	}
+	_, err = c.vmMgr.Exec(ctx, "sudo", "systemctl", "reload", "docker")
 	return err
 }

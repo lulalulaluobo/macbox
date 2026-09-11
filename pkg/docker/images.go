@@ -7,9 +7,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// Docker image references are passed as one argv item to docker. Keep the
+// accepted grammar deliberately conservative so an image field can never turn
+// into an option or shell expression.
+var validImageReference = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,255}$`)
 
 func (c *Client) ListImages(ctx context.Context) ([]ImageInfo, error) {
 	out, err := c.runDockerCmd(ctx, "images", "--format", "{{json .}}")
@@ -71,20 +77,21 @@ func (c *Client) ListImages(ctx context.Context) ([]ImageInfo, error) {
 			images = append(images, img)
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("读取镜像列表失败: %w", err)
+	}
 
 	return images, nil
 }
 
 func (c *Client) PullImage(ctx context.Context, imageName string, out io.Writer) error {
 	imageName = strings.TrimSpace(imageName)
-	if imageName == "" {
-		return fmt.Errorf("镜像名称不能为空")
+	if !validImageReference.MatchString(imageName) {
+		return fmt.Errorf("镜像名称格式无效")
 	}
 
 	fmt.Fprintf(out, "📦 准备拉取 Docker 镜像: %s\n", imageName)
-	// Execute via VM
-	execCmd := fmt.Sprintf("docker pull %s", imageName)
-	err := c.vmMgr.ExecStream(ctx, out, "bash", "-c", execCmd)
+	err := c.vmMgr.ExecStream(ctx, out, "docker", "pull", imageName)
 	if err != nil {
 		fmt.Fprintf(out, "❌ 拉取失败: %v\n", err)
 		return err
@@ -95,8 +102,8 @@ func (c *Client) PullImage(ctx context.Context, imageName string, out io.Writer)
 
 func (c *Client) RemoveImage(ctx context.Context, imageID string, force bool) error {
 	imageID = strings.TrimSpace(imageID)
-	if imageID == "" {
-		return fmt.Errorf("镜像ID不能为空")
+	if !validImageReference.MatchString(imageID) {
+		return fmt.Errorf("镜像 ID 或名称格式无效")
 	}
 	args := []string{"rmi"}
 	if force {
