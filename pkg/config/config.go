@@ -28,8 +28,9 @@ type Config struct {
 }
 
 type SystemConfig struct {
-	PreventSleep bool `yaml:"preventSleep"` // 24h keep-awake with caffeinate
-	AutoStart    bool `yaml:"autoStart"`    // macOS LaunchAgent autostart on boot
+	PreventSleep            bool `yaml:"preventSleep"`            // 24h keep-awake with caffeinate
+	AutoStart               bool `yaml:"autoStart"`               // macOS LaunchAgent autostart on boot
+	InitializationCompleted bool `yaml:"initializationCompleted"` // first-run VM/SSH bootstrap completed
 }
 
 type VMConfig struct {

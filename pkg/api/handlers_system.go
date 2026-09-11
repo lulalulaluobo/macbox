@@ -103,12 +103,13 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"system":      sysStats,
-		"power":       s.powerMgr.GetStatus(),
-		"service":     s.serviceMgr.GetStatus(),
-		"vm":          vmStat,
-		"vmAction":    s.vmMgr.GetVMAction(),
-		"configDirty": s.vmMgr.IsConfigDirty(),
+		"system":                 sysStats,
+		"power":                  s.powerMgr.GetStatus(),
+		"service":                s.serviceMgr.GetStatus(),
+		"vm":                     vmStat,
+		"vmAction":               s.vmMgr.GetVMAction(),
+		"configDirty":            s.vmMgr.IsConfigDirty(),
+		"initializationRequired": !cfgSnapshot.System.InitializationCompleted,
 		"docker": map[string]interface{}{
 			"ready":        vmStat != nil && vmStat.DockerReady,
 			"total":        len(containers),
@@ -282,6 +283,13 @@ func (s *Server) handleGetSSHConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleBootstrapSSH(w http.ResponseWriter, r *http.Request) {
 	if err := s.sshMgr.BootstrapRootKeyOnly(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("初始化 SSH 失败: %v", err))
+		return
+	}
+	if err := config.Update(s.cfg, func(updated *config.Config) error {
+		updated.System.InitializationCompleted = true
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存初始化状态失败: %v", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{

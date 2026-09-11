@@ -55,7 +55,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const needsInitialization = overview?.vm.status === 'NotCreated';
+  const needsInitialization = overview?.initializationRequired === true || overview?.vm.status === 'NotCreated';
   const navigate = (tab: typeof activeTab) => {
     if (needsInitialization && tab !== 'dashboard') return;
     setActiveTab(tab);

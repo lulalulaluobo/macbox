@@ -115,7 +115,12 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
     finalizingRef.current = false;
     setSSHReady(false);
     try {
-      await api.updateVMConfig({ cpus, memory, diskSize });
+      // A VM that was already running only needs the SSH/bootstrap step. Do
+      // not mark a live VM as config-dirty just because the wizard is being
+      // completed after an upgrade.
+      if (overview?.vm.status !== 'Running') {
+        await api.updateVMConfig({ cpus, memory, diskSize });
+      }
       const result = await api.startVM();
       setJob({
         id: result.jobId,

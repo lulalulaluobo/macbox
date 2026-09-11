@@ -271,6 +271,7 @@ export interface SystemOverview {
   vm: VMStatus;
   vmAction?: string;    // "starting" | "stopping" | "restarting" | "" (idle)
   configDirty?: boolean; // true when config changed and VM needs restart
+  initializationRequired?: boolean;
   docker: {
     ready: boolean;
     total: number;
