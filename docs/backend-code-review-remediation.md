@@ -90,9 +90,13 @@
 
 - 容器列表缓存与失效机制（`InvalidateContainerCaches`）、配置快照（`config.Snapshot`）复用。
 
-### 13. API Server 拆分 — ⏸ 未做（计划下一迭代）
+### 13. API Server 拆分 — ✅ 完成（2026-09-11 第二轮）
 
-`pkg/api/server.go` 约 3000 行，按领域拆分（middleware/policy/execx/errors）属于报告阶段 3，建议在安全基线稳定后单独立项，避免与功能迭代冲突。
+`pkg/api/server.go` 从 2859 行拆至 444 行，按业务边界拆为同包多文件（零行为变更，拆分前后 144 个顶层声明完全一致）：
+
+- `server.go`：Server 结构、构造与生命周期、Handler 中间件（认证/Origin/安全头）、通用 helper
+- `routes.go`：路由注册（权限矩阵单一入口）
+- `handlers_system.go` / `handlers_vm.go` / `handlers_storage.go` / `handlers_docker.go` / `handlers_apps.go` / `handlers_samba.go` / `handlers_files.go` / `handlers_auth.go`：按领域分组的 handler
 
 ### 14. HTTP/WS 防护与错误响应 — ✅ 完成
 
@@ -101,11 +105,11 @@
 
 ## P3 整改结果
 
-### 15. 清理与边界 — ◐ 部分
+### 15. 清理与边界 — ✅ 完成（2026-09-11 第二轮）
 
-- ✅（本次）`go mod tidy` 完成依赖修正。
+- ✅ `go mod tidy` 完成依赖修正。
 - ✅（本次）`references/dockge` 增加 stub `go.mod` 将其隔离出根模块；因 `references/` 被 .gitignore，该文件不入库，重新克隆参考项目后需再次放置（根因是参考项目位于模块树内，长期方案是移出仓库）。
-- ⏸ 废弃路由清理（容器 action 与 start/stop/restart 并存、`storage/select` 等待确认无前端调用后删除）未做。
+- ✅（本次）废弃路由删除：经前端调用逐一确认后，移除无消费者的 `POST /api/docker/images/pull/stream`、`POST /api/docker/compose/deploy/stream`、`GET /api/apps/{id}/install/stream`、`GET /api/ws/logs` 四条路由及 handler，连带清理 `websocketUpgrader` 与 `apps.InstallStream` 死代码。容器 `action` 与独立 `start/stop/restart` 路由、`storage/select` 经确认均有前端消费者，予以保留。
 
 ## 本次会话变更清单
 
@@ -117,7 +121,7 @@
 
 ## 剩余工作（建议顺序）
 
-1. `pkg/api/server.go` 按领域拆分并统一错误模型（报告 P2-13）。
-2. 确认无消费者后删除废弃路由（报告 P3-15）。
-3. 参考项目移出模块树或纳入独立 workspace（根因修复）。
-4. JobManager 化的长任务状态查询（报告 P2-11 的增强项，当前互斥已足够安全）。
+1. 参考项目移出模块树或纳入独立 workspace（根因修复）。
+2. JobManager 化的长任务状态查询（报告 P2-11 的增强项，当前互斥已足够安全）。
+
+至此，审查报告 P0–P3 共 15 项中，除上述 2 项低优先级增强外全部完成。

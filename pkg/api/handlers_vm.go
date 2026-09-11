@@ -1,0 +1,195 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/shirou/gopsutil/v3/mem"
+	"log"
+	"net/http"
+	"path/filepath"
+	"runtime"
+	"time"
+)
+
+// VM Handlers
+func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
+	if !s.vmMgr.BeginVMAction("starting") {
+		writeError(w, http.StatusConflict, "已有虚拟机操作正在进行")
+		return
+	}
+	if !s.beginBackgroundWork() {
+		s.vmMgr.EndVMAction()
+		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
+		return
+	}
+	go func() {
+		defer s.endBackgroundWork()
+		defer s.vmMgr.EndVMAction()
+		ctx, cancel := s.operationContext(10 * time.Minute)
+		defer cancel()
+		if err := s.vmMgr.Start(ctx, s.projectRoot); err != nil {
+			log.Printf("[MacNAS] VM Start error: %v", err)
+		} else {
+			s.vmMgr.SetConfigDirty(false)
+			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
+				log.Printf("[MacNAS] ensure Samba password after VM start failed: %v", err)
+			}
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting", "message": "虚拟机启动中..."})
+}
+
+func (s *Server) handleVMStop(w http.ResponseWriter, r *http.Request) {
+	if !s.vmMgr.BeginVMAction("stopping") {
+		writeError(w, http.StatusConflict, "已有虚拟机操作正在进行")
+		return
+	}
+	if !s.beginBackgroundWork() {
+		s.vmMgr.EndVMAction()
+		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
+		return
+	}
+	go func() {
+		defer s.endBackgroundWork()
+		defer s.vmMgr.EndVMAction()
+		ctx, cancel := s.operationContext(2 * time.Minute)
+		defer cancel()
+		if err := s.vmMgr.Stop(ctx); err != nil {
+			log.Printf("[MacNAS] VM Stop error: %v", err)
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping", "message": "虚拟机停止中..."})
+}
+
+func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
+	if !s.vmMgr.BeginVMAction("restarting") {
+		writeError(w, http.StatusConflict, "已有虚拟机操作正在进行")
+		return
+	}
+	if !s.beginBackgroundWork() {
+		s.vmMgr.EndVMAction()
+		writeError(w, http.StatusServiceUnavailable, "服务正在关闭")
+		return
+	}
+	go func() {
+		defer s.endBackgroundWork()
+		defer s.vmMgr.EndVMAction()
+		ctx, cancel := s.operationContext(10 * time.Minute)
+		defer cancel()
+		if err := s.vmMgr.Restart(ctx, s.projectRoot); err != nil {
+			log.Printf("[MacNAS] VM Restart error: %v", err)
+		} else {
+			s.vmMgr.SetConfigDirty(false)
+			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
+				log.Printf("[MacNAS] ensure Samba password after VM restart failed: %v", err)
+			}
+		}
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting", "message": "虚拟机重启中..."})
+}
+
+// Storage Handlers
+func (s *Server) regenerateVMConfig() error {
+	cfgDir, err := config.ConfigDir()
+	if err != nil {
+		return err
+	}
+	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	return s.vmMgr.GenerateConfigFile(tmplPath, filepath.Join(cfgDir, "macnas.yaml"))
+}
+
+func (s *Server) restoreConfigSnapshot(snapshot *config.Config) error {
+	if snapshot == nil {
+		return fmt.Errorf("配置快照为空")
+	}
+	return config.Update(s.cfg, func(updated *config.Config) error {
+		*updated = *snapshot
+		return nil
+	})
+}
+
+// VM Hardware Specs Configuration Handlers
+func (s *Server) handleVMConfigGet(w http.ResponseWriter, r *http.Request) {
+	cfgSnapshot, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取虚拟机配置失败")
+		return
+	}
+	totalMemGB := 16
+	if vMem, err := mem.VirtualMemory(); err == nil && vMem.Total > 0 {
+		totalMemGB = int(vMem.Total / 1024 / 1024 / 1024)
+	}
+
+	vmStat, _ := s.vmMgr.GetStatusContext(r.Context())
+	vmStatus := "unknown"
+	if vmStat != nil {
+		vmStatus = vmStat.Status
+	}
+
+	resp := map[string]interface{}{
+		"cpus":               cfgSnapshot.VM.CPUs,
+		"memory":             cfgSnapshot.VM.Memory,
+		"diskSize":           cfgSnapshot.VM.DiskSize,
+		"hostCpus":           runtime.NumCPU(),
+		"hostMemoryGB":       totalMemGB,
+		"vmStatus":           vmStatus,
+		"isDynamicMemory":    true,
+		"balloonDescription": "基于 Apple Virtualization.framework (vz) 原生 Virtio-Balloon 气球驱动。配置的内存为 VM 最大使用配额，系统按需动态分水，闲置内存由 macOS 自动回收。",
+		"diskDescription":    "系统根盘用于存储 Ubuntu 核心系统与 Docker 运行层。支持安全在线/重启扩容（只增不减以保障分区文件完整性）。",
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleVMConfigUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		CPUs     int `json:"cpus"`
+		Memory   int `json:"memory"`
+		DiskSize int `json:"diskSize"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "请求参数解析失败")
+		return
+	}
+	cfgSnapshot, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取虚拟机配置失败")
+		return
+	}
+
+	if req.CPUs < 1 || req.CPUs > runtime.NumCPU() {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("CPU 核心数必须在 1 到 %d 之间", runtime.NumCPU()))
+		return
+	}
+
+	if req.Memory < 2 || req.Memory > 64 {
+		writeError(w, http.StatusBadRequest, "内存分配必须在 2 GiB 到 64 GiB 之间")
+		return
+	}
+
+	if req.DiskSize < cfgSnapshot.VM.DiskSize {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("系统盘容量只支持扩容（当前为 %d GiB，不能缩减）", cfgSnapshot.VM.DiskSize))
+		return
+	}
+
+	if err := s.vmMgr.UpdateSpecs(req.CPUs, req.Memory, req.DiskSize, s.projectRoot); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	updatedConfig, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取更新后的虚拟机配置失败")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"requiresRestart": true,
+		"message":         "虚拟机硬件规格已更新！请重启虚拟机以加载新配置生效。",
+		"cpus":            updatedConfig.VM.CPUs,
+		"memory":          updatedConfig.VM.Memory,
+		"diskSize":        updatedConfig.VM.DiskSize,
+	})
+}

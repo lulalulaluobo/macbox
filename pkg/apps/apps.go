@@ -576,20 +576,6 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	return nil
 }
 
-// Backward-compatible InstallStream
-func (m *Manager) InstallStream(ctx context.Context, id string, portOverride int, out io.Writer) error {
-	cfg := InstallCustomConfig{}
-	if portOverride > 0 {
-		meta, err := m.GetAppConfig(ctx, id)
-		if err == nil && meta.Port > 0 {
-			cfg.PortsMap = map[string]int{
-				strconv.Itoa(meta.Port): portOverride,
-			}
-		}
-	}
-	return m.InstallStreamCustom(ctx, id, cfg, out)
-}
-
 func (m *Manager) Install(ctx context.Context, id string) error {
 	return m.InstallStreamCustom(ctx, id, InstallCustomConfig{}, io.Discard)
 }
