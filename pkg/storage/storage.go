@@ -125,6 +125,32 @@ func sameResolvedPath(left, right string) bool {
 	return filepath.Clean(leftResolved) == filepath.Clean(rightResolved)
 }
 
+// sameLinkTargetPath also handles a broken managed symlink. EvalSymlinks is
+// intentionally unable to resolve a missing external image, but the link's
+// recorded target can still be compared with the configured image path before
+// we safely restore the internal backup.
+func sameLinkTargetPath(linkPath, configuredPath string) bool {
+	if sameResolvedPath(linkPath, configuredPath) {
+		return true
+	}
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		return false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(linkPath), target)
+	}
+	target, err = filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	configuredPath, err = filepath.Abs(configuredPath)
+	if err != nil {
+		return false
+	}
+	return filepath.Clean(target) == filepath.Clean(configuredPath)
+}
+
 func pathWithin(base, candidate string) bool {
 	rel, err := filepath.Rel(filepath.Clean(base), filepath.Clean(candidate))
 	if err != nil {
@@ -859,12 +885,22 @@ func UnbindExternalDisk(cfg *config.Config) error {
 		if fi.Mode()&os.ModeSymlink == 0 {
 			return fmt.Errorf("Lima 数据盘目标不是 MacNAS 管理的链接，未执行解除绑定")
 		}
-		if strings.TrimSpace(cfgSnapshot.Storage.DataPath) == "" || !sameResolvedPath(targetDatadisk, cfgSnapshot.Storage.DataPath) {
+		if strings.TrimSpace(cfgSnapshot.Storage.DataPath) == "" || !sameLinkTargetPath(targetDatadisk, cfgSnapshot.Storage.DataPath) {
 			return fmt.Errorf("Lima 数据盘链接与当前配置不一致，未执行解除绑定")
 		}
 		resolvedTarget, err := filepath.EvalSymlinks(targetDatadisk)
 		if err != nil {
-			return fmt.Errorf("解析数据盘链接失败: %w", err)
+			rawTarget, readErr := os.Readlink(targetDatadisk)
+			if readErr != nil {
+				return fmt.Errorf("解析数据盘链接失败: %w", err)
+			}
+			if !filepath.IsAbs(rawTarget) {
+				rawTarget = filepath.Join(filepath.Dir(targetDatadisk), rawTarget)
+			}
+			resolvedTarget, err = filepath.Abs(rawTarget)
+			if err != nil {
+				return fmt.Errorf("解析数据盘链接目标失败: %w", err)
+			}
 		}
 		linkTarget = resolvedTarget
 		if backupInfo, backupErr := os.Lstat(backupPath); backupErr == nil {

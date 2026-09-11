@@ -26,9 +26,12 @@ func (s *Server) handleStorageDisks(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusRequestTimeout, "读取存储状态已取消")
 			return
 		}
-		log.Printf("[MacNAS Storage] managed disk discovery failed: %v", managedErr)
-		writeError(w, http.StatusInternalServerError, "读取 Lima 磁盘列表失败")
-		return
+		// A broken external image can make `limactl disk list` fail even though
+		// physical disks and the configured binding are still readable. Keep
+		// those parts available so the user can open storage settings and
+		// unbind/restore the internal backup.
+		log.Printf("[MacNAS Storage] managed disk discovery failed; returning degraded storage status: %v", managedErr)
+		managed = []storage.ManagedDisk{}
 	}
 
 	isExternal := (cfgSnapshot.Storage.DataPath != "")

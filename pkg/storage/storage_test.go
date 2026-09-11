@@ -147,3 +147,39 @@ func TestValidateStorageTargetDir(t *testing.T) {
 		t.Fatal("symlink target was accepted")
 	}
 }
+
+func TestUnbindExternalDiskRestoresBackupWhenImageIsMissing(t *testing.T) {
+	testHome := t.TempDir()
+	t.Setenv("HOME", testHome)
+	cfg := config.DefaultConfig()
+	cfg.Storage.SelectedDisk = "disk4"
+	cfg.Storage.MountPoint = "/System/Volumes/Data"
+	cfg.Storage.DataPath = filepath.Join(testHome, "MacNAS", "datadisk.img")
+
+	diskDir := filepath.Join(testHome, ".lima", "_disks", "macnas-data")
+	if err := os.MkdirAll(diskDir, 0700); err != nil {
+		t.Fatalf("create Lima disk directory: %v", err)
+	}
+	diskPath := filepath.Join(diskDir, "datadisk")
+	if err := os.Symlink(cfg.Storage.DataPath, diskPath); err != nil {
+		t.Fatalf("create broken external disk link: %v", err)
+	}
+	backupPath := filepath.Join(diskDir, "datadisk.internal.bak")
+	if err := os.WriteFile(backupPath, []byte("internal backup"), 0600); err != nil {
+		t.Fatalf("create internal backup: %v", err)
+	}
+
+	if err := UnbindExternalDisk(cfg); err != nil {
+		t.Fatalf("unbind should restore an internal backup after external image loss: %v", err)
+	}
+	content, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatalf("read restored internal data disk: %v", err)
+	}
+	if string(content) != "internal backup" {
+		t.Fatalf("restored data disk content = %q, want internal backup", content)
+	}
+	if cfg.Storage.DataPath != "" || cfg.Storage.SelectedDisk != "" || cfg.Storage.MountPoint != "" {
+		t.Fatalf("external storage config was not cleared: %+v", cfg.Storage)
+	}
+}
