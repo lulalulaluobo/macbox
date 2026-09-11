@@ -62,7 +62,7 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (needsInitialization && activeTab !== 'dashboard') {
+    if (needsInitialization && activeTab !== 'dashboard' && activeTab !== 'storage_settings') {
       setActiveTab('dashboard');
     }
   }, [needsInitialization, activeTab]);
