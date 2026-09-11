@@ -60,6 +60,8 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   const [bindingDisk, setBindingDisk] = useState<DiskInfo | null>(null);
   const [bindSizeGB, setBindSizeGB] = useState<number>(100);
   const [bindLoading, setBindLoading] = useState(false);
+  const [showUnbindConfirm, setShowUnbindConfirm] = useState(false);
+  const [unbindLoading, setUnbindLoading] = useState(false);
   const [restartPrompt, setRestartPrompt] = useState(false);
   const [restartingVM, setRestartingVM] = useState(false);
 
@@ -129,14 +131,18 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   };
 
   const handleUnbind = async () => {
-    if (!confirm('确定要切回内置虚拟数据盘吗？外接盘上的数据将安全保留。')) return;
+    setUnbindLoading(true);
     try {
       const res = await api.unbindStorage();
       setAlertMsg({ type: 'success', text: res.message });
+      setShowUnbindConfirm(false);
       setRestartPrompt(true);
       loadData();
+      if (onRefreshOverview) onRefreshOverview();
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `解除绑定失败: ${err.message}` });
+    } finally {
+      setUnbindLoading(false);
     }
   };
 
@@ -833,7 +839,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <span className="truncate text-[11px] text-slate-500">{disk.usedPercent > 0 ? `${disk.usedPercent.toFixed(0)}% 已用` : disk.mounted ? '已就绪' : '未挂载'}</span>
                     {isSelected ? (
-                      isExternalActive ? <button type="button" onClick={handleUnbind} className="min-h-9 shrink-0 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200" title={dataPath}>解除主盘</button> : <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">主盘</span>
+                      isExternalActive ? <button type="button" onClick={() => setShowUnbindConfirm(true)} className="min-h-9 shrink-0 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200" title={dataPath}>解除主盘</button> : <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">主盘</span>
                     ) : disk.isSecondary ? (
                       <button type="button" onClick={handleUnbindSecondary} className="min-h-9 shrink-0 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">解除扩展</button>
                     ) : (
@@ -1213,6 +1219,32 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>{bindLoading ? '正在绑定...' : '确认绑定为数据盘'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showUnbindConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm dark:bg-black/75" role="presentation">
+          <div className="w-full max-w-md space-y-5 rounded-3xl border border-rose-200 bg-white p-6 shadow-2xl dark:border-rose-900/60 dark:bg-slate-900" role="dialog" aria-modal="true" aria-labelledby="unbind-storage-title">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 dark:bg-rose-500/15 dark:text-rose-300">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 id="unbind-storage-title" className="text-base font-black text-slate-900 dark:text-white">解除主盘绑定？</h3>
+                <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">当前外接镜像无法访问，MacNAS 将移除外接盘链接并恢复本机内部数据盘备份。</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200">
+              外接盘原始数据不会被删除；恢复完成后需要返回主页重新初始化虚拟机。
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => setShowUnbindConfirm(false)} disabled={unbindLoading} className="min-h-11 rounded-2xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">取消</button>
+              <button type="button" onClick={() => void handleUnbind()} disabled={unbindLoading} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-rose-500 px-5 text-sm font-bold text-white transition hover:bg-rose-600 disabled:cursor-wait disabled:opacity-60">
+                {unbindLoading && <RefreshCw className="h-4 w-4 animate-spin" />}
+                {unbindLoading ? '正在恢复…' : '确认解除并恢复'}
               </button>
             </div>
           </div>
