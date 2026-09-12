@@ -572,6 +572,26 @@ func (m *Manager) GetUser(id string) (*User, error) {
 	return toPublicUser(u), nil
 }
 
+// IsInitialAdmin reports whether id belongs to the earliest enabled
+// administrator. SMB credentials intentionally follow this one account so
+// there is no second password to configure or lose.
+func (m *Manager) IsInitialAdmin(id string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var initial *storedUser
+	for _, user := range m.users {
+		if user.Role != "admin" || !user.Enabled {
+			continue
+		}
+		if initial == nil || user.CreatedAt.Before(initial.CreatedAt) ||
+			(user.CreatedAt.Equal(initial.CreatedAt) && user.ID < initial.ID) {
+			initial = user
+		}
+	}
+	return initial != nil && initial.ID == id
+}
+
 type CreateUserRequest struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"displayName"`

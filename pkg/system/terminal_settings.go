@@ -140,6 +140,59 @@ func (m *TerminalSettingsManager) Update(newSettings TerminalSettings) error {
 	return nil
 }
 
+// AISkillsDirectoryInfo validates a host directory in the shape expected by
+// Agent CLIs: each immediate child directory must contain a SKILL.md file.
+// Some skill managers keep that directory one level below their application
+// root (for example ~/.skills-manager/skills), so this also accepts that
+// layout and returns the actual skill directory.
+func AISkillsDirectoryInfo(hostPath string) (string, int, error) {
+	path := filepath.Clean(hostPath)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", 0, err
+	}
+	if !info.IsDir() {
+		return "", 0, fmt.Errorf("AI Skill 路径必须是目录")
+	}
+
+	count, err := countAISkillDirectories(path)
+	if err != nil {
+		return "", 0, err
+	}
+	if count > 0 {
+		return path, count, nil
+	}
+
+	nestedPath := filepath.Join(path, "skills")
+	nestedCount, nestedErr := countAISkillDirectories(nestedPath)
+	if nestedErr == nil && nestedCount > 0 {
+		return nestedPath, nestedCount, nil
+	}
+
+	return "", 0, fmt.Errorf("目录中未发现 Skill：请选择直接包含各 Skill 子目录/SKILL.md 的目录")
+}
+
+func countAISkillDirectories(path string) (int, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, entry := range entries {
+		entryPath := filepath.Join(path, entry.Name())
+		entryInfo, statErr := os.Stat(entryPath)
+		if statErr != nil || !entryInfo.IsDir() {
+			continue
+		}
+		skillInfo, skillErr := os.Stat(filepath.Join(entryPath, "SKILL.md"))
+		if skillErr == nil && !skillInfo.IsDir() {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // DiscoverAISkillsCandidates returns the conventional local skill locations
 // for AI CLIs. The browser may be on another device, so these are discovered
 // by the MacNAS process on the Mac host rather than by a browser directory
@@ -154,6 +207,7 @@ func DiscoverAISkillsCandidates() []AISkillsCandidate {
 		relative    string
 		description string
 	}{
+		{name: "Skills Manager（推荐）", relative: ".skills-manager/skills", description: "skills-manager 管理的通用 Skill 目录"},
 		{name: "Agent Skills（推荐）", relative: ".agents/skills", description: "Codex、Claude 等 Agent CLI 的通用 Skill 目录"},
 		{name: "Codex Skills", relative: ".codex/skills", description: "Codex CLI 的技能目录"},
 		{name: "Claude Skills", relative: ".claude/skills", description: "Claude CLI 的技能目录"},
@@ -177,13 +231,11 @@ func DiscoverAISkillsCandidates() []AISkillsCandidate {
 		} else if !info.IsDir() {
 			candidate.Reason = "路径不是目录"
 		} else {
-			candidate.Available = true
-			if entries, readErr := os.ReadDir(path); readErr == nil {
-				for _, entry := range entries {
-					if entry.IsDir() {
-						candidate.SkillCount++
-					}
-				}
+			_, candidate.SkillCount, statErr = AISkillsDirectoryInfo(path)
+			if statErr != nil {
+				candidate.Reason = statErr.Error()
+			} else {
+				candidate.Available = true
 			}
 		}
 		candidates = append(candidates, candidate)

@@ -382,9 +382,13 @@ func (s *Server) terminalSkillsState() (terminalSkillsResponse, error) {
 	}
 	path := cfgSnapshot.Terminal.AISkillsHostPath
 	result := terminalSkillsResponse{
-		Enabled:    cfgSnapshot.Terminal.AISkillsEnabled,
-		HostPath:   path,
-		GuestPaths: []string{"/home/macnasctl/.agents/skills", "/root/.agents/skills"},
+		Enabled:  cfgSnapshot.Terminal.AISkillsEnabled,
+		HostPath: path,
+		GuestPaths: []string{
+			"/home/macnasctl/.agents/skills", "/root/.agents/skills",
+			"/home/macnasctl/.claude/skills", "/root/.claude/skills",
+			"/home/macnasctl/.codex/skills", "/root/.codex/skills",
+		},
 		ReadOnly:   true,
 		Status:     "disabled",
 		Message:    "未启用本机 Skill 目录映射",
@@ -409,8 +413,20 @@ func (s *Server) terminalSkillsState() (terminalSkillsResponse, error) {
 		result.Message = "配置路径不是目录，请选择 .agents/skills 文件夹"
 		return result, nil
 	}
+	resolvedPath, skillCount, resolveErr := system.AISkillsDirectoryInfo(path)
+	if resolveErr != nil {
+		result.Status = "invalid"
+		result.Message = resolveErr.Error()
+		return result, nil
+	}
+	if resolvedPath != path {
+		result.HostPath = resolvedPath
+		result.Status = "ready"
+		result.Message = fmt.Sprintf("已识别到 %d 个 Skill；检测到管理器根目录，实际映射目录已自动下沉到 /skills", skillCount)
+		return result, nil
+	}
 	result.Status = "ready"
-	result.Message = "本机 Skill 目录已就绪，将以只读方式映射到 VM"
+	result.Message = fmt.Sprintf("已识别到 %d 个 Skill，本机目录将以只读方式映射到 VM", skillCount)
 	return result, nil
 }
 
@@ -461,6 +477,12 @@ func (s *Server) handleUpdateTerminalSkills(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusBadRequest, "AI Skill 路径必须是目录")
 			return
 		}
+		resolvedPath, _, resolveErr := system.AISkillsDirectoryInfo(hostPath)
+		if resolveErr != nil {
+			writeError(w, http.StatusBadRequest, resolveErr.Error())
+			return
+		}
+		hostPath = resolvedPath
 	}
 
 	previousConfig, err := config.Snapshot(s.cfg)

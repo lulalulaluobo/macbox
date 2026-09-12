@@ -204,7 +204,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className={`sora-app-shell flex flex-col bg-slate-50 dark:bg-[#090d16] text-slate-900 dark:text-slate-100 transition-colors duration-200 ${activeTab === 'terminal' ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'}`}>
+    <div className={`sora-app-shell flex flex-col bg-slate-50 dark:bg-[#090d16] text-slate-900 dark:text-slate-100 transition-colors duration-200 ${activeTab === 'terminal' ? 'h-[100dvh] min-h-0 overflow-hidden' : 'min-h-[100dvh]'}`}>
       <Navbar
         activeTab={activeTab}
         setActiveTab={navigate}
@@ -223,9 +223,9 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 min-w-0">
+      <div className={`mx-auto flex min-h-0 w-full max-w-6xl min-w-0 flex-1 ${activeTab === 'terminal' ? 'h-full' : ''}`}>
         <main className={`sora-app-content min-w-0 flex-1 px-3 ${activeTab === 'terminal'
-          ? 'terminal-app-content flex min-h-0 overflow-hidden pb-[calc(76px+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pt-4'
+          ? 'terminal-app-content flex h-full min-h-0 flex-col overflow-hidden pb-[calc(76px+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pt-4'
           : (activeTab === 'dashboard' || activeTab === 'storage' || activeTab === 'docker')
             ? 'pb-[calc(76px+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pt-4'
             : 'pb-32 pt-5 sm:px-6 sm:pb-32 sm:pt-8'

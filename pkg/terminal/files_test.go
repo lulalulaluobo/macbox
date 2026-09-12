@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-// 文件沙箱分为两层：normalizeRequestedPath 在词法层拒绝畸形输入，
-// resolveAllowedPathContext 再通过 VM 内 realpath + commonpath 把路径限制在
-// /data 之内。本文件只测试纯函数层；依赖 limactl 的部分不允许在单测中执行，
-// 以免触碰真实虚拟机（见 docs/backend-code-review-2026-09-11.md P0-5）。
+// 文件路径分为两层：normalizeRequestedPath 在词法层拒绝畸形输入，
+// resolveAllowedPathContext 再通过 VM 内 realpath 解析路径。API 层把非管理员
+// 请求限制在 /data；管理员可以浏览 VM 根目录。本文件只测试纯函数层，依赖
+// limactl 的部分不允许在单测中执行，以免触碰真实虚拟机。
 
 func TestNormalizeRequestedPathAcceptsValidDataPaths(t *testing.T) {
 	cases := []struct {
@@ -18,6 +18,8 @@ func TestNormalizeRequestedPathAcceptsValidDataPaths(t *testing.T) {
 		want string
 	}{
 		{"data root", "/data", "/data"},
+		{"vm root", "/", "/"},
+		{"vm system directory", "/etc", "/etc"},
 		{"plain subdir", "/data/media", "/data/media"},
 		{"trailing slash cleaned", "/data/media/", "/data/media"},
 		{"inner dot cleaned", "/data/media/../files", "/data/files"},
@@ -171,7 +173,7 @@ func TestValidateArchiveEntryNameRejectsEscapePaths(t *testing.T) {
 }
 
 func TestValidateExternalArchiveListings(t *testing.T) {
-	listing := ""+
+	listing := "" +
 		"Path = archive.7z\nType = 7z\n----------\n" +
 		"Path = folder/file.txt\nAttributes = A\nSize = 12\n"
 	if err := validateSevenZipListing(listing); err != nil {

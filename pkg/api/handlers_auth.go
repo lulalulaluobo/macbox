@@ -1,13 +1,29 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"github.com/luluen/mac-nas/pkg/auth"
+	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/luluen/mac-nas/pkg/auth"
+	"github.com/luluen/mac-nas/pkg/config"
 )
+
+func (s *Server) syncInitialAdminSMBCredentials(ctx context.Context, user *auth.User, password string) {
+	if user == nil || user.Role != "admin" || s.authMgr == nil || s.sambaMgr == nil ||
+		!s.authMgr.IsInitialAdmin(user.ID) {
+		return
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := s.sambaMgr.SyncCredentials(syncCtx, user.Username, password); err != nil {
+		log.Printf("[MacNAS Samba] 首位超级管理员凭据同步失败: %v", err)
+	}
+}
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, rememberMe bool) {
 	maxAge := int((24 * time.Hour) / time.Second)
@@ -65,6 +81,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.syncInitialAdminSMBCredentials(r.Context(), user, req.Password)
 	s.setSessionCookie(w, r, token, req.RememberMe)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"user": user,
@@ -93,12 +110,17 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "请求数据格式错误")
 		return
 	}
+	if err := config.ValidateSambaUsername(strings.TrimSpace(req.Username)); err != nil {
+		writeError(w, http.StatusBadRequest, "管理员用户名也必须可用于 SMB 登录: "+err.Error())
+		return
+	}
 	req.Role = "admin"
 	user, err := s.authMgr.CreateInitialAdmin(req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.syncInitialAdminSMBCredentials(r.Context(), user, req.Password)
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"status": "ok",
 		"user":   user,
@@ -151,6 +173,7 @@ func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.syncInitialAdminSMBCredentials(r.Context(), user, req.NewPassword)
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
@@ -202,6 +225,7 @@ func (s *Server) handleAuthUpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "用户 ID 不能为空")
 		return
 	}
+	isInitialAdmin := s.authMgr.IsInitialAdmin(id)
 
 	var req auth.UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -213,6 +237,9 @@ func (s *Server) handleAuthUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if isInitialAdmin && req.NewPassword != nil && *req.NewPassword != "" {
+		s.syncInitialAdminSMBCredentials(r.Context(), updatedUser, *req.NewPassword)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

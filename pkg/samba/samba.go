@@ -47,6 +47,11 @@ type Manager struct {
 	mu    sync.Mutex
 }
 
+const (
+	sambaInternalUser    = "macnas"
+	sambaUsernameMapPath = "/etc/samba/macnas-users.map"
+)
+
 func NewManager(cfg *config.Config, vmMgr *vm.Manager) *Manager {
 	m := &Manager{
 		cfg:   cfg,
@@ -289,6 +294,13 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("读取 Samba 配置失败: %w", err)
 	}
+	sambaUser := strings.TrimSpace(cfgSnapshot.Samba.User)
+	if sambaUser == "" {
+		sambaUser = sambaInternalUser
+	}
+	if err := config.ValidateSambaUsername(sambaUser); err != nil {
+		return fmt.Errorf("Samba 用户名无效: %w", err)
+	}
 
 	var sb strings.Builder
 	sb.WriteString("[global]\n")
@@ -297,6 +309,9 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 	sb.WriteString("   server role = standalone server\n")
 	sb.WriteString("   security = user\n")
 	sb.WriteString("   map to guest = Never\n")
+	if sambaUser != sambaInternalUser {
+		sb.WriteString("   username map = " + sambaUsernameMapPath + "\n")
+	}
 	sb.WriteString("   dns proxy = no\n")
 	sb.WriteString("   log file = /var/log/samba/log.%m\n")
 	sb.WriteString("   max log size = 50\n\n")
@@ -312,8 +327,8 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 		if cleanName == "" {
 			continue
 		}
-		if !shareNameRegex.MatchString(cleanName) || hasControlChars(cleanName) {
-			return fmt.Errorf("共享名称格式无效: %s", cleanName)
+		if err := validateShareName(cleanName); err != nil {
+			return fmt.Errorf("共享名称格式无效: %s: %w", cleanName, err)
 		}
 
 		cleanPath, pathErr := normalizeSharePath(s.Path)
@@ -347,8 +362,8 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 
 		sb.WriteString("   create mask = 0660\n")
 		sb.WriteString("   directory mask = 0770\n")
-		sb.WriteString("   force user = macnas\n")
-		sb.WriteString("   force group = macnas\n\n")
+		sb.WriteString("   force user = " + sambaInternalUser + "\n")
+		sb.WriteString("   force group = " + sambaInternalUser + "\n\n")
 	}
 
 	confContent := sb.String()
@@ -365,6 +380,15 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 	// 2. Write /etc/samba/smb.conf
 	if out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(confContent), "sudo", "tee", "/etc/samba/smb.conf"); err != nil {
 		return fmt.Errorf("写入 smb.conf 失败: %s (%w)", out, err)
+	}
+	if sambaUser != sambaInternalUser {
+		mapContent := fmt.Sprintf("%s = %s\n", sambaInternalUser, sambaUser)
+		if out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(mapContent), "sudo", "tee", sambaUsernameMapPath); err != nil {
+			return fmt.Errorf("写入 Samba 用户映射失败: %s (%w)", out, err)
+		}
+		if out, err := m.vmMgr.Exec(ctx, "sudo", "chmod", "0600", sambaUsernameMapPath); err != nil {
+			return fmt.Errorf("保护 Samba 用户映射失败: %s (%w)", out, err)
+		}
 	}
 
 	// 3. Reload or restart Samba
@@ -398,8 +422,24 @@ func (m *Manager) rollbackSharesLocked(previous []config.SMBShare, operationErr 
 	return operationErr
 }
 
-var shareNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
 var shareIDRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
+func validateShareName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("共享服务名称不能为空")
+	}
+	if len([]byte(name)) > 128 {
+		return fmt.Errorf("共享名称不能超过 128 个字节")
+	}
+	for _, r := range name {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+			continue
+		}
+		return fmt.Errorf("共享名称仅支持中文、字母、数字、下划线及连字符 (-)")
+	}
+	return nil
+}
 
 func normalizeSharePath(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
@@ -427,11 +467,8 @@ func hasControlChars(value string) bool {
 
 func (m *Manager) AddOrUpdateShare(ctx context.Context, share config.SMBShare) (*config.SMBShare, error) {
 	share.Name = strings.TrimSpace(share.Name)
-	if share.Name == "" {
-		return nil, fmt.Errorf("共享服务名称不能为空")
-	}
-	if !shareNameRegex.MatchString(share.Name) {
-		return nil, fmt.Errorf("共享名称仅支持英文字母、数字、下划线及连字符 (-)")
+	if err := validateShareName(share.Name); err != nil {
+		return nil, err
 	}
 
 	share.Path = strings.TrimSpace(share.Path)
@@ -575,72 +612,77 @@ func (m *Manager) ToggleService(ctx context.Context, enable bool) error {
 	return nil
 }
 
-func (m *Manager) UpdatePassword(ctx context.Context, newPassword string) error {
-	if err := config.ValidateSambaPassword(newPassword); err != nil {
+// SyncCredentials makes the first Web administrator's credentials the only
+// SMB credentials. The desired values are persisted before touching the VM;
+// if the VM is stopped, EnsurePassword will apply them on the next start.
+func (m *Manager) SyncCredentials(ctx context.Context, username, password string) error {
+	username = strings.TrimSpace(username)
+	if err := config.ValidateSambaUsername(username); err != nil {
+		return err
+	}
+	if err := config.ValidateSambaPassword(password); err != nil {
 		return err
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	previousConfig, err := config.Snapshot(m.cfg)
+	cfgSnapshot, err := config.Snapshot(m.cfg)
 	if err != nil {
-		return fmt.Errorf("读取旧 Samba 密码配置失败: %w", err)
+		return fmt.Errorf("读取 SMB 凭据配置失败: %w", err)
 	}
-	previousPassword := previousConfig.Samba.Password
-	rollback := func(operationErr error) error {
-		if strings.TrimSpace(previousPassword) == "" {
-			return operationErr
-		}
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if rollbackOut, rollbackErr := m.vmMgr.ExecWithInput(rollbackCtx, strings.NewReader(previousPassword+"\n"+previousPassword+"\n"), "sudo", "smbpasswd", "-a", "macnas", "-s"); rollbackErr != nil {
-			return fmt.Errorf("%v；恢复旧 Samba 密码失败: %s (%w)", operationErr, rollbackOut, rollbackErr)
-		}
-		if rollbackOut, rollbackErr := m.vmMgr.Exec(rollbackCtx, "sudo", "smbpasswd", "-e", "macnas"); rollbackErr != nil {
-			return fmt.Errorf("%v；重新启用旧 Samba 密码失败: %s (%w)", operationErr, rollbackOut, rollbackErr)
-		}
-		return operationErr
-	}
-
-	out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(newPassword+"\n"+newPassword+"\n"), "sudo", "smbpasswd", "-a", "macnas", "-s")
-	if err != nil {
-		return fmt.Errorf("修改密码失败: %s (%w)", out, err)
-	}
-	if out, err = m.vmMgr.Exec(ctx, "sudo", "smbpasswd", "-e", "macnas"); err != nil {
-		return rollback(fmt.Errorf("启用 Samba 用户失败: %s (%w)", out, err))
-	}
-
-	err = config.Update(m.cfg, func(updated *config.Config) error {
-		updated.Samba.Password = newPassword
+	if cfgSnapshot.Samba.User == username && cfgSnapshot.Samba.Password == password {
 		return nil
-	})
-	if err != nil {
-		return rollback(fmt.Errorf("保存 Samba 密码失败: %w", err))
 	}
-	return nil
+	if err := config.Update(m.cfg, func(updated *config.Config) error {
+		updated.Samba.User = username
+		updated.Samba.Password = password
+		return nil
+	}); err != nil {
+		return fmt.Errorf("保存 SMB 凭据失败: %w", err)
+	}
+
+	vmStat, statusErr := m.vmMgr.GetStatusContext(ctx)
+	if statusErr != nil || vmStat == nil || vmStat.Status != "Running" {
+		// The next VM start applies the persisted credentials and username map.
+		return nil
+	}
+	return m.ensurePasswordLocked(ctx)
 }
 
 func (m *Manager) EnsurePassword(ctx context.Context) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ensurePasswordLocked(ctx)
+}
+
+func (m *Manager) ensurePasswordLocked(ctx context.Context) error {
 	cfgSnapshot, err := config.Snapshot(m.cfg)
-	m.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("读取 Samba 密码配置失败: %w", err)
 	}
 	pwd := cfgSnapshot.Samba.Password
 	if err := config.ValidateSambaPassword(pwd); err != nil {
-		return fmt.Errorf("Samba 密码未初始化或不符合安全要求，请先设置至少 12 个字符的密码: %w", err)
+		return fmt.Errorf("Samba 密码未初始化或不符合安全要求，请先设置至少 8 个字符的密码: %w", err)
 	}
-	if _, err := m.vmMgr.Exec(ctx, "id", "-u", "macnas"); err != nil {
-		if _, userErr := m.vmMgr.Exec(ctx, "sudo", "useradd", "-M", "-s", "/usr/sbin/nologin", "macnas"); userErr != nil {
+	user := strings.TrimSpace(cfgSnapshot.Samba.User)
+	if user == "" {
+		user = sambaInternalUser
+	}
+	if err := config.ValidateSambaUsername(user); err != nil {
+		return fmt.Errorf("Samba 用户名无效: %w", err)
+	}
+	if _, err := m.vmMgr.Exec(ctx, "id", "-u", sambaInternalUser); err != nil {
+		if _, userErr := m.vmMgr.Exec(ctx, "sudo", "useradd", "-M", "-s", "/usr/sbin/nologin", sambaInternalUser); userErr != nil {
 			return userErr
 		}
 	}
-	if _, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(pwd+"\n"+pwd+"\n"), "sudo", "smbpasswd", "-a", "macnas", "-s"); err != nil {
-		return err
+	if out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(pwd+"\n"+pwd+"\n"), "sudo", "smbpasswd", "-a", sambaInternalUser, "-s"); err != nil {
+		return fmt.Errorf("同步 Samba 密码失败: %s (%w)", out, err)
 	}
-	_, err = m.vmMgr.Exec(ctx, "sudo", "smbpasswd", "-e", "macnas")
-	return err
+	if out, err := m.vmMgr.Exec(ctx, "sudo", "smbpasswd", "-e", sambaInternalUser); err != nil {
+		return fmt.Errorf("启用 Samba 用户失败: %s (%w)", out, err)
+	}
+	return m.applyConfigLocked(ctx)
 }
 
 func (m *Manager) Restart(ctx context.Context) error {

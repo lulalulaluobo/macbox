@@ -103,6 +103,13 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
 
   if (!app) return null;
 
+  const handleFinishedClose = () => {
+    if (installStatus === 'done') {
+      onSuccess();
+    }
+    onClose();
+  };
+
   const handleStartDeploy = async () => {
     setInstallStatus('installing');
     setInstallLogs([`🚀 正在连接 MacNAS 应用引擎并提交定制参数...`]);
@@ -128,6 +135,27 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let streamCompleted = false;
+      let streamFailed = false;
+
+      const processStreamLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        if (trimmed.startsWith('data:')) {
+          const dataStr = trimmed.slice(5).trim();
+          if (dataStr) {
+            setInstallLogs(prev => [...prev, dataStr]);
+          }
+        } else if (trimmed === 'event: done') {
+          streamCompleted = true;
+          setInstallStatus('done');
+        } else if (trimmed === 'event: error') {
+          streamFailed = true;
+          setInstallStatus('error');
+          setInstallError('安装过程遇到错误，请查看控制台日志');
+        }
+      };
 
       while (true) {
         const { value, done } = await reader.read();
@@ -137,25 +165,15 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('data:')) {
-            const dataStr = trimmed.slice(5).trim();
-            if (dataStr) {
-              setInstallLogs(prev => [...prev, dataStr]);
-            }
-          } else if (trimmed.startsWith('event: done')) {
-            setInstallStatus('done');
-            onSuccess();
-          } else if (trimmed.startsWith('event: error')) {
-            setInstallStatus('error');
-            setInstallError('安装过程遇到错误，请查看控制台日志');
-          }
+          processStreamLine(line);
         }
       }
 
-      if (installStatus === 'installing') {
+      buffer += decoder.decode();
+      processStreamLine(buffer);
+
+      if (!streamCompleted && !streamFailed) {
         setInstallStatus('done');
-        onSuccess();
       }
     } catch (err: any) {
       setInstallError(err.message || '安装网络中断');
@@ -189,7 +207,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
           </div>
 
           <button
-            onClick={onClose}
+            onClick={installStatus === 'done' ? handleFinishedClose : onClose}
             disabled={installStatus === 'installing'}
             aria-label="关闭配置"
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-900 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"
@@ -480,6 +498,9 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                       {webAccessUrl}
                     </a>
                   </p>
+                  <p className="text-[11px] text-emerald-200/75">
+                    部署日志已保留。请先查看或复制初始化信息，确认完成后再手动关闭窗口。
+                  </p>
                 </div>
               )}
 
@@ -548,10 +569,10 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
             {installStatus === 'done' && (
               <>
                 <button
-                  onClick={onClose}
+                  onClick={handleFinishedClose}
                   className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-semibold transition"
                 >
-                  关闭
+                  关闭并刷新应用列表
                 </button>
                 <a
                   href={webAccessUrl}

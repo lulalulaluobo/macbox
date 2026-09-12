@@ -86,9 +86,17 @@ func (m *SessionManager) Open(options terminalSessionOptions, requestedID string
 	m.reapLocked(now)
 	if requestedID != "" {
 		if existing, ok := m.sessions[requestedID]; ok && existing.matches(options) {
-			existing.touch()
+			if !existing.isFinished() {
+				existing.touch()
+				m.mu.Unlock()
+				return existing, false, nil
+			}
+			// A VM restart can terminate the PTY while its browser session ID is
+			// still present in memory. Never attach a new browser to that dead
+			// process; remove it so Open creates a fresh session below.
+			delete(m.sessions, requestedID)
 			m.mu.Unlock()
-			return existing, false, nil
+			existing.stop()
 		}
 	}
 	if len(m.sessions) >= maxTerminalSessions {
@@ -116,6 +124,26 @@ func (m *SessionManager) Open(options terminalSessionOptions, requestedID string
 	m.sessions[session.id] = session
 	m.mu.Unlock()
 	return session, true, nil
+}
+
+// Close terminates and forgets one browser-owned terminal session. It is used
+// by the explicit “关闭会话” action so a user can release a PTY immediately
+// instead of waiting for the idle reaper.
+func (m *SessionManager) CloseSession(id string) bool {
+	if m == nil || id == "" {
+		return false
+	}
+	m.mu.Lock()
+	session, ok := m.sessions[id]
+	if ok {
+		delete(m.sessions, id)
+	}
+	m.mu.Unlock()
+	if !ok {
+		return false
+	}
+	session.stop()
+	return true
 }
 
 func (m *SessionManager) start(options terminalSessionOptions) (*terminalSession, error) {
@@ -204,6 +232,12 @@ func (s *terminalSession) activity() time.Time {
 	s.activityMu.Lock()
 	defer s.activityMu.Unlock()
 	return s.lastActivity
+}
+
+func (s *terminalSession) isFinished() bool {
+	s.activityMu.Lock()
+	defer s.activityMu.Unlock()
+	return s.finished
 }
 
 func (s *terminalSession) touch() {

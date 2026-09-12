@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/luluen/mac-nas/pkg/terminal"
 	"net/http"
+	pathpkg "path"
 	"strconv"
 	"strings"
 	"time"
@@ -24,11 +25,45 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	terminal.HandleTerminalWS(w, r, s.vmMgr.InstanceName(), s.allowedOrigins, s.terminalMgr)
 }
 
+func (s *Server) handleTerminalSessionClose(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "终端会话参数无效")
+		return
+	}
+	if strings.TrimSpace(req.ID) == "" {
+		writeError(w, http.StatusBadRequest, "终端会话 ID 不能为空")
+		return
+	}
+	closed := s.terminalMgr != nil && s.terminalMgr.CloseSession(strings.TrimSpace(req.ID))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "closed", "closed": closed})
+}
+
 // File System Handlers
+func terminalPathIsNASData(requested string) bool {
+	clean := pathpkg.Clean(strings.TrimSpace(requested))
+	return clean == "/data" || strings.HasPrefix(clean, "/data/")
+}
+
+// The file browser normally exposes the NAS data root to all authenticated
+// users. Browsing the VM root is an administrator-only capability because it
+// includes /etc, /home, /var and other system directories.
+func (s *Server) requireTerminalPathAccess(w http.ResponseWriter, r *http.Request, requested string) bool {
+	if terminalPathIsNASData(requested) {
+		return true
+	}
+	return s.requireAdmin(w, r) != nil
+}
+
 func (s *Server) handleTerminalFilesList(w http.ResponseWriter, r *http.Request) {
 	targetPath := r.URL.Query().Get("path")
 	if targetPath == "" {
 		targetPath = "/data"
+	}
+	if !s.requireTerminalPathAccess(w, r, targetPath) {
+		return
 	}
 
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
@@ -52,6 +87,9 @@ func (s *Server) handleTerminalFileRead(w http.ResponseWriter, r *http.Request) 
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
 		writeError(w, http.StatusBadRequest, "缺少文件路径")
+		return
+	}
+	if !s.requireTerminalPathAccess(w, r, filePath) {
 		return
 	}
 
@@ -172,6 +210,9 @@ func (s *Server) handleTerminalFileDownload(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "缺少路径参数")
 		return
 	}
+	if !s.requireTerminalPathAccess(w, r, targetPath) {
+		return
+	}
 
 	terminal.DownloadFile(w, r, s.vmMgr.InstanceName(), targetPath)
 }
@@ -184,6 +225,11 @@ func (s *Server) handleTerminalFilesBatchDownload(w http.ResponseWriter, r *http
 	if len(paths) == 0 {
 		writeError(w, http.StatusBadRequest, "至少选择一个文件或文件夹")
 		return
+	}
+	for _, requestedPath := range paths {
+		if !s.requireTerminalPathAccess(w, r, requestedPath) {
+			return
+		}
 	}
 	if err := terminal.DownloadPathsAsZip(w, r, s.vmMgr.InstanceName(), paths); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -256,6 +302,9 @@ func (s *Server) handleTerminalFileRaw(w http.ResponseWriter, r *http.Request) {
 	targetPath := r.URL.Query().Get("path")
 	if targetPath == "" {
 		writeError(w, http.StatusBadRequest, "缺少路径参数")
+		return
+	}
+	if !s.requireTerminalPathAccess(w, r, targetPath) {
 		return
 	}
 

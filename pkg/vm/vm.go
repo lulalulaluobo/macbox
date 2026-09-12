@@ -751,8 +751,30 @@ if ! mountpoint -q "$SOURCE_PATH" || [ ! -d "$SOURCE_PATH" ]; then
   exit 1
 fi
 
-install -d -o macnasctl -g macnasctl -m 0755 /home/macnasctl/.agents
-install -d -m 0755 /root/.agents
+# Skill managers may expose an application root whose actual Skill folders
+# live in a nested ./skills directory. Claude/Codex scan the mapped directory
+# itself, so make the symlink target the directory that directly contains
+# each <skill>/SKILL.md. This also keeps older VM configs working.
+SKILL_ROOT="$SOURCE_PATH"
+DIRECT_SKILL=$(find -L "$SKILL_ROOT" -mindepth 2 -maxdepth 2 -type f -name SKILL.md -print -quit)
+if [ -z "$DIRECT_SKILL" ] && [ -d "$SOURCE_PATH/skills" ]; then
+  SKILL_ROOT="$SOURCE_PATH/skills"
+fi
+
+ensure_parent_dir() {
+  local dir_path="$1"
+  local owner="$2"
+  if [ ! -d "$dir_path" ]; then
+    install -d -o "$owner" -g "$owner" -m 0755 "$dir_path"
+  fi
+}
+
+ensure_parent_dir /home/macnasctl/.agents macnasctl
+ensure_parent_dir /home/macnasctl/.claude macnasctl
+ensure_parent_dir /home/macnasctl/.codex macnasctl
+ensure_parent_dir /root/.agents root
+ensure_parent_dir /root/.claude root
+ensure_parent_dir /root/.codex root
 
 ensure_skill_link() {
   local link_path="$1"
@@ -761,11 +783,15 @@ ensure_skill_link() {
     return 1
   fi
   rm -f "$link_path"
-  ln -s "$SOURCE_PATH" "$link_path"
+  ln -s "$SKILL_ROOT" "$link_path"
 }
 
 ensure_skill_link /home/macnasctl/.agents/skills
 ensure_skill_link /root/.agents/skills
+ensure_skill_link /home/macnasctl/.claude/skills
+ensure_skill_link /root/.claude/skills
+ensure_skill_link /home/macnasctl/.codex/skills
+ensure_skill_link /root/.codex/skills
 `
 		serviceContent := `[Unit]
 Description=MacNAS AI CLI skills mapping
@@ -799,12 +825,20 @@ systemctl restart macnas-ai-skills.service
 set -euo pipefail
 remove_owned_link() {
   local link_path="$1"
-  if [ -L "$link_path" ] && [ "$(readlink "$link_path")" = "/mnt/macnas-ai-skills" ]; then
+  local target=""
+  if [ -L "$link_path" ]; then
+    target="$(readlink "$link_path")"
+  fi
+  if [ "$target" = "/mnt/macnas-ai-skills" ] || [ "$target" = "/mnt/macnas-ai-skills/skills" ]; then
     rm -f "$link_path"
   fi
 }
 remove_owned_link /home/macnasctl/.agents/skills
 remove_owned_link /root/.agents/skills
+remove_owned_link /home/macnasctl/.claude/skills
+remove_owned_link /root/.claude/skills
+remove_owned_link /home/macnasctl/.codex/skills
+remove_owned_link /root/.codex/skills
 if [ -f /etc/systemd/system/macnas-ai-skills.service ]; then
   systemctl disable --now macnas-ai-skills.service 2>/dev/null || true
   rm -f /etc/systemd/system/macnas-ai-skills.service

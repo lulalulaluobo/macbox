@@ -37,6 +37,11 @@ export const api = {
   stopVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/stop`, { method: 'POST' }),
   restartVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/restart`, { method: 'POST' }),
 
+  closeTerminalSession: (id: string) => fetchJSON<{ status: string; closed: boolean }>(`${BASE_URL}/terminal/session/close`, {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  }),
+
   // Storage
   getDisks: () => fetchJSON<{
     disks: DiskInfo[];
@@ -252,10 +257,6 @@ export const api = {
 
   // Samba
   getSambaStatus: () => fetchJSON<SambaStatus>(`${BASE_URL}/samba/status`),
-  updateSambaPassword: (password: string) => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/samba/password`, {
-    method: 'POST',
-    body: JSON.stringify({ password }),
-  }),
   addOrUpdateSMBShare: (share: Partial<SMBShare> & { name: string; path: string }) => fetchJSON<{ status: string; share: SMBShare }>(`${BASE_URL}/samba/shares`, {
     method: 'POST',
     body: JSON.stringify(share),

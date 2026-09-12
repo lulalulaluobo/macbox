@@ -106,7 +106,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
   }, [inputText, isMultiline]);
 
   return (
-    <div className="terminal-dark-preserve shrink-0 space-y-1.5 border-t border-slate-800/90 bg-[#090d16] p-2 sm:space-y-2 sm:p-3">
+    <div className="terminal-dark-preserve shrink-0 space-y-1.5 border-t border-slate-800/90 bg-[#090d16] p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:space-y-2 sm:p-3 sm:pb-3">
       {/* 1. Virtual Control Keypad Bar (对标移动与桌面级终端按键条) */}
       <div className="flex touch-pan-x items-center gap-2 overflow-x-auto overscroll-x-contain scrollbar-none select-none [-webkit-overflow-scrolling:touch]">
         <div className="flex shrink-0 items-center space-x-1.5 rounded-xl border border-slate-800/90 bg-slate-900/90 p-1 shadow-inner">

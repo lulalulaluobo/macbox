@@ -29,7 +29,7 @@ type SSHKeyGenerationResult struct {
 	KeyType     string `json:"keyType"`     // "ed25519"
 	Fingerprint string `json:"fingerprint"` // e.g. "SHA256:..."
 	Comment     string `json:"comment"`
-	Filename    string `json:"filename"` // "macnas_root_id_ed25519"
+	Filename    string `json:"filename"` // "macnas_root_id_ed25519.txt"
 }
 
 type SSHManager struct {
@@ -320,7 +320,7 @@ func (sm *SSHManager) GenerateRootKey(ctx context.Context, comment string) (*SSH
 		KeyType:     "ed25519",
 		Fingerprint: fingerprint,
 		Comment:     comment,
-		Filename:    "macnas_root_id_ed25519",
+		Filename:    fmt.Sprintf("macnas_root_id_ed25519_%s.txt", time.Now().Format("20060102-150405")),
 	}, nil
 }
 

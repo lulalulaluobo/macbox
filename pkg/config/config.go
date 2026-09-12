@@ -165,7 +165,7 @@ func NormalizeForwardedPorts(ports []int) []int {
 const legacySambaPassword = "macnas123"
 
 const (
-	minSambaPasswordBytes = 12
+	minSambaPasswordBytes = 8
 	maxSambaPasswordBytes = 256
 )
 
@@ -336,6 +336,25 @@ func ValidateSambaPassword(password string) error {
 	}
 	if len([]byte(password)) > maxSambaPasswordBytes || strings.IndexFunc(password, unicode.IsControl) >= 0 {
 		return fmt.Errorf("Samba 密码长度不能超过 %d 个字节且不能包含控制字符", maxSambaPasswordBytes)
+	}
+	return nil
+}
+
+// ValidateSambaUsername validates the Web username when it is also used as
+// the SMB client username. The value is written to Samba's username map, so
+// separators and comment characters must not be allowed to reach that file.
+func ValidateSambaUsername(username string) error {
+	username = strings.TrimSpace(username)
+	if len([]byte(username)) < 3 || len([]byte(username)) > 128 {
+		return errors.New("SMB 用户名长度必须在 3 到 128 个字节之间")
+	}
+	if strings.IndexFunc(username, func(r rune) bool {
+		return unicode.IsControl(r) || unicode.IsSpace(r)
+	}) >= 0 {
+		return errors.New("SMB 用户名不能包含空白或控制字符")
+	}
+	if strings.ContainsAny(username, "=#") {
+		return errors.New("SMB 用户名不能包含 = 或 #")
 	}
 	return nil
 }

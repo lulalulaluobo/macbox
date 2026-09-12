@@ -81,6 +81,19 @@ func TestEnsureSecretsRejectsWeakExistingSambaPassword(t *testing.T) {
 	}
 }
 
+func TestValidateSambaUsername(t *testing.T) {
+	for _, username := range []string{"luobo", "中文管理员", "admin@example"} {
+		if err := ValidateSambaUsername(username); err != nil {
+			t.Errorf("ValidateSambaUsername(%q) returned error: %v", username, err)
+		}
+	}
+	for _, username := range []string{"", "ab", "bad user", "bad=user", "#comment", "bad\nuser"} {
+		if err := ValidateSambaUsername(username); err == nil {
+			t.Errorf("ValidateSambaUsername(%q) accepted unsafe username", username)
+		}
+	}
+}
+
 func TestNormalizeGuestTarget(t *testing.T) {
 	tests := []struct {
 		name    string

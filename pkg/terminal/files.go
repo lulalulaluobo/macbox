@@ -75,8 +75,11 @@ func ListFilesPageContext(ctx context.Context, instanceName, targetPath string, 
 	if targetPath == "" {
 		targetPath = "/data"
 	}
-	var err error
-	targetPath, err = resolveAllowedPathContext(ctx, instanceName, targetPath)
+	displayPath, err := normalizeRequestedPath(targetPath)
+	if err != nil {
+		return nil, false, err
+	}
+	resolvedPath, err := resolveAllowedPathContext(ctx, instanceName, displayPath)
 	if err != nil {
 		return nil, false, err
 	}
@@ -90,20 +93,7 @@ func ListFilesPageContext(ctx context.Context, instanceName, targetPath string, 
 	pyScript := fmt.Sprintf(`
 import os, json, sys, time
 p = os.path.realpath(sys.argv[1] if len(sys.argv) > 1 else "/data")
-root = os.path.realpath('/data')
-if os.path.commonpath((root, p)) != root:
-    raise RuntimeError('路径超出 /data 存储范围')
-relative = os.path.relpath(p, root)
-fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-try:
-    if relative != '.':
-        for component in relative.split(os.sep):
-            next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = next_fd
-except Exception:
-    os.close(fd)
-    raise
+fd = os.open(p, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 items = []
 try:
     with os.scandir(fd) as it:
@@ -112,7 +102,11 @@ try:
                 st = entry.stat(follow_symlinks=False)
                 items.append({
                     "name": entry.name,
-                    "isDir": entry.is_dir(follow_symlinks=False),
+                    # Make standard VM links such as /bin and /lib
+                    # navigable in the root browser. The resolver still
+                    # canonicalizes every child and keeps /data links from
+                    # escaping the NAS data root.
+                    "isDir": entry.is_dir(follow_symlinks=True),
                     "isSymlink": entry.is_symlink(),
                     "size": st.st_size,
                     "mode": oct(st.st_mode)[-4:],
@@ -131,7 +125,7 @@ limit = int(sys.argv[3])
 print(json.dumps({"items": items[offset:offset + limit], "hasMore": offset + limit < len(items)}))
 `)
 
-	cmd := managementCommand(ctx, instanceName, "python3", "-c", pyScript, targetPath, strconv.Itoa(offset), strconv.Itoa(limit))
+	cmd := privilegedCommand(ctx, instanceName, "python3", "-c", pyScript, resolvedPath, strconv.Itoa(offset), strconv.Itoa(limit))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, false, fmt.Errorf("读取目录失败: %s (%w)", strings.TrimSpace(string(out)), err)
@@ -155,7 +149,7 @@ print(json.dumps({"items": items[offset:offset + limit], "hasMore": offset + lim
 
 	var items []FileInfo
 	for _, raw := range pageResult.Items {
-		fullPath := path.Join(targetPath, raw.Name)
+		fullPath := path.Join(displayPath, raw.Name)
 		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(raw.Name), "."))
 		mtimeStr := time.Unix(raw.Mtime, 0).Format("2006-01-02 15:04")
 		sizeFmt := formatBytes(raw.Size)
@@ -183,12 +177,11 @@ print(json.dumps({"items": items[offset:offset + limit], "hasMore": offset + lim
 const safeReadScript = `import json, os, shutil, stat, sys
 raw = sys.argv[1]
 mode = sys.argv[2]
-root = os.path.realpath('/data')
 candidate = os.path.realpath(raw)
-if os.path.commonpath((root, candidate)) != root or candidate == root:
-    raise RuntimeError('文件路径超出 /data 存储范围')
-parts = os.path.relpath(candidate, root).split(os.sep)
-parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+if not os.path.isabs(candidate) or candidate == '/':
+    raise RuntimeError('目标不是可读取的文件')
+parts = [part for part in candidate.split(os.sep) if part]
+parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 try:
     for component in parts[:-1]:
         next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
@@ -350,14 +343,17 @@ func isSystemProtectedDir(p string) bool {
 
 const allowedPathResolverScript = `import os, sys
 
-root = os.path.realpath('/data')
-candidate = os.path.realpath(sys.argv[1])
-try:
-    allowed = os.path.commonpath((root, candidate)) == root
-except ValueError:
-    allowed = False
-if not allowed:
+requested = os.path.normpath(sys.argv[1])
+candidate = os.path.realpath(requested)
+if not os.path.isabs(candidate):
     raise SystemExit(2)
+data_root = os.path.realpath('/data')
+if requested == '/data' or requested.startswith('/data/'):
+    try:
+        if os.path.commonpath((data_root, candidate)) != data_root:
+            raise SystemExit(2)
+    except ValueError:
+        raise SystemExit(2)
 print(candidate)
 `
 
@@ -526,9 +522,9 @@ func runSafeMutation(ctx context.Context, instanceName string, request map[strin
 	return nil
 }
 
-// resolveAllowedPath validates the canonical path inside the VM. Checking the
-// canonical parent also blocks ../ traversal and symlinks that point outside
-// the user data root, including for paths that do not exist yet.
+// resolveAllowedPath validates and canonicalizes an absolute path inside the
+// VM. The API layer limits non-admin callers to /data; this lower-level helper
+// also serves the admin-only VM root browser.
 func resolveAllowedPath(instanceName, requested string) (string, error) {
 	return resolveAllowedPathContext(context.Background(), instanceName, requested)
 }
@@ -557,7 +553,7 @@ func resolveAllowedPathContext(ctx context.Context, instanceName, requested stri
 		return "", err
 	}
 
-	cmd := managementCommand(ctx, instanceName, "python3", "-c", allowedPathResolverScript, clean)
+	cmd := privilegedCommand(ctx, instanceName, "python3", "-c", allowedPathResolverScript, clean)
 	resolved, err := cmd.Output()
 	if err != nil || strings.TrimSpace(string(resolved)) == "" {
 		detail := strings.TrimSpace(string(resolved))
@@ -567,7 +563,7 @@ func resolveAllowedPathContext(ctx context.Context, instanceName, requested stri
 		if detail == "" {
 			detail = "虚拟机路径解析命令未返回结果"
 		}
-		return "", fmt.Errorf("路径不在允许的 /data 存储范围内: %s", detail)
+		return "", fmt.Errorf("虚拟机路径解析失败: %s", detail)
 	}
 	// Use the same canonical path that was checked. Returning the original
 	// lexical path would reopen a symlink/TOCTOU window between validation and
@@ -623,6 +619,12 @@ func DownloadFile(w http.ResponseWriter, r *http.Request, instanceName, filePath
 		http.Error(w, "文件路径不允许访问", http.StatusForbidden)
 		return
 	}
+	if path.Clean(filePath) == "/" {
+		// The VM root is available for browsing, but downloading it would
+		// recursively archive the whole system filesystem.
+		http.Error(w, "禁止下载虚拟机根目录", http.StatusForbidden)
+		return
+	}
 	fileName := path.Base(filePath)
 
 	// Preflight the file before committing the HTTP response. Without a known
@@ -671,8 +673,8 @@ func DownloadPathsAsZip(w http.ResponseWriter, r *http.Request, instanceName str
 		if err != nil {
 			return fmt.Errorf("下载路径无效: %w", err)
 		}
-		if path.Clean(filePath) == "/data" {
-			return fmt.Errorf("禁止下载存储根目录")
+		if path.Clean(filePath) == "/" || path.Clean(filePath) == "/data" {
+			return fmt.Errorf("禁止下载虚拟机或存储根目录")
 		}
 		resolved = append(resolved, filePath)
 	}

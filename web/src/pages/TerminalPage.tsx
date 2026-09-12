@@ -5,8 +5,8 @@ import '@xterm/xterm/css/xterm.css';
 import {
   Terminal as TerminalIcon, Folder, FolderPlus, Upload, RefreshCw, ArrowLeft,
   Download, Trash2, Edit3, Copy, Check, FileText, Film, Image, Music, Archive,
-  Code, Maximize2, Minimize2, CornerDownRight, Star,
-  PanelLeftClose, PanelLeft, X, Save, Crown, User
+  Code, HardDrive, Maximize2, Minimize2, CornerDownRight, Star,
+  PanelLeftClose, PanelLeft, X, Save, Crown, User, Eye, EyeOff
 } from 'lucide-react';
 import { api } from '../api';
 import { FileItem, TerminalPrefill } from '../types';
@@ -22,7 +22,11 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const xtermInstance = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const connectionGenerationRef = useRef(0);
   const [connected, setConnected] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionClosed, setSessionClosed] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [loginUser, setLoginUser] = useState<'root' | 'default'>('default');
@@ -31,6 +35,14 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const [currentPath, setCurrentPath] = useState<string>('/data');
   const [files, setFiles] = useState<FileItem[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [showHiddenFiles, setShowHiddenFiles] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage.getItem('macnas_terminal_show_hidden') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [favoritePaths, setFavoritePaths] = useState<string[]>(() => {
@@ -52,7 +64,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const [uploading, setUploading] = useState(false);
 
   // File View / Edit Modal
-  const [editingFile, setEditingFile] = useState<{ path: string; name: string; content: string } | null>(null);
+  const [editingFile, setEditingFile] = useState<{ path: string; name: string; content: string; readOnly: boolean } | null>(null);
   const [savingFile, setSavingFile] = useState(false);
 
   // Drag & drop upload
@@ -60,9 +72,14 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
   // Quick Shortcuts
   const rootShortcuts = [
+    ...(loginUser === 'root' ? [{ label: 'VM 根目录', path: '/', icon: HardDrive }] : []),
     { label: 'NAS 根目录', path: '/data', icon: Folder },
     { label: 'Docker 目录', path: '/data/appdata', icon: Code },
   ];
+
+  // The VM root is a browse-only view. Mutating operations continue to be
+  // anchored to the NAS data disk by the backend safe-mutation layer.
+  const isVMSystemPath = currentPath !== '/data' && !currentPath.startsWith('/data/');
 
   const favoriteShortcuts = favoritePaths.map((path) => ({
     label: path.split('/').filter(Boolean).pop() || path,
@@ -73,24 +90,42 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const aiCommands = [
     {
       label: 'Codex',
-      cmd: 'codex --dangerously-bypass-approvals-and-sandbox\n',
       title: '启动 Codex 高权限模式（跳过审批和沙箱）',
+      command: 'codex --dangerously-bypass-approvals-and-sandbox',
     },
     {
       label: 'Claude',
-      cmd: 'claude --dangerously-skip-permissions\n',
       title: '启动 Claude 高权限模式（跳过权限确认）',
+      command: 'claude --dangerously-skip-permissions',
     },
     {
       label: 'Anti Gravity',
-      cmd: 'agy --dangerously-skip-permissions\n',
       title: '启动 Anti Gravity 高权限模式（跳过权限确认）',
+      command: 'agy --dangerously-skip-permissions',
     },
   ];
+
+  const aiCommandForUser = (command: string, user: 'root' | 'default') => {
+    if (user !== 'root') return `${command}\n`;
+
+    // Claude's GLM provider is configured in root's Claude settings. A plain
+    // `sudo -iu macnasctl` changes HOME and makes Claude fall back to the
+    // official login flow. Read only the provider settings as root, drop to
+    // macnasctl in the same process, then launch Claude with the same model
+    // configuration and no root privileges.
+    if (command === 'claude --dangerously-skip-permissions') {
+      return `python3 -c 'import json,os,pwd; u=pwd.getpwnam("macnasctl"); s=json.load(open("/root/.claude/settings.json")); e={k:v for k,v in os.environ.items() if k in ("PATH","TERM","COLORTERM","LANG","LC_ALL","TZ","NO_COLOR","FORCE_COLOR")}; e.update({str(k):str(v) for k,v in s.get("env",{}).items()}); e.update({"HOME":u.pw_dir,"USER":u.pw_name,"LOGNAME":u.pw_name,"SHELL":"/bin/bash","PWD":u.pw_dir,"CLAUDE_CONFIG_DIR":os.path.join(u.pw_dir,".claude")}); os.chdir(u.pw_dir); os.initgroups(u.pw_name,u.pw_gid); os.setgid(u.pw_gid); os.setuid(u.pw_uid); os.execvpe("claude",["claude","--dangerously-skip-permissions"],e)'\n`;
+    }
+
+    return `sudo -iu macnasctl -- bash -lc 'exec ${command}'\n`;
+  };
 
   // Initialize Terminal WebSocket
   const initTerminal = (userToUse?: 'root' | 'default') => {
     if (!terminalRef.current) return;
+
+    const generation = ++connectionGenerationRef.current;
+    setSessionClosed(false);
 
     if (xtermInstance.current) {
       xtermInstance.current.dispose();
@@ -166,6 +201,8 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
           const control = JSON.parse(event.data) as { type?: string; id?: string; resumed?: boolean };
           if (control.type === 'session' && control.id) {
             window.sessionStorage.setItem(sessionStorageKey, control.id);
+            sessionIdRef.current = control.id;
+            setSessionId(control.id);
             term.write(control.resumed
               ? '\r\n\x1b[32m[MacNAS] 已恢复之前的终端任务和输出记录。\x1b[0m\r\n'
               : '\r\n\x1b[36m[MacNAS] 已创建可恢复的终端任务会话。\x1b[0m\r\n');
@@ -181,11 +218,13 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
     };
 
     ws.onclose = () => {
+      if (generation !== connectionGenerationRef.current) return;
       setConnected(false);
       term.write('\r\n\x1b[33m[MacNAS] 终端连接已断开。\x1b[0m\r\n');
     };
 
     ws.onerror = () => {
+      if (generation !== connectionGenerationRef.current) return;
       setConnected(false);
       term.write('\r\n\x1b[31m[MacNAS] 终端连接异常。\x1b[0m\r\n');
     };
@@ -218,7 +257,46 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
   const handleSwitchUser = (newUser: 'root' | 'default') => {
     setLoginUser(newUser);
+    if (newUser !== 'root' && isVMSystemPath) {
+      setCurrentPath('/data');
+      if (showSidebar) loadFiles('/data');
+    }
+    const oldKey = `macnas_terminal_session:${window.location.host}:${loginUser}`;
+    window.sessionStorage.removeItem(oldKey);
+    sessionIdRef.current = null;
+    setSessionId(null);
     initTerminal(newUser);
+  };
+
+  const handleReconnect = () => {
+    const targetUser = loginUser;
+    const key = `macnas_terminal_session:${window.location.host}:${targetUser}`;
+    window.sessionStorage.removeItem(key);
+    sessionIdRef.current = null;
+    setSessionId(null);
+    initTerminal(targetUser);
+  };
+
+  const handleCloseSession = async () => {
+    const id = sessionIdRef.current;
+    if (id) {
+      try {
+        await api.closeTerminalSession(id);
+      } catch {
+        // The VM may already have been restarted; clearing the local reference
+        // still allows the next reconnect to create a fresh session.
+      }
+    }
+    const key = `macnas_terminal_session:${window.location.host}:${loginUser}`;
+    window.sessionStorage.removeItem(key);
+    sessionIdRef.current = null;
+    setSessionId(null);
+    connectionGenerationRef.current += 1;
+    wsRef.current?.close();
+    wsRef.current = null;
+    setConnected(false);
+    setSessionClosed(true);
+    xtermInstance.current?.write('\r\n\x1b[33m[MacNAS] 当前终端会话已关闭。点击“重连”创建新会话。\x1b[0m\r\n');
   };
 
   useEffect(() => {
@@ -246,6 +324,14 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
     }
   }, [favoritePaths]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('macnas_terminal_show_hidden', String(showHiddenFiles));
+    } catch {
+      // 隐藏文件显示偏好无法保存时，不影响当前页面的切换。
+    }
+  }, [showHiddenFiles]);
+
   // Fit terminal when sidebar toggles or fullscreen changes
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -264,6 +350,30 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
     return () => clearTimeout(timer);
   }, [showSidebar, fullscreen]);
 
+  // The input/shortcut bar changes height when the viewport or multiline mode
+  // changes. Keep xterm fitted to the remaining grid row so its last line is
+  // never painted underneath the helper bar.
+  useEffect(() => {
+    const element = terminalRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(() => {
+        if (!fitAddonRef.current || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+        try {
+          fitAddonRef.current.fit();
+          const dims = fitAddonRef.current.proposeDimensions();
+          if (dims) {
+            wsRef.current.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
+          }
+        } catch {
+          // The terminal may be disposing while the layout observer fires.
+        }
+      });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   // Load File List
   const loadFiles = async (targetPath: string) => {
     setFilesLoading(true);
@@ -277,6 +387,10 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
       setFilesLoading(false);
     }
   };
+
+  const visibleFiles = showHiddenFiles
+    ? files
+    : files.filter((file) => !file.name.startsWith('.'));
 
   // Send command to live terminal
   const sendToTerminal = (cmd: string) => {
@@ -296,6 +410,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   // Navigate Up
   const handleNavigateUp = () => {
     if (currentPath === '/' || currentPath === '') return;
+    if (loginUser !== 'root' && currentPath === '/data') return;
     const parts = currentPath.split('/').filter(Boolean);
     parts.pop();
     const parent = '/' + parts.join('/');
@@ -305,6 +420,10 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   // Create Folder
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isVMSystemPath) {
+      setAlertMsg({ type: 'error', text: 'VM 系统目录仅支持浏览，请切换到 NAS 根目录后操作' });
+      return;
+    }
     if (!newFolderName.trim()) return;
     const target = currentPath === '/' ? `/${newFolderName.trim()}` : `${currentPath}/${newFolderName.trim()}`;
     try {
@@ -340,6 +459,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
         path: item.path,
         name: item.name,
         content: res.content || '',
+        readOnly: isVMSystemPath,
       });
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `打开文件失败: ${err.message}` });
@@ -348,7 +468,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
   // Save File
   const handleSaveFile = async () => {
-    if (!editingFile) return;
+    if (!editingFile || editingFile.readOnly) return;
     setSavingFile(true);
     try {
       await api.writeFile(editingFile.path, editingFile.content);
@@ -365,6 +485,10 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   // Upload File
   const handleFileUpload = async (filesToUpload: FileList | null) => {
     if (!filesToUpload || filesToUpload.length === 0) return;
+    if (isVMSystemPath) {
+      setAlertMsg({ type: 'error', text: 'VM 系统目录仅支持浏览，请切换到 NAS 根目录后上传' });
+      return;
+    }
     setUploading(true);
     try {
       for (let i = 0; i < filesToUpload.length; i++) {
@@ -423,7 +547,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   };
 
   return (
-    <div className={`terminal-page flex min-h-0 flex-col gap-4 ${showSidebar ? 'overflow-y-auto overscroll-contain lg:overflow-hidden' : 'overflow-hidden'} ${fullscreen ? 'fixed inset-0 z-[70] bg-[#090d16] p-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]' : 'h-full w-full'}`}>
+    <div className={`terminal-page flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 ${showSidebar ? 'overflow-y-auto overscroll-contain lg:overflow-hidden' : 'overflow-hidden'} ${fullscreen ? 'fixed inset-0 z-[70] bg-[#090d16] p-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]' : 'w-full'}`}>
       {/* Alert Banner */}
       {alertMsg && (
         <div className={`p-3.5 rounded-xl text-sm flex items-center justify-between shadow ${
@@ -442,83 +566,117 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
         {showSidebar && (
           <div className="order-2 flex min-h-[420px] w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/80 lg:order-1 lg:min-h-0 lg:w-[320px] lg:shrink-0">
             {/* Header & Quick Shortcuts */}
-            <div className="p-4 border-b border-slate-800/80 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Folder className="w-4 h-4 text-sky-400" />
-                  <span className="font-bold text-white text-sm">虚拟机文件系统</span>
+            <div className="space-y-3 border-b border-slate-800/80 p-3.5 sm:p-4">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 ring-1 ring-sky-400/20">
+                    <Folder className="h-4 w-4 text-sky-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block truncate whitespace-nowrap text-[15px] font-bold text-white">虚拟机文件系统</span>
+                    <span className="mt-0.5 block truncate text-[10px] text-slate-500">VM 文件浏览与目录管理</span>
+                  </div>
                 </div>
-                <div className="flex items-center space-x-1.5">
+                <div className="flex shrink-0 items-center gap-1.5">
                   <button
                     onClick={() => setShowMkdirModal(true)}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center space-x-1 transition"
+                    disabled={isVMSystemPath}
+                    aria-label="新建文件夹"
+                    className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 disabled:pointer-events-none disabled:opacity-40"
                     title="新建文件夹"
                   >
-                    <FolderPlus className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">新建</span>
+                    <FolderPlus className="h-4 w-4" />
                   </button>
-                  <label className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center space-x-1 cursor-pointer transition">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">上传</span>
+                  <label
+                    aria-label="上传文件"
+                    className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 ${isVMSystemPath ? 'pointer-events-none opacity-40' : ''}`}
+                    title="上传文件"
+                  >
+                    <Upload className="h-4 w-4" />
                     <input
                       type="file"
                       multiple
                       className="hidden"
                       onChange={(e) => handleFileUpload(e.target.files)}
-                      disabled={uploading}
+                      disabled={uploading || isVMSystemPath}
                     />
                   </label>
                   <button
                     onClick={() => loadFiles(currentPath)}
                     disabled={filesLoading}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition"
+                    aria-label="刷新列表"
+                    className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 disabled:opacity-50"
                     title="刷新列表"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${filesLoading ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`h-4 w-4 ${filesLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                  <button
+                    onClick={() => setShowHiddenFiles((visible) => !visible)}
+                    aria-pressed={showHiddenFiles}
+                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition ${showHiddenFiles
+                      ? 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/30'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                    title={showHiddenFiles ? '隐藏以 . 开头的文件和文件夹' : '显示隐藏文件和文件夹'}
+                    aria-label={showHiddenFiles ? '隐藏隐藏文件和文件夹' : '显示隐藏文件和文件夹'}
+                  >
+                    {showHiddenFiles ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
 
               {/* Quick Path Shortcuts: keep the two stable roots first, then user favorites. */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pt-1 pb-0.5 scrollbar-none">
-                {rootShortcuts.map((sc) => (
-                  <button
-                    key={sc.path}
-                    onClick={() => loadFiles(sc.path)}
-                    className={`flex shrink-0 items-center space-x-1 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
-                      currentPath === sc.path
-                        ? 'border-sky-500/40 bg-sky-500/20 font-bold text-sky-300'
-                        : 'border-slate-700/60 bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                    }`}
-                    title={sc.path}
-                  >
-                    <sc.icon className="w-3 h-3" />
-                    <span>{sc.label}</span>
-                  </button>
-                ))}
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">快捷路径</span>
+                  <span className="text-[10px] text-slate-600">{showHiddenFiles ? '含隐藏项' : '隐藏项已隐藏'}</span>
+                </div>
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+                  {rootShortcuts.map((sc) => (
+                    <button
+                      key={sc.path}
+                      onClick={() => loadFiles(sc.path)}
+                      className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[11px] font-medium transition ${
+                        currentPath === sc.path
+                          ? 'border-sky-500/40 bg-sky-500/20 font-bold text-sky-300'
+                          : 'border-slate-700/60 bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
+                      title={sc.path}
+                    >
+                      <sc.icon className="h-3.5 w-3.5" />
+                      <span>{sc.label}</span>
+                    </button>
+                  ))}
 
-                {favoriteShortcuts.length > 0 && (
-                  <span className="mx-0.5 h-4 w-px shrink-0 bg-slate-700/80" aria-hidden="true" />
-                )}
-                {favoriteShortcuts.map((sc) => (
-                  <button
-                    key={sc.path}
-                    onClick={() => loadFiles(sc.path)}
-                    className={`flex shrink-0 items-center space-x-1 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
-                      currentPath === sc.path
-                        ? 'border-sky-500/40 bg-sky-500/20 font-bold text-slate-100'
-                        : 'border-slate-700/60 bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
-                    }`}
-                    title={sc.path}
-                  >
-                    <sc.icon className="h-3 w-3 fill-amber-300 text-amber-300" />
-                    <span>{sc.label}</span>
-                  </button>
-                ))}
+                  {favoriteShortcuts.length > 0 && (
+                    <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-700/80" aria-hidden="true" />
+                  )}
+                  {favoriteShortcuts.map((sc) => (
+                    <button
+                      key={sc.path}
+                      onClick={() => loadFiles(sc.path)}
+                      className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[11px] font-medium transition ${
+                        currentPath === sc.path
+                          ? 'border-sky-500/40 bg-sky-500/20 font-bold text-slate-100'
+                          : 'border-slate-700/60 bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                      title={sc.path}
+                    >
+                      <sc.icon className="h-3.5 w-3.5 fill-amber-300 text-amber-300" />
+                      <span>{sc.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
+              {isVMSystemPath && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-200">
+                  VM 根目录浏览模式：可查看系统文件，上传、新建、编辑和删除仅限 NAS 数据目录。
+                </div>
+              )}
+
               {/* Breadcrumb Path Bar */}
-              <div className="flex items-center space-x-1 text-xs bg-slate-950/60 p-2 rounded-xl border border-slate-800/80 overflow-x-auto font-mono">
+              <div className="flex items-center space-x-1 overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-950/60 p-2.5 font-mono text-xs">
                 <button
                   onClick={handleNavigateUp}
                   disabled={currentPath === '/'}
@@ -529,8 +687,8 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
                 </button>
                 <div className="flex items-center space-x-1 text-slate-300 truncate">
                   <span
-                    onClick={() => loadFiles('/')}
-                    className="cursor-pointer hover:text-sky-400 font-bold"
+                    onClick={() => loginUser === 'root' && loadFiles('/')}
+                    className={`${loginUser === 'root' ? 'cursor-pointer hover:text-sky-400' : 'cursor-default opacity-50'} font-bold`}
                   >
                     /
                   </span>
@@ -578,10 +736,10 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
               {filesLoading && files.length === 0 ? (
                 <div className="p-8 text-center text-xs text-slate-500">正在扫描文件系统...</div>
-              ) : files.length === 0 ? (
+              ) : visibleFiles.length === 0 ? (
                 <div className="p-8 text-center text-xs text-slate-500">该目录下暂无文件</div>
               ) : (
-                files.map((file) => (
+                visibleFiles.map((file) => (
                   <div
                     key={file.path}
                     className="group flex items-center justify-between p-2 rounded-xl hover:bg-slate-800/60 transition text-xs"
@@ -630,13 +788,15 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
                           </button>
                         ) : (
                           <>
-                            <button
-                              onClick={() => handleViewFile(file)}
-                              className="p-1 rounded hover:bg-sky-500/20 text-slate-400 hover:text-sky-300 transition"
-                              title="查看/编辑文件"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
+                            {!isVMSystemPath && (
+                              <button
+                                onClick={() => handleViewFile(file)}
+                                className="p-1 rounded hover:bg-sky-500/20 text-slate-400 hover:text-sky-300 transition"
+                                title="查看/编辑文件"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             <a
                               href={api.getFileDownloadUrl(file.path)}
                               download={file.name}
@@ -654,13 +814,15 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
                         >
                           {copiedPath === file.path ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                         </button>
-                        <button
-                          onClick={() => handleDelete(file)}
-                          className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
-                          title="删除"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {!isVMSystemPath && (
+                          <button
+                            onClick={() => handleDelete(file)}
+                            className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -683,7 +845,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
         )}
 
         {/* Right Side: Interactive Web Terminal */}
-        <div className={`terminal-dark-preserve order-1 flex w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'min-h-[520px] flex-none lg:order-2 lg:min-h-0 lg:w-auto lg:flex-1' : 'min-h-0 flex-1'}`}>
+        <div className={`terminal-dark-preserve order-1 grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'min-h-[520px] flex-none lg:order-2 lg:min-h-0 lg:w-auto lg:flex-1' : 'min-h-0 flex-1'}`}>
           {/* Terminal Top Toolbar */}
           <div className="flex flex-col gap-2.5 border-b border-slate-800/80 bg-[#0d121f] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-3.5">
             <div className="flex min-w-0 items-center gap-2">
@@ -704,6 +866,28 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
                 <span className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
                 <span className="truncate text-xs font-bold text-white">终端</span>
                 <span className="shrink-0 text-[11px] text-slate-400">{connected ? '已连接' : '未连接'}</span>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleReconnect}
+                  className="flex min-h-8 items-center gap-1 rounded-lg bg-slate-800 px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-sky-600"
+                  title="清除旧会话并重新连接虚拟机终端"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">{sessionClosed ? '重开' : '重连'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleCloseSession()}
+                  disabled={!connected && !sessionId}
+                  className="flex min-h-8 items-center gap-1 rounded-lg bg-slate-800 px-2 text-[11px] font-semibold text-rose-300 transition hover:bg-rose-900/60 disabled:opacity-40"
+                  title="关闭当前终端会话"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">关闭</span>
+                </button>
               </div>
 
               {/* Login Identity Badge & Fast Switcher */}
@@ -740,7 +924,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
               {aiCommands.map((ai) => (
                 <button
                   key={ai.label}
-                  onClick={() => sendToTerminal(ai.cmd)}
+                  onClick={() => sendToTerminal(aiCommandForUser(ai.command, loginUser))}
                   disabled={!connected}
                   className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-violet-500/30 bg-violet-500/15 px-2 py-1 text-[11px] font-semibold text-violet-200 transition hover:bg-violet-500/25 disabled:opacity-40"
                   title={ai.title}
@@ -771,7 +955,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
           {/* Terminal Canvas Container */}
           <div
             ref={terminalRef}
-            className="min-h-0 flex-1 overflow-hidden bg-[#090d16] p-3 font-mono"
+            className="h-full min-h-0 min-w-0 overflow-hidden bg-[#090d16] p-3 font-mono"
           />
 
           {/* Bottom Text Input & Action Keys Helper Bar */}
@@ -834,7 +1018,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
           <div className="w-full max-w-3xl rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4 flex flex-col max-h-[85dvh]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center space-x-2">
-                <Edit3 className="w-4 h-4 text-sky-400" />
+                {editingFile.readOnly ? <FileText className="w-4 h-4 text-sky-400" /> : <Edit3 className="w-4 h-4 text-sky-400" />}
                 <span className="font-bold text-white text-sm">{editingFile.name}</span>
                 <span className="text-xs text-slate-500 font-mono">({editingFile.path})</span>
               </div>
@@ -849,12 +1033,15 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
             <textarea
               value={editingFile.content}
               onChange={(e) => setEditingFile({ ...editingFile, content: e.target.value })}
-              className="flex-1 w-full min-h-[360px] p-4 rounded-xl bg-[#090d16] border border-slate-800 font-mono text-xs text-slate-200 focus:outline-none focus:border-sky-500 resize-none leading-relaxed"
+              readOnly={editingFile.readOnly}
+              className={`flex-1 w-full min-h-[360px] p-4 rounded-xl bg-[#090d16] border border-slate-800 font-mono text-xs text-slate-200 focus:outline-none focus:border-sky-500 resize-none leading-relaxed ${editingFile.readOnly ? 'cursor-default opacity-80' : ''}`}
               spellCheck={false}
             />
 
             <div className="flex items-center justify-between pt-2">
-              <span className="text-xs text-slate-500">支持直接在线修改文件并写回虚拟机文件系统</span>
+              <span className="text-xs text-slate-500">
+                {editingFile.readOnly ? 'VM 系统目录仅支持查看；如需修改，请使用 root 终端命令并确认风险' : '支持直接在线修改文件并写回虚拟机文件系统'}
+              </span>
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setEditingFile(null)}
@@ -862,14 +1049,16 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
                 >
                   取消
                 </button>
-                <button
-                  onClick={handleSaveFile}
-                  disabled={savingFile}
-                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold flex items-center space-x-1.5 disabled:opacity-50"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>{savingFile ? '保存中...' : '保存更改'}</span>
-                </button>
+                {!editingFile.readOnly && (
+                  <button
+                    onClick={handleSaveFile}
+                    disabled={savingFile}
+                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold flex items-center space-x-1.5 disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{savingFile ? '保存中...' : '保存更改'}</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

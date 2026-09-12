@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  HardDrive, Check, Copy, KeyRound, CheckCircle2, AlertCircle, RefreshCw, FolderLock, RotateCw,
+  HardDrive, Check, Copy, CheckCircle2, AlertCircle, RefreshCw, FolderLock, RotateCw,
   X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, ShieldCheck, Plus, Folder, Lock, Unlock, Edit3, Zap, Power, ArrowLeft, FolderOpen
 } from 'lucide-react';
 import { DiskInfo, ManagedDisk, SambaStatus, LocalMount, LocalMountCandidate, LocalMountHealth, SMBShare, FileItem } from '../../types';
@@ -52,11 +52,6 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   const [newMountGuestTarget, setNewMountGuestTarget] = useState('media/MacMedia');
   const [newMountWritable, setNewMountWritable] = useState(false);
   const [mountsLoading, setMountsLoading] = useState(false);
-
-  // Password Modal
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [passwordLoading, setPasswordLoading] = useState(false);
 
   // External Disk Bind Modal
   const [showBindModal, setShowBindModal] = useState(false);
@@ -330,23 +325,6 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
     }
   };
 
-  const handleUpdatePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPassword.trim()) return;
-    setPasswordLoading(true);
-    try {
-      await api.updateSambaPassword(newPassword.trim());
-      setAlertMsg({ type: 'success', text: 'Samba 访问密码已更新！' });
-      setShowPasswordModal(false);
-      setNewPassword('');
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `密码修改失败: ${err.message}` });
-    } finally {
-      setPasswordLoading(false);
-    }
-  };
-
-
   const handleCopyShareAddress = (address: string, id: string) => {
     navigator.clipboard.writeText(address);
     setCopiedShareId(id);
@@ -586,9 +564,9 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                 <button onClick={handleRestartSamba} disabled={restartingSamba} className="flex min-h-10 w-full items-center gap-2 rounded-xl px-2.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:text-slate-200 dark:hover:bg-slate-800">
                   <RotateCw className={`h-3.5 w-3.5 text-sky-500 ${restartingSamba ? 'animate-spin' : ''}`} /><span>{restartingSamba ? '重启中...' : '重启服务'}</span>
                 </button>
-                <button onClick={() => setShowPasswordModal(true)} className="flex min-h-10 w-full items-center gap-2 rounded-xl px-2.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800">
-                  <KeyRound className="h-3.5 w-3.5 text-amber-500" /><span>修改密码</span>
-                </button>
+                <div className="flex min-h-10 items-center gap-2 rounded-xl px-2.5 text-xs text-slate-500 dark:text-slate-400">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" /><span>密码跟随首位管理员</span>
+                </div>
               </div>
             </details>
             <button
@@ -617,11 +595,16 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
             </span>
             </div>
             <div className="flex items-center space-x-3 text-slate-500 dark:text-slate-400 text-[11px] shrink-0">
-            <span>默认账户: <code className="text-sky-600 dark:text-sky-300 font-mono font-bold">{samba?.user || 'macnas'}</code></span>
+            <span>SMB 账户: <code className="text-sky-600 dark:text-sky-300 font-mono font-bold">{samba?.user || 'macnas'}</code></span>
+            <span>•</span>
+            <span>密码：首位超级管理员密码</span>
             <span>•</span>
             <span>权限模型: <span className="text-slate-700 dark:text-slate-300">Linux 原生 ACL 0777</span></span>
             </div>
           </div>
+          <p className="px-3.5 pb-3.5 text-[11px] text-slate-500 dark:text-slate-400">
+            SMB 账号和密码与首位超级管理员同步；修改管理员密码后会自动同步。访客免密共享仍以每个共享的开关为准。
+          </p>
         </details>
 
         {/* Multi-Share List */}
@@ -967,49 +950,6 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
         </details>
       )}
 
-      {/* Password Modal */}
-      {showPasswordModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 dark:bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl space-y-5">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white">修改 Samba 共享密码</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">用于局域网用户 <code>macnas</code> 连接共享文件夹</p>
-            </div>
-
-            <form onSubmit={handleUpdatePassword} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">新密码</label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-				  placeholder="请输入至少 8 位新密码"
-                  required
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm focus:outline-none focus:border-sky-500 transition"
-                />
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowPasswordModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={passwordLoading}
-                  className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold shadow-xs transition disabled:opacity-50"
-                >
-                  {passwordLoading ? '保存中...' : '确认修改'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Add / Edit SMB Share Modal */}
       {showShareModal && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 dark:bg-black/75 sm:items-center sm:p-4">
@@ -1039,9 +979,8 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   type="text"
                   value={shareFormName}
                   onChange={(e) => setShareFormName(e.target.value)}
-                  placeholder="例如: MacNAS, Movies"
+                  placeholder="例如：硬盘2或MediaShare"
                   required
-                  pattern="^[a-zA-Z0-9_\-]+$"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 text-sm font-mono focus:outline-none focus:border-sky-500 transition"
                 />
               </div>

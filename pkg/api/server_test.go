@@ -72,6 +72,22 @@ func TestAdminOnlyRequiresAdministrator(t *testing.T) {
 	}
 }
 
+func TestTerminalPathIsNASData(t *testing.T) {
+	tests := map[string]bool{
+		"/data":                 true,
+		"/data/files/report.md": true,
+		"/data/../etc":          false,
+		"/":                     false,
+		"/etc/hosts":            false,
+		"relative/path":         false,
+	}
+	for input, want := range tests {
+		if got := terminalPathIsNASData(input); got != want {
+			t.Errorf("terminalPathIsNASData(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
+
 func TestAPIHandlerRequiresAuthentication(t *testing.T) {
 	server := &Server{mux: http.NewServeMux()}
 	handler := server.Handler()

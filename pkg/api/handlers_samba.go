@@ -25,19 +25,7 @@ func (s *Server) handleSambaStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSambaPassword(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request")
-		return
-	}
-
-	if err := s.sambaMgr.UpdatePassword(r.Context(), body.Password); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "密码修改成功"})
+	writeError(w, http.StatusConflict, "SMB 账号和密码跟随首位超级管理员，请修改管理员密码")
 }
 
 func (s *Server) handleSambaShareAddOrUpdate(w http.ResponseWriter, r *http.Request) {

@@ -104,6 +104,7 @@ func (s *Server) registerRoutes() {
 
 	// 7. Web Terminal & File System
 	s.mux.HandleFunc("GET /api/terminal/ws", s.adminOnly(s.handleTerminalWS))
+	s.mux.HandleFunc("POST /api/terminal/session/close", s.adminOnly(s.handleTerminalSessionClose))
 	s.mux.HandleFunc("GET /api/terminal/files", s.handleTerminalFilesList)
 	s.mux.HandleFunc("GET /api/terminal/files/read", s.handleTerminalFileRead)
 	s.mux.HandleFunc("POST /api/terminal/files/write", s.adminOnly(s.handleTerminalFileWrite))

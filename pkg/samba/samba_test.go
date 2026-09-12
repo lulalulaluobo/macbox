@@ -31,3 +31,16 @@ func TestNormalizeSharePathRestrictsSharesToDataRoot(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateShareName(t *testing.T) {
+	for _, name := range []string{"硬盘2", "家庭照片", "MacNAS-SSD", "共享_01"} {
+		if err := validateShareName(name); err != nil {
+			t.Errorf("validateShareName(%q) returned error: %v", name, err)
+		}
+	}
+	for _, name := range []string{"", "share name", "share/path", "share[bad]", "share\nname"} {
+		if err := validateShareName(name); err == nil {
+			t.Errorf("validateShareName(%q) accepted an unsafe name", name)
+		}
+	}
+}

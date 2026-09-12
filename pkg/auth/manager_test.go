@@ -71,6 +71,34 @@ func TestInitialAdminCredentialsAreChosenDuringSetup(t *testing.T) {
 	}
 }
 
+func TestIsInitialAdmin(t *testing.T) {
+	mgr, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	first, err := mgr.CreateInitialAdmin(CreateUserRequest{
+		Username: "first-admin",
+		Password: "another-strong-password",
+	})
+	if err != nil {
+		t.Fatalf("CreateInitialAdmin() error = %v", err)
+	}
+	second, err := mgr.CreateUser(CreateUserRequest{
+		Username: "second-admin",
+		Password: "different-strong-password",
+		Role:     "admin",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if !mgr.IsInitialAdmin(first.ID) {
+		t.Fatal("first administrator was not recognized as the initial administrator")
+	}
+	if mgr.IsInitialAdmin(second.ID) {
+		t.Fatal("second administrator was incorrectly recognized as the initial administrator")
+	}
+}
+
 func TestAuthPasswordUsesEightCharacterStrongMinimum(t *testing.T) {
 	validMgr, err := NewManager(t.TempDir())
 	if err != nil {

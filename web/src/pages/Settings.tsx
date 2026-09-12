@@ -120,7 +120,11 @@ export const Settings: React.FC<SettingsProps> = ({
   const [terminalSkills, setTerminalSkills] = useState<TerminalSkillsSettings>({
     enabled: false,
     hostPath: '',
-    guestPaths: ['/home/macnasctl/.agents/skills', '/root/.agents/skills'],
+    guestPaths: [
+      '/home/macnasctl/.agents/skills', '/root/.agents/skills',
+      '/home/macnasctl/.claude/skills', '/root/.claude/skills',
+      '/home/macnasctl/.codex/skills', '/root/.codex/skills',
+    ],
     readOnly: true,
     status: 'disabled',
     message: '未启用本机 Skill 目录映射',
@@ -389,7 +393,10 @@ export const Settings: React.FC<SettingsProps> = ({
   };
 
   const downloadPrivateKeyFile = (privKey: string, filename: string) => {
-    const blob = new Blob([privKey], { type: 'text/plain;charset=utf-8' });
+    // OpenSSH expects the PEM-style text file to end with a newline. The API
+    // trims transport whitespace, so restore it before browser download.
+    const normalizedKey = privKey.endsWith('\n') ? privKey : `${privKey}\n`;
+    const blob = new Blob([normalizedKey], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -1082,7 +1089,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
               <div className="space-y-3 font-mono text-xs">
                 {/* Root Key Connect Command */}
-                {sshConfig.permitRootLogin && (
+                {sshConfig.permitRootLogin && generatedKeyResult && (
                   <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 space-y-2">
                     <div className="flex justify-between items-center text-amber-400 font-sans text-xs font-semibold">
                       <span className="flex items-center space-x-1.5">
@@ -1090,7 +1097,7 @@ export const Settings: React.FC<SettingsProps> = ({
                         <span>👑 Root 密钥免密连接:</span>
                       </span>
                       <button
-                        onClick={() => handleCopySSHCommand(`ssh -i ~/Downloads/macnas_root_id_ed25519 -p ${sshConfig.sshLocalPort || sshConfig.port} root@${sshConfig.sshLocalPort ? '127.0.0.1' : primaryIP}`)}
+                        onClick={() => handleCopySSHCommand(`ssh -o StrictHostKeyChecking=accept-new -i ~/Downloads/${generatedKeyResult.filename} -p ${sshConfig.sshLocalPort || sshConfig.port} root@127.0.0.1`)}
                         className="p-1 rounded hover:bg-amber-500/20 text-amber-300"
                         title="复制密钥连接命令"
                       >
@@ -1098,7 +1105,7 @@ export const Settings: React.FC<SettingsProps> = ({
                       </button>
                     </div>
                     <code className="text-amber-200 block bg-black/60 p-2.5 rounded-xl break-all">
-                      ssh -i ~/Downloads/macnas_root_id_ed25519 -p {sshConfig.sshLocalPort || sshConfig.port} root@{sshConfig.sshLocalPort ? '127.0.0.1' : primaryIP}
+                      ssh -o StrictHostKeyChecking=accept-new -i ~/Downloads/{generatedKeyResult.filename} -p {sshConfig.sshLocalPort || sshConfig.port} root@127.0.0.1
                     </code>
                   </div>
                 )}
@@ -1106,7 +1113,7 @@ export const Settings: React.FC<SettingsProps> = ({
               </div>
 
               <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
-                提示: 先生成或导入 Root SSH 公钥，再使用上面的密钥命令连接 MacNAS Linux 虚拟机。
+                提示: 先生成 Root SSH 密钥，然后在运行 MacNAS 的这台 Mac 的 macOS“终端”中执行弹窗里的完整命令；不要把这些命令粘贴到本页面的 Web 终端中。私钥路径是 Mac 的 Downloads，不是 VM 内的 /root/Downloads。
               </p>
             </div>
           </div>
@@ -1328,7 +1335,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   </span>
                 </div>
                 <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                  将 Mac 本机的 <code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.agents/skills</code> 以只读方式映射到 VM，终端里的 Codex、Claude 等 AI CLI 可以直接调用。目录不会被 AI CLI 修改。
+                  将 Mac 本机的 Skill 目录以只读方式映射到 VM 的 <code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.agents/skills</code>、<code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.claude/skills</code> 和 <code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.codex/skills</code>，终端里的 Codex、Claude 等 AI CLI 可以直接调用。目录不会被 AI CLI 修改。
                 </p>
               </div>
             </div>
@@ -1422,7 +1429,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
               <div className="flex flex-col gap-2 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3 text-[11px] leading-relaxed text-slate-500 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <div>VM 映射位置：<code className="text-slate-300">/home/macnasctl/.agents/skills</code>、<code className="text-slate-300">/root/.agents/skills</code></div>
+                  <div>VM 映射位置：<code className="text-slate-300">.agents/skills</code>、<code className="text-slate-300">.claude/skills</code>、<code className="text-slate-300">.codex/skills</code>（普通用户与 root 均已映射）</div>
                   <div className="mt-1">纯 Web 访问时，浏览器目录选择器只能读取手机/当前设备，不能代表运行 Mac；因此这里由 MacNAS 在服务器本机自动扫描。</div>
                 </div>
                 <span className="shrink-0 text-emerald-300">只读映射</span>
@@ -1788,7 +1795,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
               {/* Usage Guide */}
               <div className="space-y-2 font-sans">
-                <h4 className="font-bold text-slate-200">使用指南 (在 Mac 终端中运行):</h4>
+                <h4 className="font-bold text-slate-200">使用指南（必须在运行 MacNAS 的 Mac 的 macOS“终端”中运行）:</h4>
 
                 <div className="p-3 rounded-xl bg-black/60 border border-slate-800 font-mono text-[11px] space-y-2 text-slate-300">
                   <div>
@@ -1797,24 +1804,22 @@ export const Settings: React.FC<SettingsProps> = ({
                   </div>
 
                   <div>
-                    <span className="text-slate-500"># 步骤 2: 宿主机本机直连命令 (端口 {sshConfig.sshLocalPort || 58107})</span>
+                    <span className="text-slate-500"># 步骤 2: 在 Mac 宿主机终端执行（端口 {sshConfig.sshLocalPort || 58107}）</span>
                     <div className="text-sky-300 select-all">
-                      ssh -i ~/Downloads/{generatedKeyResult.filename} -p {sshConfig.sshLocalPort || 58107} root@127.0.0.1
+                      ssh -o StrictHostKeyChecking=accept-new -i ~/Downloads/{generatedKeyResult.filename} -p {sshConfig.sshLocalPort || 58107} root@127.0.0.1
                     </div>
                   </div>
 
                   <div>
-                    <span className="text-slate-500"># 步骤 3: 局域网其他设备连接命令 (端口 {sshConfig.port})</span>
-                    <div className="text-emerald-300 select-all">
-                      ssh -i ~/Downloads/{generatedKeyResult.filename} -p {sshConfig.port} root@{primaryIP}
-                    </div>
+                    <span className="text-slate-500"># 步骤 3: 局域网其他设备（当前不提供默认直连）</span>
+                    <div className="text-emerald-300">当前未开放宿主机 22 端口；运行 Mac 请始终使用步骤 2 的 127.0.0.1:{sshConfig.sshLocalPort || 58107}。</div>
                   </div>
                 </div>
               </div>
 
               {/* Important security warning */}
               <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300/90 text-[11px] leading-relaxed">
-                ⚠️ <strong>安全提示</strong>: 私钥文件已自动下载至您的 Downloads 文件夹中。为确保绝对安全，MacNAS 服务器端已彻底擦除私钥明文，请妥善保存该私钥文件。
+                ⚠️ <strong>安全提示</strong>: 私钥文件已自动下载至运行浏览器的 Mac 的 Downloads 文件夹中，文件名包含 `.txt` 扩展名也可以直接用于 SSH。为确保绝对安全，MacNAS 服务器端已彻底擦除私钥明文，请妥善保存该私钥文件。
               </div>
             </div>
 
@@ -1848,7 +1853,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const cmd = `chmod 600 ~/Downloads/${generatedKeyResult.filename} && ssh -i ~/Downloads/${generatedKeyResult.filename} -p ${sshConfig.sshLocalPort || sshConfig.port} root@${sshConfig.sshLocalPort ? '127.0.0.1' : primaryIP}`;
+                    const cmd = `chmod 600 ~/Downloads/${generatedKeyResult.filename} && ssh -o StrictHostKeyChecking=accept-new -i ~/Downloads/${generatedKeyResult.filename} -p ${sshConfig.sshLocalPort || sshConfig.port} root@${sshConfig.sshLocalPort ? '127.0.0.1' : primaryIP}`;
                     navigator.clipboard.writeText(cmd);
                     setCopiedKeyCmd(true);
                     setTimeout(() => setCopiedKeyCmd(false), 2000);
