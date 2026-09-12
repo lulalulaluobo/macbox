@@ -2,6 +2,14 @@
 
 MacNAS 正式发行版是 macOS Web 服务压缩包，不提供 DMG。发行包根目录提供可选的原生 `MacNASMenu.app` 菜单栏助手、备用 `MacNAS.command` 控制器，以及 `install.sh`/`uninstall.sh` 命令。MacNAS 作为 Go Web 服务运行，浏览器负责全部管理操作；Lima 提供 Linux 虚拟机，Docker、Samba、文件管理和终端均由 Web 控制台管理。
 
+## 首选：本地 Agent 一句话部署
+
+如果目标 Mac 已安装 Codex CLI、WorkBuddy 或其他具有本地终端权限的 Agent，直接发送：
+
+```text
+请在当前这台 macOS 上部署 MacNAS：自动识别 Apple Silicon 或 Intel，从 MacNAS GitHub 的最新 Release 下载并校验对应压缩包，优先启动发行包中的 MacNASMenu.app，检测并在需要时通过 Homebrew 安装或复用 Lima，完成安装并启动 Web 服务，最后打开本机 Web 页面并返回局域网访问地址；不要使用开发机绝对路径，不要删除用户数据，遇到系统授权或破坏性操作时先向我确认。
+```
+
 ## 安装
 
 下载与你的 Mac 架构匹配的 `MacNAS_*_macos_aarch64.tar.gz`（Apple Silicon）或 `MacNAS_*_macos_x86_64.tar.gz`（Intel），解压后双击根目录的 `MacNASMenu.app`，再从顶部栏选择“启动后端服务”即可。首次运行未签名开源 App 时，如果 macOS 阻止打开，请在 Finder 中右键选择“打开”。
@@ -133,6 +141,10 @@ macnas --host 127.0.0.1 --port 19808
 菜单栏助手的“彻底卸载”会先进行二次确认，然后只删除 MacNAS 实例、管理盘、数据镜像、Docker 资源和配置；菜单中的“卸载程序”则保留这些运行数据。
 
 破坏性命令必须手动输入 `DELETE`。它不会删除其他 Lima 实例、Homebrew、宿主机无关 Docker 数据或整个 `~/MacNAS` 目录，只处理 MacNAS 固定资源。
+
+## 开源许可
+
+MacNAS 代码采用 [Apache License 2.0](LICENSE)。
 
 ## 校验发行包
 

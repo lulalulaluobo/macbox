@@ -1,16 +1,27 @@
 # MacNAS 分发与本地部署指南
 
-本文说明新用户从 GitHub 获取 MacNAS 后，应该选择 Release 还是源码，以及怎样把安装阻力降到最低。
+本文说明新用户如何通过本地 Agent、GitHub Release 或源码完成 MacNAS 部署，以及怎样把安装阻力降到最低。
 
-## 结论：普通用户优先使用 GitHub Release
+## 结论：本地 Agent 优先，GitHub Release 作为标准兜底
 
 | 用户类型 | 获取方式 | 用户需要准备 | 推荐入口 |
 | --- | --- | --- | --- |
-| 普通家庭用户 | GitHub Release 预编译压缩包 | macOS；Lima/Homebrew 按首次初始化提示处理 | 优先双击 `MacNASMenu.app` |
+| 普通家庭用户 | 本地 Agent 调用 GitHub Release | 已安装 Codex CLI、WorkBuddy 或其他有本机终端权限的 Agent | 一句话提示词部署 |
+| 手动安装用户 | GitHub Release 预编译压缩包 | macOS；Lima/Homebrew 按首次初始化提示处理 | 双击 `MacNASMenu.app` |
 | 开发者/贡献者 | GitHub 源码 | Go、Node.js/npm、Xcode Command Line Tools | `make release-mac` |
 | 内部测试 | 当前工作树 | 完整开发环境 | `make build` 或 `make dev-backend-lan` |
 
-Release 是降低分发阻力的核心：用户不需要 Go、Node.js、npm，也不需要自己编译前端和后端。源码部署应该定位为开发和贡献流程，不应作为普通用户的默认路径。
+本地 Agent 是普通用户的首选入口：它可以在用户自己的 Mac 上完成架构识别、Release 下载、SHA-256 校验、Lima 检查和启动，不要求用户理解目录、命令或运行时依赖。Release 是没有本地 Agent 时的标准兜底，用户不需要 Go、Node.js、npm，也不需要自己编译前端和后端。源码部署应该定位为开发和贡献流程。
+
+## 本地 Agent 一句话部署
+
+将下面的提示词发送给运行在目标 Mac 上、并且具有本地终端权限的 Codex CLI、WorkBuddy 或其他 Agent：
+
+```text
+请在当前这台 macOS 上部署 MacNAS：自动识别 Apple Silicon 或 Intel，从 MacNAS GitHub 的最新 Release 下载并校验对应压缩包，优先启动发行包中的 MacNASMenu.app，检测并在需要时通过 Homebrew 安装或复用 Lima，完成安装并启动 Web 服务，最后打开本机 Web 页面并返回局域网访问地址；不要使用开发机绝对路径，不要删除用户数据，遇到系统授权或破坏性操作时先向我确认。
+```
+
+本地 Agent 必须实际运行在安装 MacNAS 的那台 Mac 上。手机端聊天或没有本机终端权限的云端 Agent 不能代替部署。Agent 完成后应返回实际安装目录、服务地址、Lima 状态和失败日志。
 
 ## Release 用户安装（推荐优先双击 `MacNASMenu.app`）
 
@@ -106,8 +117,10 @@ brew install lima
 
 ### 1. 获取源码和开发依赖
 
+请先在 MacNAS GitHub 仓库页面复制实际的 HTTPS 地址，再执行：
+
 ```bash
-git clone https://github.com/luluen/mac-nas.git
+git clone <MacNAS GitHub 仓库 HTTPS 地址>
 cd mac-nas
 ```
 

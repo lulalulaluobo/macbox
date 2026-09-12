@@ -1,132 +1,225 @@
 # MacNAS
 
-MacNAS 是面向 macOS 的家庭 NAS Web 控制台：Go 后端通过浏览器提供管理界面，Lima 提供 Linux 虚拟机，虚拟机内运行 Docker、文件服务、SMB 和终端。
+MacNAS 是一个面向 macOS 的家庭 NAS 控制中心。它以 Web 控制台为主界面，在 Lima Linux 虚拟机中运行 Docker、文件服务、SMB 共享和 Web 终端；macOS 顶部菜单栏助手负责启动、停止、状态监控、日志和卸载。
 
-正式发行方式是“预编译二进制压缩包 + `MacNASMenu.app`/`install.sh`”，不提供 DMG。发行包不包含开发机用户、Docker 容器、Docker 镜像、卷、Lima 实例或任何 NAS 数据。`MacNASMenu.app` 是可选的原生菜单栏助手，Web 控制台仍是主界面。
+MacNAS 采用 Apache License 2.0 发布，允许个人和组织商用、修改和再分发，具体条款见 [LICENSE](LICENSE)。
 
-## 从源码构建 macOS 发行包
+当前版本的分发方式是“预编译二进制压缩包 + `MacNASMenu.app` + `install.sh`”，不提供 DMG。发行包不包含开发机用户、Docker 容器、Docker 镜像、卷、Lima 实例或 NAS 数据。
 
-在 macOS 上执行：
+## 当前版本功能（2026-09-12）
 
-```bash
+### 主要页面
+
+以下截图来自当前运行版本，使用 MacNAS 内置浏览器的手机视口生成。截图中的 CPU、内存、存储和文件名是测试环境数据。
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/dashboard-mobile.png" alt="MacNAS 首页" width="300"><br>首页：主机状态、资源监控、Docker 服务导航</td>
+    <td align="center"><img src="docs/screenshots/file-manager-mobile.png" alt="文件管理" width="300"><br>文件：磁盘、目录、收藏和文件操作</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/docker-mobile.png" alt="Docker 管理" width="300"><br>Docker：容器、编排、镜像和网络</td>
+    <td align="center"><img src="docs/screenshots/apps-mobile.png" alt="NAS 应用商城" width="300"><br>应用：应用商城与 Compose 部署</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/web-terminal-mobile.png" alt="Web 终端" width="300"><br>Web 终端：持久化会话与 AI CLI 快捷入口</td>
+    <td align="center"><img src="docs/screenshots/terminal-settings-mobile.png" alt="终端设置与 Skill 映射" width="300"><br>设置：终端身份与 AI CLI Skill 目录映射</td>
+  </tr>
+</table>
+
+### 平台与启动管理
+
+- Go 后端嵌入 React/Vite 前端，最终用户不需要安装 Node.js。
+- Lima 提供 Linux 虚拟机，虚拟机内运行 Docker Engine、文件操作、SMB 和交互式终端。
+- 首次启动状态机分为环境检查、虚拟机配置和服务启动阶段。
+- 诊断中心检查 Lima、虚拟机、Mac 数据盘、NAS 数据盘、SSH、Docker 和本机目录直通探针，并保留具体失败原因。
+- 顶部菜单栏助手每 5 秒检测 Web 服务和资源状态，显示 CPU、内存、存储、Lima 和 Docker 状态。
+- 菜单栏提供打开网页、启动/停止后端、启动/停止 Lima、刷新状态、打开日志，以及“仅卸载程序”和“彻底卸载”两级入口。
+
+### 存储与文件管理
+
+- 支持 NAS 根目录、Docker 目录、第二存储空间和已挂载云盘等磁盘入口。
+- 存储设置支持外置盘、本机目录直通、候选目录扫描、挂载契约和 VM 内可见性探针。
+- 文件列表支持新建目录、上传、读取、重命名、复制、移动、删除、路径复制和下载。
+- 常用目录可以收藏/取消收藏；收藏项在上方快速导航中显示，收藏星星使用黄色高对比度图标。
+- 文件和文件夹都可以下载；文件夹会在服务端流式生成 ZIP，避免移动端依赖新窗口。
+- 文件下载会先验证源文件和读取权限，避免浏览器创建 0 KB 空文件。
+- 删除默认进入 `/data/.trash` 回收站，可恢复、清空；也支持从回收站安全移动到 Mac 本机 `~/.Trash`。
+- 顶部任务列表显示云盘传输任务的状态、文件进度、总大小、当前文件和实时速度，并支持清理历史任务。
+
+### 压缩与解压
+
+- 支持 ZIP、7z、RAR 的压缩/解压入口。
+- ZIP 使用虚拟机内 Python 标准库，开箱即用，不需要额外安装工具。
+- 7z/RAR 使用虚拟机内的 `7z`、`7zz`、`unrar` 或 `rar` 工具；工具缺失时页面会显示明确提示。
+- 压缩包解压前会校验绝对路径、`..` 路径、控制字符、符号链接和特殊文件，降低路径穿越风险。
+
+### Docker 与应用商城
+
+- Docker 总览、容器、Compose 编排、镜像和网络页面。
+- 容器支持启动、停止、重启、日志、删除；镜像支持拉取、删除和清理；Compose 支持查看、部署、启动、停止、重启、更新和删除。
+- Compose 的宿主机 `ports` 会自动加入 Lima 端口转发白名单，新部署的服务默认可以通过 Mac 局域网 IP 访问，例如 `http://<Mac局域网IP>:8088`。
+- 首页 Docker 服务导航从真实容器列表同步：删除容器后会清理对应导航，Docker 临时故障时不会误删用户配置。
+- 容器右侧 `+` 可以自动读取容器名称和内网端口，选择 20 个预设图标后添加到首页；首页点击导航即可打开服务。
+- 应用商城提供内置和社区 Compose 项目，可搜索、按分类筛选、查看端口/目录映射、配置并安装。
+- 当前仓库包含 Dockge、File Browser、Jellyfin、Syncthing、qBittorrent、Alist、迅雷下载和百度网盘等模板；迅雷模板包含 `SYS_ADMIN` 与 `apparmor=unconfined` 配置。
+
+### Web 终端与 AI CLI
+
+- Web 终端支持可恢复的 Linux Shell 会话，页面刷新后仍能看到执行中的任务和历史输出。
+- Docker 容器页面可以将最近日志填入终端输入框，用户确认后交给 AI CLI 分析；不会自动发送命令。
+- 顶部提供 Codex、Claude、Anti Gravity 三个 CLI 快捷入口，分别启动对应工具的高权限模式：
+
+  ```
+  codex --dangerously-bypass-approvals-and-sandbox
+  claude --dangerously-skip-permissions
+  agy --dangerously-skip-permissions
+  ```
+
+- 在“设置 → 终端”中可以选择普通用户或 Root 默认登录身份。
+- 支持配置 Mac 本机 AI Skill 目录：扫描 `~/.agents/skills`、`~/.codex/skills` 和 `~/.claude/skills`，经管理员确认后以只读方式映射到 VM 的 `/home/macnasctl/.agents/skills` 和 `/root/.agents/skills`。
+- Skill 映射保存后需要重启 VM；AI CLI 和 Skill 本身需要用户预先安装并登录。
+
+### 夸克云盘
+
+- 文件页支持挂载夸克云盘，使用夸克官方扫码页面完成网页鉴权，不要求在 MacNAS 中粘贴 Cookie、手机号密码或短信验证码。
+- 挂载后作为独立云盘入口显示，可浏览目录、新建文件夹、重命名和删除云端文件。
+- 支持下载单个文件、文件夹或多选项目到 NAS 本地挂载目录，默认目标为 `/data/downloads`。
+- 云盘下载在后台任务中执行，记录文件数量、总大小、完成字节数、当前文件、速度和失败原因；刷新页面后仍可查询。
+
+## 安装与分发
+
+### 首选：本地 Agent 一句话部署
+
+如果用户已经在这台 Mac 上安装了 Codex CLI、WorkBuddy 或其他具有本地终端权限的 Agent，推荐直接发送下面这一句话，让 Agent 完成环境检测、Release 获取、校验和部署：
+
+```text
+请在当前这台 macOS 上部署 MacNAS：自动识别 Apple Silicon 或 Intel，从 MacNAS GitHub 的最新 Release 下载并校验对应压缩包，优先启动发行包中的 MacNASMenu.app，检测并在需要时通过 Homebrew 安装或复用 Lima，完成安装并启动 Web 服务，最后打开本机 Web 页面并返回局域网访问地址；不要使用开发机绝对路径，不要删除用户数据，遇到系统授权或破坏性操作时先向我确认。
+```
+
+本地 Agent 需要能够在运行 MacNAS 的 Mac 上执行终端命令；手机端聊天或没有本机权限的云端 Agent 不能替代本地部署。部署完成后，Agent 应返回实际安装目录、服务地址、Lima 状态和失败日志，而不是只报告“已完成”。
+
+如果用户已经克隆了源码，可使用下面的一句话提示词：
+
+```text
+请在当前 MacNAS 源码目录完成本地部署：检查 Go、Node.js/npm、Xcode Command Line Tools 和 Lima，运行 make release-mac 生成当前架构发行包，再按正式用户流程校验并安装，启动 MacNASMenu.app 和 Web 服务，最后返回本机及局域网访问地址；不要覆盖用户数据，所有需要授权或删除的操作先向我确认。
+```
+
+### 第二选择：直接使用 GitHub Release
+
+从 GitHub Release 下载匹配架构的压缩包：
+
+- Apple Silicon（M1/M2/M3/M4）：`MacNAS_*_macos_aarch64.tar.gz`
+- Intel Mac：`MacNAS_*_macos_x86_64.tar.gz`
+
+解压后直接双击根目录的 `MacNASMenu.app`，然后从顶部菜单选择：
+
+1. 启动后端服务；
+2. 打开网页端；
+3. 在本机完成首次初始化。
+
+首次初始化只允许在运行 MacNAS 的 Mac 本机完成。登录页会要求现场设置管理员账号和至少 12 个字节的密码，不使用公开固定密码。
+
+如果 macOS 阻止未签名或未公证的开源 App：
+
+1. 先校验 Release 的 SHA-256；
+2. 在 Finder 中右键 `MacNASMenu.app`，选择“打开”；
+3. 如果仍被阻止，到“系统设置 → 隐私与安全性”点击“仍要打开”。
+
+确认来源可信时，也可以只对当前发行包中的 App 移除隔离标记：
+
+```
+xattr -dr com.apple.quarantine "./MacNASMenu.app"
+open "./MacNASMenu.app"
+```
+
+不要使用会全局关闭 Gatekeeper 的 `sudo spctl --master-disable`。
+
+### 命令行备用安装
+
+```
+tar -xzf MacNAS_*_macos_*.tar.gz
+cd MacNAS_*_macos_*
+./install.sh --start
+```
+
+安装器会把程序安装到用户级目录 `~/.local/share/macnas`，并创建 `~/.local/bin/macnas`。它会检查 Lima：
+
+- 已安装 Lima：直接复用；
+- 已安装 Homebrew 但没有 Lima：交互式询问后执行 `brew install lima`；
+- 没有 Homebrew：显示官方安装方式并停止，不静默执行远程脚本。
+
+默认地址：
+
+```
+本机：http://127.0.0.1:19808
+局域网：http://<Mac局域网IP>:19808
+```
+
+### 从源码构建
+
+源码方式适合开发、调试和贡献，不是普通用户的默认安装路径。请先在 MacNAS GitHub 仓库页面复制实际的 HTTPS 地址，再执行：
+
+```
+git clone <MacNAS GitHub 仓库 HTTPS 地址>
+cd mac-nas
 make release-mac
 ```
 
-默认按当前机器架构生成压缩包：
+构建依赖 Go、Node.js/npm、Xcode Command Line Tools、Lima 和 macOS。构建脚本会：
 
-```text
-dist/MacNAS_<版本>_macos_aarch64.tar.gz   # Apple Silicon
-dist/MacNAS_<版本>_macos_x86_64.tar.gz    # Intel
+1. 构建 React 前端；
+2. 编译当前 macOS 架构的 Go 后端；
+3. 复制 VM 模板、安装器、卸载器和备用控制器；
+4. 编译 `MacNASMenu.app`；
+5. 生成压缩包、包内文件清单和 SHA-256 校验文件。
+
+常用开发命令：
+
 ```
-
-构建脚本会先构建 React 前端，再将 `web/dist` 嵌入 Go 二进制；最终用户不需要 Node.js。维护者也可以使用 `MACNAS_GOARCH=amd64` 或 `MACNAS_GOARCH=arm64` 交叉构建另一种 macOS 架构。
-
-仅构建顶部菜单栏助手：
-
-```bash
-make build-mac-menu
-```
-
-## 用户安装和启动
-
-解压匹配架构的发行包后，先双击根目录中的 `MacNASMenu.app`。它会常驻 macOS 顶部菜单栏，提供打开 Web、启动/停止后端、启动/停止 Lima、查看日志以及分级卸载。首次运行未签名开源 App 时，如果 macOS 阻止打开，请在 Finder 中右键选择“打开”。
-
-也可以使用命令行安装：
-
-```bash
-cd MacNAS_*
-./install.sh
-export PATH="$HOME/.local/bin:$PATH"
-macnas --lan
-```
-
-安装完成后可以从顶部栏 MacNAS 菜单启动服务。`MacNAS.command` 仍然保留，适合不使用菜单栏助手时的备用控制。
-
-安装器会检查 Lima。若已安装 Homebrew，会在确认后执行 `brew install lima`；若没有 Homebrew，会显示官方安装命令并停止，不会静默执行远程安装脚本。服务以前台方式运行，终端会显示 Lima 初始化、错误和 Web 地址，按 `Ctrl+C` 停止。
-
-首次初始化请在运行 MacNAS 的 Mac 本机浏览器打开：
-
-```text
-http://127.0.0.1:19808
-```
-
-首次初始化只允许本机完成，登录页会要求现场设置管理员账号和至少 12 个字节的密码，不再提供公开的固定初始密码。完成后，局域网设备访问终端打印的 `http://<Mac局域网IP>:19808` 即可登录。`macnas --lan` 监听 `0.0.0.0`，若不需要局域网访问，可改用 `macnas --host 127.0.0.1`。
-
-为防止恶意网页通过 DNS Rebinding 访问 API，默认只接受 `localhost` 和 IP 地址形式的 Host。若通过反向代理使用自定义域名，请在启动服务前设置逗号分隔的 `MACNAS_ALLOWED_HOSTS`，例如 `MACNAS_ALLOWED_HOSTS=nas.example.com`；这不代表 MacNAS 已提供公网安全访问，公网仍应使用 HTTPS/VPN。
-
-### Docker 项目的局域网访问
-
-应用商城和 Docker Compose 页面部署项目时，MacNAS 会自动读取 Compose 中的宿主机 `ports` 映射，并将端口加入 Lima 转发白名单。发现新端口后会自动短暂重启虚拟机，使端口立即绑定到 Mac 的局域网地址；已登记的端口不会重复重启。之后可通过 `http://<Mac局域网IP>:<端口>` 访问对应服务。
-
-因此新项目应使用标准 Compose 端口映射，例如：
-
-```yaml
-services:
-  app:
-    image: example/app:latest
-    ports:
-      - "8088:80"
-```
-
-端口必须是宿主机可用的 TCP 端口；如果端口冲突或虚拟机重启失败，部署日志会明确提示，容器不会被静默认为“局域网已可访问”。
-
-更多安装、校验、目录直通和卸载说明见 [`docs/macos-cli-install.md`](docs/macos-cli-install.md)。
-
-新用户选择 Release、源码构建和本地部署的完整说明见 [`docs/distribution-and-local-deploy.md`](docs/distribution-and-local-deploy.md)。普通用户建议直接下载 GitHub Release，源码方式仅用于开发和贡献。
-
-### AI 终端维护容器
-
-Web 终端顶部提供 `Codex`、`Claude` 和 `Anti Gravity` 三个快捷入口，分别执行对应 CLI 的高权限模式：
-
-```text
-codex --dangerously-bypass-approvals-and-sandbox
-claude --dangerously-skip-permissions
-agy --dangerously-skip-permissions
-```
-
-这三个 CLI 必须预先安装在 Lima 虚拟机中，并完成各自登录。按钮会跳过对应工具的安全审批，拥有当前终端用户的权限，只建议管理员在可信环境中使用。Docker 容器管理页的 `AI` 按钮会读取最近 200 行容器日志，切换到 Web 终端并填入输入框；不会自动发送，选择 AI 后仍需由用户点击发送。
-
-在「设置 → 终端」中可以配置 AI CLI Skill 目录。MacNAS 会在运行服务的 Mac 本机扫描 `~/.agents/skills`（推荐）、`~/.codex/skills` 和 `~/.claude/skills`，管理员确认后以只读方式挂载到 VM 的 `/home/macnasctl/.agents/skills` 与 `/root/.agents/skills`。纯 Web 访问时不要使用浏览器目录选择器代替本机路径：手机或浏览器选择到的是当前访问设备，而不是运行 MacNAS 的 Mac。已有运行中的 VM 保存映射后需要重启一次；尚未创建 VM 的安装会在首次启动时自动应用。
-
-### 夸克云盘与下载任务
-
-在「文件 → 更多 → 挂载云盘」中选择夸克云盘，使用夸克 App 扫码完成网页鉴权。MacNAS 不要求用户粘贴 Cookie，也不保存手机号、密码或短信验证码；登录会话只在服务端短暂保留并写入权限为 `0600` 的配置文件。挂载成功后，夸克云盘会作为新的文件页磁盘入口显示。
-
-云端目录支持浏览、新建文件夹、重命名、删除，以及将文件或文件夹下载到 NAS 数据目录。下载目标默认为 `/data/downloads`，每次下载都会创建后台任务；文件页会显示任务状态、字节进度、当前文件、实时速度，并在刷新页面后继续显示。服务重启造成的未完成任务会标记为中断，不会伪装成已完成。
-
-当前第一阶段提供安全的手机扫码鉴权；手机号登录仍由夸克官方页面负责，MacNAS 不接管短信验证。后续如果夸克提供稳定的公开 OAuth 回调，再增加完整的手机号网页登录回调。
-
-## 完整删除 MacNAS
-
-发行包根目录的 `MacNASMenu.app` 菜单包含“卸载程序（保留实例和数据）”与“彻底卸载（实例、镜像和配置）”。彻底卸载会先进行原生对话框确认，再调用安全卸载流程；不会删除其他 Lima 实例、宿主机无关 Docker 数据或整个 `~/MacNAS` 目录。
-
-也可以直接使用发行包自带卸载脚本。仅移除程序并保留数据：
-
-```bash
-./uninstall.sh
-```
-
-恢复新用户状态，删除 MacNAS 专属 Lima 实例、`macnas-data` 管理盘、配置和数据镜像：
-
-```bash
-./uninstall.sh --purge
-```
-
-同时卸载 Homebrew 安装的 Lima：
-
-```bash
-./uninstall.sh --purge --uninstall-lima
-```
-
-破坏性清理必须输入 `DELETE`。脚本不会删除其他 Lima 实例、Homebrew、宿主机无关 Docker 数据或整个 `~/MacNAS` 目录。
-
-## 开发命令
-
-```bash
 make build              # 构建前端并编译 bin/macnas
 make dev-backend        # 仅本机访问的开发服务
 make dev-backend-lan    # 局域网可访问的开发服务
-make test               # 后端单元测试
+make test               # 后端测试
 ```
 
-纯 Web 版无法取得 macOS 本机的绝对路径，因此目录直通需要在 Web 页面填写“运行 MacNAS 的 Mac”上的路径。直通目录中的文件仍留在原位置，不会复制进 NAS 数据镜像。
+## 局域网边界与安全说明
+
+MacNAS 当前定位是可信家庭局域网使用：默认使用 HTTP，外网访问需要用户自行配置 HTTPS/VPN/反向代理。HTTP 局域网模式不应直接暴露到公网。
+
+当前已处理：
+
+- 首次初始化仅允许本机完成，管理员密码由用户现场设置；
+- API 默认拒绝未登记的 DNS Host，降低 DNS Rebinding 风险；
+- AI Skill 映射使用只读挂载，并要求管理员二次确认风险；
+- ZIP、7z、RAR 解压执行路径和归档条目经过安全校验；
+- 登录、上传并发和终端会话已有基础限制。
+
+当前按内网产品边界暂缓：普通成员共享全部 NAS 数据的细粒度 ACL、完整全局审计日志、完整供应链签名和公网级 HTTPS/限流。这些不代表 MacNAS 已适合公网部署。
+
+## 卸载与恢复初始状态
+
+发行包中的菜单栏助手和卸载脚本区分两种操作：
+
+```
+./uninstall.sh                # 仅卸载程序，保留实例和数据
+./uninstall.sh --purge        # 删除 MacNAS 专属实例、镜像、配置和数据
+./uninstall.sh --purge --uninstall-lima  # 同时卸载 Homebrew 安装的 Lima
+```
+
+破坏性清理需要输入 `DELETE` 确认，不会删除其他 Lima 实例、宿主机无关 Docker 数据或整个用户目录。
+
+## 开源许可与致谢
+
+MacNAS 代码正式采用 **Apache License 2.0**，具体条款见仓库根目录的 [LICENSE](LICENSE)。
+
+MacNAS 的架构、功能边界和交互设计参考了以下优秀开源项目，感谢它们及其贡献者：
+
+- [Lima](https://github.com/lima-vm/lima)（Apache-2.0）：macOS Linux 虚拟机、磁盘和端口转发思路。
+- [Colima](https://github.com/abiosoft/colima)（MIT）：macOS 容器运行时的安装、检测和使用体验。
+- [Dockge](https://github.com/louislam/dockge)（MIT）：Docker Compose 堆栈管理和实时日志交互。
+- [CasaOS](https://github.com/IceWhaleTech/CasaOS)（Apache-2.0）：家庭服务器 Dashboard、应用导航和低门槛交互。
+- [Cockpit](https://github.com/cockpit-project/cockpit)（包含 LGPL-2.1-or-later、GPL-3.0-or-later、BSD-3-Clause、MIT、CC-BY-SA-3.0 等）：存储状态抽象和服务器管理交互。
+- [BigBear Dockge](https://github.com/bigbeartechworld/big-bear-dockge) 与 [BigBear CasaOS](https://github.com/bigbeartechworld/big-bear-casaos)：应用模板、Compose 配置和元数据组织方式。
+- [copyparty](https://github.com/9001/copyparty)（MIT）：轻量文件服务、多协议共享和 NAS 文件操作思路。
+- [SFTPGo](https://github.com/drakkan/sftpgo)（AGPL-3.0-only，并带附加条款）：文件服务能力和存储后端抽象思路。

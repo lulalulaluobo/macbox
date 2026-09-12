@@ -49,6 +49,7 @@ CGO_ENABLED=0 GOOS=darwin GOARCH="$GOARCH_VALUE" go build \
 cp -R "$ROOT_DIR/templates" "$PACKAGE_DIR/templates"
 cp "$ROOT_DIR/scripts/install.sh" "$PACKAGE_DIR/install.sh"
 cp "$ROOT_DIR/scripts/uninstall.sh" "$PACKAGE_DIR/uninstall.sh"
+cp "$ROOT_DIR/LICENSE" "$PACKAGE_DIR/LICENSE"
 cp "$ROOT_DIR/docs/macos-cli-install.md" "$PACKAGE_DIR/README.md"
 cp "$ROOT_DIR/scripts/macnas.command" "$PACKAGE_DIR/MacNAS.command"
 chmod 0755 "$PACKAGE_DIR/bin/macnas" "$PACKAGE_DIR/install.sh" "$PACKAGE_DIR/uninstall.sh" "$PACKAGE_DIR/MacNAS.command"
@@ -59,7 +60,7 @@ chmod 0755 "$PACKAGE_DIR/bin/macnas" "$PACKAGE_DIR/install.sh" "$PACKAGE_DIR/uni
   cd "$PACKAGE_DIR"
   {
     find bin templates MacNASMenu.app/Contents -type f -print
-    printf '%s\n' MacNAS.command install.sh uninstall.sh
+    printf '%s\n' LICENSE MacNAS.command install.sh uninstall.sh
   } | sort | xargs shasum -a 256
 ) > "$PACKAGE_DIR/checksums.txt"
 
