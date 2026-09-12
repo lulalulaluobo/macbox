@@ -6,22 +6,59 @@
 
 | 用户类型 | 获取方式 | 用户需要准备 | 推荐入口 |
 | --- | --- | --- | --- |
-| 普通家庭用户 | GitHub Release 预编译压缩包 | macOS、Homebrew/Lima | `install.sh --start` 或 `MacNASMenu.app` |
+| 普通家庭用户 | GitHub Release 预编译压缩包 | macOS；Lima/Homebrew 按首次初始化提示处理 | 优先双击 `MacNASMenu.app` |
 | 开发者/贡献者 | GitHub 源码 | Go、Node.js/npm、Xcode Command Line Tools | `make release-mac` |
 | 内部测试 | 当前工作树 | 完整开发环境 | `make build` 或 `make dev-backend-lan` |
 
 Release 是降低分发阻力的核心：用户不需要 Go、Node.js、npm，也不需要自己编译前端和后端。源码部署应该定位为开发和贡献流程，不应作为普通用户的默认路径。
 
-## Release 用户安装
+## Release 用户安装（推荐优先双击 `MacNASMenu.app`）
 
-### 1. 下载正确架构
+### 1. 下载并校验正确架构
 
 - Apple Silicon（M1/M2/M3/M4）：下载 `MacNAS_*_macos_aarch64.tar.gz`。
 - Intel Mac：下载 `MacNAS_*_macos_x86_64.tar.gz`。
 
 不要混用架构；安装器会在开始时检查并拒绝不匹配的二进制。
 
-### 2. 一条命令安装并启动
+建议在首次运行前校验发行包，确认文件没有损坏或被替换：
+
+```bash
+shasum -a 256 -c checksums.txt
+```
+
+校验不通过时不要启动 App，应该重新下载对应 Release。
+
+### 2. 推荐方式：双击 `MacNASMenu.app`
+
+解压后进入完整发行包根目录，直接双击 `MacNASMenu.app`。从 macOS 顶部菜单栏选择：
+
+1. 启动后端服务；
+2. 打开网页端；
+3. 首次进入时完成初始化。
+
+这条路径直接使用发行包中的预编译后端，不要求普通用户先安装 Go、Node.js 或执行构建命令。菜单栏助手是 Web 控制台的启动、停止、状态和日志入口，不承担 Web 页面本身的功能。
+
+#### 首次打开未签名或未公证的开源 App
+
+MacNASMenu 是开源分发的未签名/未公证 App 时，macOS 可能首次阻止打开。按以下顺序处理：
+
+1. 在 Finder 中对 `MacNASMenu.app` 右键，选择“打开”，再确认一次“打开”；
+2. 如果仍被阻止，先尝试打开一次，然后进入“系统设置 → 隐私与安全性”，在安全性提示区域点击“仍要打开”，再确认打开 App。
+
+这是针对单个 App 的放行。执行前应先完成上面的 SHA-256 校验，并确认发行包来自可信的 GitHub Release。Apple 也提醒，绕过未识别开发者保护可能带来安全风险，详见 [Apple：安全地打开 Mac App](https://support.apple.com/en-gb/102445) 和 [Apple：打开来自未知开发者的 App](https://support.apple.com/en-ca/guide/mac-help/mh40616/mac)。
+
+如果你明确确认 App 来源可信，也可以只对这个 App 移除下载隔离标记，然后重新打开：
+
+```bash
+# 在发行包根目录执行；路径含空格时仍然安全
+xattr -dr com.apple.quarantine "./MacNASMenu.app"
+open "./MacNASMenu.app"
+```
+
+上面的命令只处理指定的 `MacNASMenu.app`，不要使用会全局关闭 Gatekeeper 的 `sudo spctl --master-disable`。如果 App 不在当前目录，把 `./MacNASMenu.app` 替换为它的实际完整路径。
+
+### 3. 命令行备用方式
 
 在下载文件所在目录执行：
 
@@ -39,16 +76,6 @@ cd MacNAS_*_macos_*
 ```
 
 首次初始化必须在运行 MacNAS 的 Mac 本机完成。初始化完成后，手机或其他局域网设备访问局域网地址即可。
-
-### 3. 无需命令行的方式
-
-在完整发行包根目录双击 `MacNASMenu.app`，从顶部菜单选择：
-
-1. 启动后端服务；
-2. 打开网页端；
-3. 首次进入时完成初始化。
-
-菜单栏助手是可选控制器，不承担 Web 页面功能。MacOS 首次阻止未签名开源 App 时，在 Finder 中右键选择“打开”。
 
 ### 4. Lima 依赖处理
 
@@ -167,4 +194,3 @@ Release 描述中只需要保留：支持的 macOS 架构、安装命令、首�
 ```
 
 破坏性清理需要输入 `DELETE` 确认，且不会删除其他 Lima 实例或宿主机无关数据。
-
