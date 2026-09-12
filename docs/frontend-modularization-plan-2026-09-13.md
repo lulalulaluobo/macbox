@@ -322,6 +322,7 @@ npm audit --audit-level=low
 - FileManager 的夸克云盘上传、下载、复制/移动和传输任务刷新拆分为 `useTransferTasks`；
 - FileManager 的磁盘路径推导与磁盘/云盘/收藏/回收站切换栏拆分为 `useStorageDriveOptions`、`FileDriveSwitcher`；
 - FileManager 的文件列表/回收站内容区与预览、操作、传输等弹窗编排拆分为 `FileContentView`、`FileManagerModals`；
+- FileManager 的文件预览/文本保存、鼠标拖框多选和复制/批量下载动作拆分为 `useFilePreviews`、`useFileMarquee`、`useFileActions`；
 - Settings 的终端默认身份与 AI CLI Skill 映射区拆分为独立 section；
 - Settings 的 NAS 用户、Linux 系统用户、Root 密码和主题外观区拆分为独立 section；
 - Settings 的 Root SSH 密钥生成/导入弹窗拆分为 `SSHKeyModals`，复制状态改为弹窗内部状态；

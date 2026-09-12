@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Star, Upload, AlertTriangle, X } from 'lucide-react';
 import { CloudMount, DiskInfo, FileItem, LocalMount } from '../../types';
 import { api } from '../../api';
-import { TextPreviewState, getFileType } from './filemanager/types';
 import { FileToolbar } from './filemanager/FileToolbar';
 import { FileContentView } from './filemanager/FileContentView';
 import { BatchActionBar } from './filemanager/BatchActionBar';
@@ -17,6 +16,9 @@ import { useFileNavigation } from './filemanager/useFileNavigation';
 import { useFileUpload } from './filemanager/useFileUpload';
 import { useFileOperations } from './filemanager/useFileOperations';
 import { useTrash } from './filemanager/useTrash';
+import { useFilePreviews } from './filemanager/useFilePreviews';
+import { useFileMarquee } from './filemanager/useFileMarquee';
+import { useFileActions } from './filemanager/useFileActions';
 
 interface FileManagerProps {
   initialPath?: string;
@@ -100,26 +102,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   const [archiveItem, setArchiveItem] = useState<FileItem | null>(null);
 
-  const fileListRef = useRef<HTMLDivElement>(null);
-  const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
-  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
-  const marqueeActiveRef = useRef(false);
-  const marqueeJustFinishedRef = useRef(false);
   const draggedPathsRef = useRef<string[]>([]);
-
-  // Preview Modals
-  const [videoPreview, setVideoPreview] = useState<FileItem | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [videoMuted, setVideoMuted] = useState(false);
-  const [videoVolume, setVideoVolume] = useState(1.0);
-  const [imagePreview, setImagePreview] = useState<FileItem | null>(null);
-  const [imageZoom, setImageZoom] = useState(1);
-  const [imageRotate, setImageRotate] = useState(0);
-
-  const [audioPreview, setAudioPreview] = useState<FileItem | null>(null);
-
-  const [textPreview, setTextPreview] = useState<TextPreviewState | null>(null);
-  const [savingText, setSavingText] = useState(false);
 
   const [localMounts, setLocalMounts] = useState<LocalMount[]>([]);
   const [storageDisks, setStorageDisks] = useState<DiskInfo[]>([]);
@@ -161,16 +144,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       else localStorage.removeItem('macnas_active_cloud_mount');
     } catch {}
   }, [activeCloudMountId]);
-
-  useEffect(() => {
-    if (videoPreview && videoRef.current) {
-      videoRef.current.volume = 1.0;
-      videoRef.current.muted = false;
-      setVideoVolume(1.0);
-      setVideoMuted(false);
-      videoRef.current.play().catch(() => {});
-    }
-  }, [videoPreview]);
 
   // System folder filter logic
   const isSystemProtected = (name: string) => {
@@ -218,6 +191,40 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     handleLongPress,
   } = useFileSelection({ filteredFiles });
 
+  const handleToggleSelectedItem = (path: string) => {
+    setSelectedPaths((previous) => {
+      const next = new Set(previous);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const handleOpenDirectory = (path: string) => {
+    setViewingFavorites(false);
+    setViewingTrash(false);
+    setCurrentPath(path);
+  };
+
+  const {
+    previewProps,
+    handleItemClick,
+  } = useFilePreviews({
+    selectionMode,
+    onToggleSelection: handleToggleSelectedItem,
+    onOpenDirectory: handleOpenDirectory,
+    onSuccess: (text) => setAlertMsg({ type: 'success', text }),
+    onError: (text) => setAlertMsg({ type: 'error', text }),
+    onReload: () => loadFiles(currentPath),
+  });
+
+  const {
+    fileListRef,
+    marquee,
+    marqueeJustFinishedRef,
+    handlePointerDown: handleFileListPointerDown,
+  } = useFileMarquee({ setSelectionMode, setSelectedPaths });
+
   const {
     transferRequest,
     setTransferRequest,
@@ -254,53 +261,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     onError: (text) => setAlertMsg({ type: 'error', text }),
   });
 
-  // Open / Preview Item
-  const handleItemClick = async (item: FileItem) => {
-    if (selectionMode) {
-      setSelectedPaths((prev) => {
-        const next = new Set(prev);
-        if (next.has(item.path)) next.delete(item.path);
-        else next.add(item.path);
-        return next;
-      });
-      return;
-    }
-
-    if (item.isDir) {
-      setViewingFavorites(false);
-      setViewingTrash(false);
-      setCurrentPath(item.path);
-      return;
-    }
-
-    const type = getFileType(item.ext);
-    if (type === 'video') {
-      setVideoPreview(item);
-    } else if (type === 'image') {
-      setImageZoom(1);
-      setImageRotate(0);
-      setImagePreview(item);
-    } else if (type === 'audio') {
-      setAudioPreview(item);
-    } else if (type === 'text') {
-      try {
-        const res = await api.readFile(item.path);
-        setTextPreview({ item, content: res.content || '' });
-      } catch (err: any) {
-        setAlertMsg({ type: 'error', text: `读取文本失败: ${err.message}` });
-      }
-    } else {
-      // Use a same-page download instead of opening a new tab. This keeps the
-      // authenticated response in the browser download flow on mobile.
-      const link = document.createElement('a');
-      link.href = api.getFileDownloadUrl(item.path);
-      link.download = item.name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    }
-  };
-
   const handleArchiveConfirm = async (operation: 'compress' | 'extract', format: 'zip', destination: string, conflictPolicy: ConflictPolicy) => {
     if (!archiveItem) return;
     const sourcePath = archiveItem.path;
@@ -310,47 +270,17 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     loadFiles(currentPath);
   };
 
-  const handleCopyPath = async (path: string) => {
-    try {
-      await navigator.clipboard.writeText(path);
-      setAlertMsg({ type: 'success', text: '路径已复制' });
-    } catch {
-      setAlertMsg({ type: 'error', text: '复制路径失败，请检查浏览器剪贴板权限' });
-    }
-  };
-
-  const handleBatchDownload = () => {
-    const paths = Array.from(selectedPaths);
-    if (paths.length === 0) return;
-    const link = document.createElement('a');
-    link.href = api.getBatchDownloadUrl(paths);
-    link.download = 'MacNAS-批量下载.zip';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  };
+  const { handleCopyPath, handleBatchDownload } = useFileActions({
+    selectedPaths,
+    onSuccess: (text) => setAlertMsg({ type: 'success', text }),
+    onError: (text) => setAlertMsg({ type: 'error', text }),
+  });
 
   const openFavorites = () => {
     setViewingTrash(false);
     setSelectionMode(false);
     setSelectedPaths(new Set());
     setViewingFavorites(true);
-  };
-
-  // Save Text
-  const handleSaveText = async () => {
-    if (!textPreview) return;
-    setSavingText(true);
-    try {
-      await api.writeFile(textPreview.item.path, textPreview.content);
-      setAlertMsg({ type: 'success', text: '文件保存成功' });
-      setTextPreview(null);
-      loadFiles(currentPath);
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `保存失败: ${err.message}` });
-    } finally {
-      setSavingText(false);
-    }
   };
 
   const handleItemDragStart = (item: FileItem, event: React.DragEvent<HTMLDivElement>) => {
@@ -379,43 +309,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   };
 
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
-
-  const finishMarquee = () => {
-    if (!marqueeActiveRef.current || !fileListRef.current || !marquee) return;
-    const left = Math.min(marquee.startX, marquee.currentX);
-    const right = Math.max(marquee.startX, marquee.currentX);
-    const top = Math.min(marquee.startY, marquee.currentY);
-    const bottom = Math.max(marquee.startY, marquee.currentY);
-    const selected = Array.from(fileListRef.current.querySelectorAll<HTMLElement>('[data-file-item]')).filter((element) => {
-      const rect = element.getBoundingClientRect();
-      return rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top;
-    }).map((element) => element.dataset.filePath).filter((path): path is string => Boolean(path));
-    setSelectionMode(true);
-    setSelectedPaths(new Set(selected));
-    marqueeJustFinishedRef.current = true;
-    marqueeActiveRef.current = false;
-    marqueeStartRef.current = null;
-    setMarquee(null);
-  };
-
-  useEffect(() => {
-    if (!marquee) return;
-    const handlePointerMove = (event: PointerEvent) => setMarquee((current) => current ? { ...current, currentX: event.clientX, currentY: event.clientY } : current);
-    const handlePointerUp = () => finishMarquee();
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    return () => { window.removeEventListener('pointermove', handlePointerMove); window.removeEventListener('pointerup', handlePointerUp); };
-  }, [marquee]);
-
-  const handleFileListPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== 'mouse' || event.button !== 0) return;
-    const target = event.target as HTMLElement;
-    if (target.closest('[data-file-item]') || target.closest('button')) return;
-    marqueeActiveRef.current = true;
-    marqueeStartRef.current = { x: event.clientX, y: event.clientY };
-    setMarquee({ startX: event.clientX, startY: event.clientY, currentX: event.clientX, currentY: event.clientY });
-    event.preventDefault();
-  };
 
   const { driveOptions, activeDriveId, secondaryOptions } = useStorageDriveOptions({
     storageDisks,
@@ -691,42 +584,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
             setActionItem(null);
           },
         }}
-        preview={{
-          videoPreview,
-          videoRef,
-          videoMuted,
-          videoVolume,
-          onCloseVideo: () => setVideoPreview(null),
-          onToggleMute: () => {
-            if (videoRef.current) {
-              const next = !videoMuted;
-              videoRef.current.muted = next;
-              setVideoMuted(next);
-              if (!next) videoRef.current.volume = 1.0;
-            }
-          },
-          onVolumeChange: (event) => {
-            const element = event.target as HTMLVideoElement;
-            setVideoVolume(element.volume);
-            setVideoMuted(element.muted);
-          },
-          imagePreview,
-          imageZoom,
-          imageRotate,
-          onCloseImage: () => setImagePreview(null),
-          onZoomIn: () => setImageZoom((previous) => Math.min(3, previous + 0.25)),
-          onZoomOut: () => setImageZoom((previous) => Math.max(0.5, previous - 0.25)),
-          onRotate: () => setImageRotate((previous) => (previous + 90) % 360),
-          audioPreview,
-          onCloseAudio: () => setAudioPreview(null),
-          textPreview,
-          savingText,
-          onCloseText: () => setTextPreview(null),
-          onTextContentChange: (content) => {
-            if (textPreview) setTextPreview({ ...textPreview, content });
-          },
-          onSaveText: handleSaveText,
-        }}
+        preview={previewProps}
         operations={{
           showMkdirModal,
           newFolderName,
