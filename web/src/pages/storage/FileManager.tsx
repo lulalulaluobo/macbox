@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Cloud, Folder, HardDrive, MoreHorizontal, Pencil, ShieldCheck, Star, Trash2, Upload, AlertTriangle, X } from 'lucide-react';
-import { CloudMount, DiskInfo, FileItem, LocalMount, TrashItem } from '../../types';
+import { CloudMount, DiskInfo, FileItem, LocalMount } from '../../types';
 import { api } from '../../api';
 import { TextPreviewState, getFileType } from './filemanager/types';
 import { FileToolbar } from './filemanager/FileToolbar';
@@ -20,6 +20,8 @@ import { ConflictPolicy, TransferDestinationModal, TransferOperation } from './f
 import { useFileSelection } from './filemanager/useFileSelection';
 import { useFavorites } from './filemanager/useFavorites';
 import { useFileNavigation } from './filemanager/useFileNavigation';
+import { useFileUpload } from './filemanager/useFileUpload';
+import { useTrash } from './filemanager/useTrash';
 
 interface FileManagerProps {
   initialPath?: string;
@@ -36,14 +38,34 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   // Trash View State
   const [viewingTrash, setViewingTrash] = useState<boolean>(false);
-  const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
-  const [trashLoading, setTrashLoading] = useState<boolean>(false);
 
   // Security: Hide system / container metadata folders by default (Benchmark fnOS)
   const [hideSystemFiles, setHideSystemFiles] = useState<boolean>(true);
 
   // Notifications
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+
+  const {
+    trashItems,
+    trashLoading,
+    trashSelectedIds,
+    setTrashSelectedIds,
+    showTrashDeleteModal,
+    setShowTrashDeleteModal,
+    trashDeleteTarget,
+    setTrashDeleteTarget,
+    deletingTrash,
+    showEmptyTrashModal,
+    setShowEmptyTrashModal,
+    loadTrash,
+    handleRestoreTrash,
+    handlePromptDeleteTrash,
+    handleConfirmDeleteTrash,
+    handleConfirmEmptyTrash,
+  } = useTrash({
+    onSuccess: (text) => setAlertMsg({ type: 'success', text }),
+    onError: (text) => setAlertMsg({ type: 'error', text }),
+  });
 
   const {
     currentPath,
@@ -68,6 +90,22 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     onError: (text) => setAlertMsg({ type: 'error', text }),
   });
 
+  const {
+    uploading,
+    uploadProgress,
+    fileInputRef,
+    isDragging,
+    handleFileChange,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+  } = useFileUpload({
+    targetPath: currentPath,
+    onSuccess: (text) => setAlertMsg({ type: 'success', text }),
+    onError: (text) => setAlertMsg({ type: 'error', text }),
+    onReload: () => loadFiles(currentPath),
+  });
+
   // Modals: CRUD
   const [showMkdirModal, setShowMkdirModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
@@ -81,18 +119,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const [deleting, setDeleting] = useState(false);
   const [archiveItem, setArchiveItem] = useState<FileItem | null>(null);
 
-  // Trash Modals & Multi-select
-  const [trashSelectedIds, setTrashSelectedIds] = useState<Set<string>>(new Set());
-  const [showTrashDeleteModal, setShowTrashDeleteModal] = useState(false);
-  const [trashDeleteTarget, setTrashDeleteTarget] = useState<TrashItem | null>(null);
-  const [deletingTrash, setDeletingTrash] = useState(false);
-  const [showEmptyTrashModal, setShowEmptyTrashModal] = useState(false);
-
-  // Upload State
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<string>('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
   const fileListRef = useRef<HTMLDivElement>(null);
   const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
   const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -356,19 +382,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     setViewingFavorites(true);
   };
 
-  // Trash Handlers
-  const loadTrash = async () => {
-    setTrashLoading(true);
-    try {
-      const res = await api.listTrash();
-      setTrashItems(res.items || []);
-    } catch {
-      // ignore
-    } finally {
-      setTrashLoading(false);
-    }
-  };
-
   // Delete / Trash Modals
   const handleOpenDelete = (item: FileItem, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -417,58 +430,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
   };
 
-  const handleRestoreTrash = async (ids: string[]) => {
-    try {
-      const res = await api.restoreTrash(ids);
-      setAlertMsg({ type: 'success', text: res.message });
-      loadTrash();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `还原失败: ${err.message}` });
-    }
-  };
-
-  const handlePromptDeleteTrash = (it?: TrashItem) => {
-    if (it) {
-      setTrashDeleteTarget(it);
-    } else {
-      setTrashDeleteTarget(null);
-    }
-    setShowTrashDeleteModal(true);
-  };
-
-  const handleConfirmDeleteTrash = async () => {
-    const ids = trashDeleteTarget ? [trashDeleteTarget.id] : Array.from(trashSelectedIds);
-    if (ids.length === 0) return;
-    setDeletingTrash(true);
-    try {
-      const res = await api.deleteTrashItems(ids);
-      setAlertMsg({ type: 'success', text: res.message });
-      setShowTrashDeleteModal(false);
-      setTrashDeleteTarget(null);
-      setTrashSelectedIds(new Set());
-      loadTrash();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `从回收站删除失败: ${err.message}` });
-    } finally {
-      setDeletingTrash(false);
-    }
-  };
-
-  const handleConfirmEmptyTrash = async () => {
-    setDeletingTrash(true);
-    try {
-      const res = await api.emptyTrash();
-      setAlertMsg({ type: 'success', text: res.message });
-      setShowEmptyTrashModal(false);
-      setTrashSelectedIds(new Set());
-      loadTrash();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `清空回收站失败: ${err.message}` });
-    } finally {
-      setDeletingTrash(false);
-    }
-  };
-
   // Save Text
   const handleSaveText = async () => {
     if (!textPreview) return;
@@ -482,54 +443,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       setAlertMsg({ type: 'error', text: `保存失败: ${err.message}` });
     } finally {
       setSavingText(false);
-    }
-  };
-
-  // Upload Files
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const uploadList = e.target.files;
-    if (!uploadList || uploadList.length === 0) return;
-    await doUploadFiles(Array.from(uploadList));
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const doUploadFiles = async (fileArray: File[]) => {
-    setUploading(true);
-    let successCount = 0;
-    try {
-      for (let i = 0; i < fileArray.length; i++) {
-        const f = fileArray[i];
-        setUploadProgress(`正在上传 (${i + 1}/${fileArray.length}): ${f.name}`);
-        await api.uploadFile(f, currentPath);
-        successCount++;
-      }
-      setAlertMsg({ type: 'success', text: `成功上传 ${successCount} 个文件` });
-      loadFiles(currentPath);
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `上传过程中断: ${err.message}` });
-    } finally {
-      setUploading(false);
-      setUploadProgress('');
-    }
-  };
-
-  // Drag & Drop
-  const handleDragOver = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files')) return;
-    e.preventDefault();
-    setIsDragging(true);
-  };
-  const handleDragLeave = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files')) return;
-    e.preventDefault();
-    setIsDragging(false);
-  };
-  const handleDrop = async (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes('Files')) return;
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      await doUploadFiles(Array.from(e.dataTransfer.files));
     }
   };
 
