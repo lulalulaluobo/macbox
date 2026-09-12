@@ -1,10 +1,36 @@
+---
+title: MacNAS 线上手动测试清单
+project: MacNAS
+release: v0.1.0
+date: 2026-09-12
+status: 未开始
+scope: 可信家庭局域网
+tags:
+  - macnas
+  - testing
+  - obsidian
+---
+
 # MacNAS 线上手动测试清单
 
-日期：2026-09-12  
-适用范围：当前 macOS Release、`MacNASMenu.app`、局域网 Web 控制台、Lima VM、Docker、文件管理和夸克云盘。  
-使用方式：每完成一项就在 `[ ]` 中打勾；失败时记录浏览器、设备、时间、截图、后端日志和复现步骤。
+> [!info] 测试范围
+> 本清单适用于 macOS Release、`MacNASMenu.app`、局域网 Web 控制台、Lima VM、Docker、文件管理和夸克云盘。当前版本只在可信家庭局域网内测试，不要配置路由器公网端口映射。
 
-> 当前版本只在可信家庭局域网内测试，不要配置路由器公网端口映射。全新安装时必须在登录页现场设置管理员账号和至少 12 个字节的密码。
+## 使用方式
+
+- [ ] 每完成一项测试就在 `[ ]` 中打勾。
+- [ ] 失败时填写底部“失败记录”，附浏览器、设备、时间、截图、后端日志和复现步骤。
+- [ ] 全新安装时在登录页现场设置管理员账号和至少 12 个字节的密码。
+
+## 当前测试批次
+
+| 字段 | 内容 |
+| --- | --- |
+| 测试人员 |  |
+| 测试设备 |  |
+| 测试开始时间 |  |
+| 测试结束时间 |  |
+| GitHub Release | [MacNAS v0.1.0](https://github.com/lulalulaluobo/macmini/releases/tag/v0.1.0) |
 
 ## A. 测试环境记录
 
