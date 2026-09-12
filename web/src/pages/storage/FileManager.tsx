@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Star, Upload } from 'lucide-react';
 import { CloudMount, DiskInfo, FileItem, LocalMount } from '../../types';
 import { api } from '../../api';
@@ -19,6 +19,7 @@ import { useTrash } from './filemanager/useTrash';
 import { useFilePreviews } from './filemanager/useFilePreviews';
 import { useFileMarquee } from './filemanager/useFileMarquee';
 import { useFileActions } from './filemanager/useFileActions';
+import { useFileDragAndDrop } from './filemanager/useFileDragAndDrop';
 import { FileManagerAlerts } from './filemanager/FileManagerAlerts';
 
 interface FileManagerProps {
@@ -102,8 +103,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   });
 
   const [archiveItem, setArchiveItem] = useState<FileItem | null>(null);
-
-  const draggedPathsRef = useRef<string[]>([]);
 
   const [localMounts, setLocalMounts] = useState<LocalMount[]>([]);
   const [storageDisks, setStorageDisks] = useState<DiskInfo[]>([]);
@@ -192,28 +191,17 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     handleLongPress,
   } = useFileSelection({ filteredFiles });
 
-  const handleToggleSelectedItem = (path: string) => {
-    setSelectedPaths((previous) => {
-      const next = new Set(previous);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-
-  const handleOpenDirectory = (path: string) => {
-    setViewingFavorites(false);
-    setViewingTrash(false);
-    setCurrentPath(path);
-  };
-
   const {
     previewProps,
     handleItemClick,
   } = useFilePreviews({
     selectionMode,
-    onToggleSelection: handleToggleSelectedItem,
-    onOpenDirectory: handleOpenDirectory,
+    onToggleSelection: toggleSelectItem,
+    onOpenDirectory: (path) => {
+      setViewingFavorites(false);
+      setViewingTrash(false);
+      setCurrentPath(path);
+    },
     onSuccess: (text) => setAlertMsg({ type: 'success', text }),
     onError: (text) => setAlertMsg({ type: 'error', text }),
     onReload: () => loadFiles(currentPath),
@@ -277,39 +265,17 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     onError: (text) => setAlertMsg({ type: 'error', text }),
   });
 
-  const openFavorites = () => {
-    setViewingTrash(false);
-    setSelectionMode(false);
-    setSelectedPaths(new Set());
-    setViewingFavorites(true);
-  };
-
-  const handleItemDragStart = (item: FileItem, event: React.DragEvent<HTMLDivElement>) => {
-    const paths = selectedPaths.has(item.path) ? Array.from(selectedPaths) : [item.path];
-    draggedPathsRef.current = paths;
-    setSelectionMode(true);
-    setSelectedPaths(new Set(paths));
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', JSON.stringify(paths));
-  };
-
-  const handleItemDragOver = (item: FileItem, event: React.DragEvent<HTMLDivElement>) => {
-    if (!item.isDir || draggedPathsRef.current.length === 0) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    setDropTargetPath(item.path);
-  };
-
-  const handleItemDrop = (item: FileItem, event: React.DragEvent<HTMLDivElement>) => {
-    if (!item.isDir || draggedPathsRef.current.length === 0) return;
-    event.preventDefault();
-    const paths = draggedPathsRef.current;
-    draggedPathsRef.current = [];
-    setDropTargetPath(null);
-    openTransfer('move', paths, item.path);
-  };
-
-  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
+  const {
+    dropTargetPath,
+    handleItemDragStart,
+    handleItemDragOver,
+    handleItemDrop,
+  } = useFileDragAndDrop({
+    selectedPaths,
+    setSelectedPaths,
+    setSelectionMode,
+    openTransfer,
+  });
 
   const { driveOptions, activeDriveId, secondaryOptions } = useStorageDriveOptions({
     storageDisks,
@@ -384,7 +350,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           setCurrentPath(path);
         }}
         onOpenDriveDetail={openDriveDetail}
-        onOpenFavorites={openFavorites}
+        onOpenFavorites={() => { setViewingTrash(false); setSelectionMode(false); setSelectedPaths(new Set()); setViewingFavorites(true); }}
         onOpenTrash={() => {
           setViewingFavorites(false);
           setViewingTrash(true);

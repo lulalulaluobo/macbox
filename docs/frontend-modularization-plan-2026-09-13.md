@@ -324,6 +324,7 @@ npm audit --audit-level=low
 - FileManager 的文件列表/回收站内容区与预览、操作、传输等弹窗编排拆分为 `FileContentView`、`FileManagerModals`；
 - FileManager 的文件预览/文本保存、鼠标拖框多选和复制/批量下载动作拆分为 `useFilePreviews`、`useFileMarquee`、`useFileActions`；
 - FileManager 的提示横幅和系统目录警告拆分为 `FileManagerAlerts`；
+- FileManager 的拖拽移动状态和目标目录交互拆分为 `useFileDragAndDrop`，页面降至 600 行以内；
 - Settings 的终端默认身份与 AI CLI Skill 映射区拆分为独立 section；
 - Settings 的 NAS 用户、Linux 系统用户、Root 密码和主题外观区拆分为独立 section；
 - Settings 的 NAS 控制台用户加载、表单和增删改流程拆分为 `useNASUserSettings`；
