@@ -1,14 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   RefreshCw,
-  Plus,
   CheckCircle2,
   AlertCircle,
-  Copy,
-  Check,
-  Download,
-  FileKey,
-  X,
 } from 'lucide-react';
 import { SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, NASUser } from '../types';
 import { api } from '../api';
@@ -20,6 +14,7 @@ import { NASUsersSection } from './settings/NASUsersSection';
 import { SystemUsersSection } from './settings/SystemUsersSection';
 import { RootPasswordSection } from './settings/RootPasswordSection';
 import { AppearanceSettingsSection } from './settings/AppearanceSettingsSection';
+import { SSHKeyModals } from './settings/SSHKeyModals';
 
 interface SettingsProps {
   primaryIP?: string;
@@ -92,8 +87,6 @@ export const Settings: React.FC<SettingsProps> = ({
   const [generatingKey, setGeneratingKey] = useState(false);
   const [generatedKeyResult, setGeneratedKeyResult] = useState<SSHKeyGenerationResult | null>(null);
   const [showKeyModal, setShowKeyModal] = useState(false);
-  const [copiedKeyText, setCopiedKeyText] = useState(false);
-  const [copiedKeyCmd, setCopiedKeyCmd] = useState(false);
   const [authorizedKeys, setAuthorizedKeys] = useState<string[]>([]);
   const [showAuthorizedKeys, setShowAuthorizedKeys] = useState(false);
   const [loadingAuthKeys, setLoadingAuthKeys] = useState(false);
@@ -692,181 +685,20 @@ export const Settings: React.FC<SettingsProps> = ({
         <AppearanceSettingsSection theme={theme} onThemeChange={setTheme} />
       )}
 
-      {/* ===================== Modal: Generated Root SSH Key ===================== */}
-      {showKeyModal && generatedKeyResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="w-full max-w-xl rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center space-x-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                  <FileKey className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">Root SSH 私钥已生成并自动下载</h3>
-                  <p className="text-xs text-emerald-400 font-medium">公钥已自动部署至虚拟机 /root/.ssh/authorized_keys</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowKeyModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              {/* Key metadata */}
-              <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-1.5 font-mono">
-                <div className="flex justify-between text-slate-400">
-                  <span>私钥文件名:</span>
-                  <span className="text-amber-300 font-bold">{generatedKeyResult.filename}</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>密钥算法:</span>
-                  <span className="text-slate-200">{generatedKeyResult.keyType.toUpperCase()} (高安全性椭圆曲线)</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>密钥指纹:</span>
-                  <span className="text-slate-200">{generatedKeyResult.fingerprint}</span>
-                </div>
-              </div>
-
-              {/* Usage Guide */}
-              <div className="space-y-2 font-sans">
-                <h4 className="font-bold text-slate-200">使用指南（必须在运行 MacNAS 的 Mac 的 macOS“终端”中运行）:</h4>
-
-                <div className="p-3 rounded-xl bg-black/60 border border-slate-800 font-mono text-[11px] space-y-2 text-slate-300">
-                  <div>
-                    <span className="text-slate-500"># 步骤 1: 设置严格权限 (macOS / Linux 必需)</span>
-                    <div className="text-amber-300 select-all">chmod 600 ~/Downloads/{generatedKeyResult.filename}</div>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-500"># 步骤 2: 在 Mac 宿主机终端执行（端口 {sshConfig.sshLocalPort || 58107}）</span>
-                    <div className="text-sky-300 select-all">
-                      ssh -o StrictHostKeyChecking=accept-new -i ~/Downloads/{generatedKeyResult.filename} -p {sshConfig.sshLocalPort || 58107} root@127.0.0.1
-                    </div>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-500"># 步骤 3: 局域网其他设备（当前不提供默认直连）</span>
-                    <div className="text-emerald-300">当前未开放宿主机 22 端口；运行 Mac 请始终使用步骤 2 的 127.0.0.1:{sshConfig.sshLocalPort || 58107}。</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Important security warning */}
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300/90 text-[11px] leading-relaxed">
-                ⚠️ <strong>安全提示</strong>: 私钥文件已自动下载至运行浏览器的 Mac 的 Downloads 文件夹中，文件名包含 `.txt` 扩展名也可以直接用于 SSH。为确保绝对安全，MacNAS 服务器端已彻底擦除私钥明文，请妥善保存该私钥文件。
-              </div>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
-              <div className="flex items-center space-x-2">
-                <button
-                  type="button"
-                  onClick={() => downloadPrivateKeyFile(generatedKeyResult.privateKey, generatedKeyResult.filename)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>再次下载私钥</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(generatedKeyResult.privateKey);
-                    setCopiedKeyText(true);
-                    setTimeout(() => setCopiedKeyText(false), 2000);
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition"
-                >
-                  {copiedKeyText ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedKeyText ? '已复制私钥' : '复制私钥文本'}</span>
-                </button>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const cmd = `chmod 600 ~/Downloads/${generatedKeyResult.filename} && ssh -o StrictHostKeyChecking=accept-new -i ~/Downloads/${generatedKeyResult.filename} -p ${sshConfig.sshLocalPort || sshConfig.port} root@${sshConfig.sshLocalPort ? '127.0.0.1' : primaryIP}`;
-                    navigator.clipboard.writeText(cmd);
-                    setCopiedKeyCmd(true);
-                    setTimeout(() => setCopiedKeyCmd(false), 2000);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition flex items-center space-x-1.5 shadow-md shadow-amber-500/20"
-                >
-                  {copiedKeyCmd ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedKeyCmd ? '已复制命令' : '一键复制完整连接命令'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowKeyModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold"
-                >
-                  关闭
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===================== Modal: Import Existing Public Key ===================== */}
-      {showImportKeyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                <Plus className="w-4 h-4 text-emerald-400" />
-                <span>导入已有 SSH 公钥到 Root 授权列表</span>
-              </h3>
-              <button
-                onClick={() => setShowImportKeyModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-400">
-              请粘贴您本地生成的公钥（通常位于 <code>~/.ssh/id_ed25519.pub</code> 或 <code>~/.ssh/id_rsa.pub</code>）：
-            </p>
-
-            <form onSubmit={handleAddAuthorizedKey} className="space-y-4">
-              <textarea
-                value={importKeyText}
-                onChange={(e) => setImportKeyText(e.target.value)}
-                placeholder="ssh-ed25519 AAAA... 用户名@设备名"
-                className="w-full h-32 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-xs focus:outline-none focus:border-sky-500 resize-none leading-relaxed"
-                required
-                autoFocus
-              />
-
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowImportKeyModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={importingKey || !importKeyText.trim()}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition disabled:opacity-50 flex items-center space-x-1.5"
-                >
-                  {importingKey && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{importingKey ? '导入中...' : '确认导入公钥'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <SSHKeyModals
+        showKeyModal={showKeyModal}
+        generatedKeyResult={generatedKeyResult}
+        showImportKeyModal={showImportKeyModal}
+        importKeyText={importKeyText}
+        importingKey={importingKey}
+        sshConfig={sshConfig}
+        primaryIP={primaryIP}
+        onCloseKeyModal={() => setShowKeyModal(false)}
+        onDownloadPrivateKey={downloadPrivateKeyFile}
+        onImportKeyTextChange={setImportKeyText}
+        onCloseImportKeyModal={() => setShowImportKeyModal(false)}
+        onAddAuthorizedKey={handleAddAuthorizedKey}
+      />
     </div>
   );
 };
