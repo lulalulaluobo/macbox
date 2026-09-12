@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/luluen/mac-nas/pkg/config"
 	"github.com/luluen/mac-nas/pkg/storage"
 	"log"
 	"net/http"
+	"time"
 )
 
 func (s *Server) handleStorageDisks(w http.ResponseWriter, r *http.Request) {
@@ -177,10 +179,32 @@ func (s *Server) handleStorageUnbindSecondary(w http.ResponseWriter, r *http.Req
 
 func (s *Server) handleStorageMountsList(w http.ResponseWriter, r *http.Request) {
 	configured, recommended := storage.ListLocalMounts(s.cfg)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	response := map[string]interface{}{
 		"mounts":      configured,
 		"recommended": recommended,
-	})
+		"candidates":  storage.ScanLocalMountCandidates(s.cfg),
+	}
+	// A storage page should remain usable even when one guest probe is slow or
+	// the VM is stopped. The probe is read-only and bounded independently from
+	// the HTTP connection lifetime.
+	probeCtx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	probes, probeErr := s.vmMgr.ProbeLocalMounts(probeCtx)
+	health := make([]storage.LocalMountHealth, 0, len(probes))
+	for _, probe := range probes {
+		health = append(health, storage.LocalMountHealth{
+			ID: probe.ID, ExpectedEnabled: probe.ExpectedEnabled, HostReady: probe.HostReady,
+			SourceMounted: probe.SourceMounted, TargetMounted: probe.TargetMounted,
+			Healthy: probe.Healthy, Status: probe.Status, Message: probe.Message,
+			CheckedAt: probe.CheckedAt,
+		})
+	}
+	response["health"] = health
+	if probeErr != nil {
+		response["healthError"] = "无法完成虚拟机挂载探针，请稍后重试"
+		log.Printf("[MacNAS Storage] local mount probe failed: %v", probeErr)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleStorageMountsAdd(w http.ResponseWriter, r *http.Request) {

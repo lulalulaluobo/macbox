@@ -16,7 +16,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { api } from '../api';
-import { BackgroundJob, SystemOverview, VMConfigInfo, VMPrerequisites } from '../types';
+import { BackgroundJob, SystemDiagnostics, SystemOverview, VMConfigInfo, VMPrerequisites } from '../types';
 
 interface InitializationWizardProps {
   overview?: SystemOverview;
@@ -47,6 +47,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   const [limaInstallJob, setLimaInstallJob] = useState<BackgroundJob | null>(null);
   const [startStartedAt, setStartStartedAt] = useState<number | null>(null);
   const [startElapsedSeconds, setStartElapsedSeconds] = useState(0);
+  const [diagnostics, setDiagnostics] = useState<SystemDiagnostics | null>(null);
   const finalizingRef = useRef(false);
 
   const cpuMax = useMemo(() => Math.max(1, Math.min(16, vmConfig?.hostCpus || 16)), [vmConfig]);
@@ -59,15 +60,32 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
     setLoading(true);
     setError(null);
     try {
-      const [nextPrerequisites, nextConfig] = await Promise.all([
+      const [nextPrerequisites, nextConfig, jobsResponse] = await Promise.all([
         api.getVMPrerequisites(),
         api.getVMConfig(),
+        api.getJobs().catch(() => ({ jobs: [] })),
       ]);
       setPrerequisites(nextPrerequisites);
       setVMConfig(nextConfig);
       setCPUs(Math.min(Math.max(nextConfig.cpus || 2, 1), Math.max(1, Math.min(16, nextConfig.hostCpus || 16))));
       setMemory(Math.max(2, nextConfig.memory || 4));
       setDiskSize(Math.max(20, nextConfig.diskSize || 20));
+
+      // Resume an in-flight first-run job after a browser refresh or a
+      // temporary network interruption instead of starting a second Lima
+      // operation against the same instance.
+      const activeStart = (jobsResponse.jobs || []).find((candidate) => candidate.kind === 'vm.start' && candidate.status === 'running');
+      const activeLimaInstall = (jobsResponse.jobs || []).find((candidate) => candidate.kind === 'lima.install' && candidate.status === 'running');
+      if (activeStart) {
+        setJob(activeStart);
+        setJobId(activeStart.id);
+        setStep('start');
+        setStartStartedAt(new Date(activeStart.createdAt).getTime() || Date.now());
+      }
+      if (activeLimaInstall) {
+        setLimaInstallJob(activeLimaInstall);
+        setLimaInstallJobId(activeLimaInstall.id);
+      }
     } catch (err: any) {
       setError(err.message || '无法读取初始化环境');
     } finally {
@@ -131,6 +149,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
           }
         } else if ((nextJob.status === 'failed' || nextJob.status === 'cancelled') && active) {
           setError(nextJob.error || (nextJob.status === 'cancelled' ? '初始化任务已取消' : '虚拟机启动失败'));
+          void api.getDiagnostics().then(setDiagnostics).catch(() => undefined);
           setJobId(null);
         }
       } catch (err: any) {
@@ -149,6 +168,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   const handleStart = async () => {
     setSaving(true);
     setError(null);
+    setDiagnostics(null);
     setJob(null);
     finalizingRef.current = false;
     setSSHReady(false);
@@ -166,6 +186,8 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
         id: result.jobId,
         kind: 'vm.start',
         status: 'running',
+        stage: 'checking',
+        progress: 0,
         message: result.message,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -183,6 +205,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
     setJob(null);
     setJobId(null);
     setError(null);
+    setDiagnostics(null);
     finalizingRef.current = false;
     setSSHReady(false);
     setStartStartedAt(null);
@@ -224,11 +247,21 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   const isComplete = job?.status === 'succeeded' && sshReady && !error;
   const vmIsRunning = overview?.vm.status === 'Running';
   const elapsedLabel = `${Math.floor(startElapsedSeconds / 60)}分${String(startElapsedSeconds % 60).padStart(2, '0')}秒`;
+  const stageLabel: Record<string, string> = {
+    starting: '准备启动',
+    checking: '环境与配置检查',
+    'waiting-ssh': '等待 SSH 与系统服务',
+    'syncing-mounts': '同步本机目录直通',
+    'verifying-services': '校验 Docker 与文件服务',
+    completed: '服务已就绪',
+    failed: '启动失败',
+    cancelled: '任务已取消',
+  };
   const startProgressDetail = job?.error || (
     isStarting
-      ? vmIsRunning
+      ? job?.message || (vmIsRunning
         ? 'Lima 虚拟机已启动，正在等待 SSH 和 MacNAS 服务就绪。请保持 MacNAS 运行。'
-        : '正在启动虚拟机，可能正在下载 Ubuntu、Docker 和 Samba，首次启动通常需要 1–5 分钟。'
+        : '正在启动虚拟机，可能正在下载 Ubuntu、Docker 和 Samba，首次启动通常需要 1–5 分钟。')
       : job?.message
   );
 
@@ -285,6 +318,18 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
             <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-300" role="alert">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <span className="min-w-0 break-words">{error}</span>
+            </div>
+          )}
+
+          {step === 'start' && job?.stage && !isComplete && (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 dark:border-sky-900/70 dark:bg-sky-950/25">
+              <div className="flex items-center justify-between gap-3 text-xs font-bold text-sky-800 dark:text-sky-200">
+                <span>当前阶段：{stageLabel[job.stage] || job.stage}</span>
+                <span>{Math.max(0, Math.min(100, job.progress || 0))}%</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/80 dark:bg-slate-800">
+                <div className="h-full rounded-full bg-sky-500 transition-[width] duration-500" style={{ width: `${Math.max(4, Math.min(100, job.progress || 0))}%` }} />
+              </div>
             </div>
           )}
 
@@ -421,10 +466,14 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
               )}
 
               <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/30">
-                <ProgressRow label="启动 Lima 虚拟机" status={job?.status === 'failed' || job?.status === 'cancelled' ? 'error' : isStarting ? 'running' : job?.status === 'succeeded' ? 'done' : 'waiting'} detail={startProgressDetail} />
-                <ProgressRow label="配置 root 密钥登录" status={isComplete ? 'done' : job?.status === 'succeeded' ? 'running' : 'waiting'} detail={isComplete ? '密码认证已关闭' : undefined} />
+                <ProgressRow label="启动 Lima 虚拟机" status={job?.status === 'failed' || job?.status === 'cancelled' ? 'error' : job?.status === 'succeeded' ? 'done' : isStarting ? 'running' : 'waiting'} detail={startProgressDetail} />
+                <ProgressRow label="配置 root 密钥登录" status={isComplete ? 'done' : job?.status === 'succeeded' ? 'running' : 'waiting'} detail={isComplete ? '密码认证已关闭' : job?.stage === 'waiting-ssh' ? '正在等待并配置 SSH' : undefined} />
                 <ProgressRow label="进入 MacNAS 控制台" status={isComplete ? 'done' : 'waiting'} />
               </div>
+
+              {diagnostics && (
+                <DiagnosticPanel diagnostics={diagnostics} />
+              )}
 
               {isComplete ? (
                 <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/25 dark:text-emerald-300">
@@ -451,6 +500,42 @@ interface StatusCardProps {
   detail: string;
   ok: boolean;
 }
+
+const DiagnosticPanel: React.FC<{ diagnostics: SystemDiagnostics }> = ({ diagnostics }) => {
+  const statusStyle = (status: string) => {
+    if (status === 'pass') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/25 dark:text-emerald-300';
+    if (status === 'fail') return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/25 dark:text-rose-300';
+    return 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200';
+  };
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/30" role="status">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-black text-slate-900 dark:text-white">诊断中心</h3>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">按环境、虚拟机、数据盘、Docker 和直通目录逐项核对</p>
+        </div>
+        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${diagnostics.ok ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'}`}>
+          {diagnostics.ok ? '未发现阻断项' : '发现阻断项'}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {diagnostics.checks.map((check) => (
+          <div key={check.id} className={`rounded-xl border px-3 py-2.5 ${statusStyle(check.status)}`}>
+            <div className="flex items-start gap-2">
+              {check.status === 'pass' ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+              <div className="min-w-0">
+                <p className="text-xs font-bold">{check.title}</p>
+                <p className="mt-1 break-words text-[11px] leading-5">{check.message}</p>
+                {check.repair && <p className="mt-1 break-words text-[11px] leading-5 opacity-80">建议：{check.repair}</p>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const StatusCard: React.FC<StatusCardProps> = ({ icon: Icon, title, value, detail, ok }) => (
   <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/60">

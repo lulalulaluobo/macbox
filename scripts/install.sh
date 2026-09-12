@@ -25,7 +25,7 @@ usage() {
 MacNAS macOS Web 服务安装器
 
 用法：
-  ./install.sh                  安装文件并打印启动命令
+  ./install.sh                  安装文件并打印下一步说明
   ./install.sh --start          安装完成后以前台方式启动 Web 服务
   ./install.sh --port 19808     指定启动端口（仅影响 --start）
   ./install.sh --host 0.0.0.0   指定启动监听地址（仅影响 --start）
@@ -34,6 +34,10 @@ MacNAS macOS Web 服务安装器
 安装位置：
   程序：~/.local/share/macnas
   命令：~/.local/bin/macnas
+
+图形化入口：
+  双击发行包根目录中的 MacNASMenu.app，可在 macOS 顶部菜单栏控制服务。
+  MacNAS.command 仍可作为无菜单栏助手时的备用控制器。
 USAGE
 }
 
@@ -108,6 +112,10 @@ validate_release() {
   esac
 
   [[ -x "$SCRIPT_DIR/bin/macnas" ]] || die "发行包不完整：缺少可执行文件 bin/macnas。"
+  [[ -x "$SCRIPT_DIR/MacNAS.command" ]] || die "发行包不完整：缺少可执行文件 MacNAS.command。"
+  [[ -d "$SCRIPT_DIR/MacNASMenu.app/Contents/MacOS" ]] || die "发行包不完整：缺少 MacNASMenu.app。"
+  [[ -x "$SCRIPT_DIR/MacNASMenu.app/Contents/MacOS/MacNASMenu" ]] || die "发行包不完整：MacNASMenu.app 不可执行。"
+  [[ -x "$SCRIPT_DIR/uninstall.sh" ]] || die "发行包不完整：缺少可执行文件 uninstall.sh。"
   [[ -d "$SCRIPT_DIR/templates/vm" ]] || die "发行包不完整：缺少 templates/vm。"
   require_command file
   require_command shasum
@@ -127,8 +135,11 @@ install_files() {
   mkdir -p "$stage/bin"
   cp "$SCRIPT_DIR/bin/macnas" "$stage/bin/macnas"
   cp -R "$SCRIPT_DIR/templates" "$stage/templates"
+  cp -R "$SCRIPT_DIR/MacNASMenu.app" "$stage/MacNASMenu.app"
+  cp "$SCRIPT_DIR/uninstall.sh" "$stage/uninstall.sh"
+  cp "$SCRIPT_DIR/MacNAS.command" "$stage/MacNAS.command"
   [[ ! -e "$SCRIPT_DIR/checksums.txt" ]] || cp "$SCRIPT_DIR/checksums.txt" "$stage/checksums.txt"
-  chmod 0755 "$stage/bin/macnas"
+  chmod 0755 "$stage/bin/macnas" "$stage/uninstall.sh" "$stage/MacNAS.command" "$stage/MacNASMenu.app/Contents/MacOS/MacNASMenu"
 
   mkdir -p "$(dirname -- "$INSTALL_ROOT")"
   if [[ -e "$INSTALL_ROOT" || -L "$INSTALL_ROOT" ]]; then
@@ -158,14 +169,14 @@ print_next_steps() {
 
   log "安装完成。"
   printf '\n下一步：\n'
-  printf '  1. 启动局域网 Web 服务：\n'
-  printf '     macnas --lan --port %s\n' "$PORT"
-  printf '  2. 在本机浏览器完成首次初始化（固定账号：admin / admin123）：\n'
+  printf '  1. 在 Finder 中双击 MacNASMenu.app，顶部栏会出现 MacNAS 图标。\n'
+  printf '  2. 从顶部栏选择“启动后端服务”，再打开网页端完成首次初始化（固定账号：admin / admin123）：\n'
   printf '     http://127.0.0.1:%s\n' "$PORT"
   if [[ -n "$lan_ip" ]]; then
     printf '  3. 初始化完成后，局域网其他设备访问：\n     http://%s:%s\n' "$lan_ip" "$PORT"
   fi
-  printf '\n注意：首次管理员初始化只允许在运行 MacNAS 的 Mac 本机完成；完成后局域网设备可以登录。\n'
+  printf '\n备用控制器：双击 MacNAS.command；命令行启动仍可使用：macnas --lan --port %s\n' "$PORT"
+  printf '注意：首次管理员初始化只允许在运行 MacNAS 的 Mac 本机完成；完成后局域网设备可以登录。\n'
 }
 
 while [[ $# -gt 0 ]]; do

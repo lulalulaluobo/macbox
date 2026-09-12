@@ -1,0 +1,14 @@
+services:
+  baidunetdisk:
+    image: tzuhsiao/baidunetdisk:latest
+    container_name: macnas-baidunetdisk
+    restart: unless-stopped
+    ports:
+      - "6080:6080"
+      - "5900:5900"
+    environment:
+      - TZ=Asia/Shanghai
+      - VNC_SERVER_PASSWD=macnas-change-me
+    volumes:
+      - /data/appdata/baidunetdisk/config:/root/baidunetdisk
+      - /data/downloads:/root/baidunetdiskdownload

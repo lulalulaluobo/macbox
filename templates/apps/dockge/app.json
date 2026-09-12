@@ -1,0 +1,21 @@
+{
+  "id": "dockge",
+  "name": "Docker Compose（Dockge）",
+  "description": "面向 compose.yaml 的可视化编排管理器，可创建、编辑、启动、停止和更新 Docker Compose 堆栈。需要访问 Docker Socket，请仅授予管理员使用。",
+  "version": "1.x",
+  "icon": "layers",
+  "category": "系统运维",
+  "port": 5001,
+  "webUrl": "http://{{.HostIP}}:5001",
+  "ports": [
+    {"hostPort": 5001, "containerPort": 5001, "protocol": "tcp", "description": "Dockge Compose 堆栈管理 Web 端口"}
+  ],
+  "volumes": [
+    {"host": "/var/run/docker.sock", "container": "/var/run/docker.sock", "description": "Docker Engine 控制套接字（高权限）"},
+    {"host": "/data/appdata/dockge/data", "container": "/app/data", "description": "Dockge 登录与界面配置"},
+    {"host": "/data", "container": "/data", "description": "Compose 堆栈目录与 NAS 数据路径（保持宿主机路径一致）"}
+  ],
+  "env": [
+    {"key": "DOCKGE_STACKS_DIR", "value": "/data/appdata", "description": "MacNAS Compose 堆栈目录"}
+  ]
+}

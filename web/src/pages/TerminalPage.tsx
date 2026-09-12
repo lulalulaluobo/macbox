@@ -9,10 +9,14 @@ import {
   PanelLeftClose, PanelLeft, X, Save, Crown, User
 } from 'lucide-react';
 import { api } from '../api';
-import { FileItem } from '../types';
+import { FileItem, TerminalPrefill } from '../types';
 import { TerminalInputBar } from './terminal/TerminalInputBar';
 
-export const TerminalPage: React.FC = () => {
+interface TerminalPageProps {
+  prefill?: TerminalPrefill | null;
+}
+
+export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) => {
   // Terminal State
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermInstance = useRef<XTerm | null>(null);
@@ -59,6 +63,24 @@ export const TerminalPage: React.FC = () => {
     { label: '系统负载', cmd: 'top -b -n 1 | head -n 15\n' },
     { label: 'Samba 状态', cmd: 'systemctl status smbd --no-pager\n' },
     { label: '系统内核', cmd: 'uname -a\n' },
+  ];
+
+  const aiCommands = [
+    {
+      label: 'Codex',
+      cmd: 'codex --dangerously-bypass-approvals-and-sandbox\n',
+      title: '启动 Codex 高权限模式（跳过审批和沙箱）',
+    },
+    {
+      label: 'Claude',
+      cmd: 'claude --dangerously-skip-permissions\n',
+      title: '启动 Claude 高权限模式（跳过权限确认）',
+    },
+    {
+      label: 'Anti Gravity',
+      cmd: 'agy --dangerously-skip-permissions\n',
+      title: '启动 Anti Gravity 高权限模式（跳过权限确认）',
+    },
   ];
 
   // Initialize Terminal WebSocket
@@ -645,6 +667,22 @@ export const TerminalPage: React.FC = () => {
                 </button>
               ))}
 
+              <span className="shrink-0 px-1 text-[10px] font-bold uppercase tracking-wide text-violet-300" title="以下命令会跳过 AI 工具的安全审批，请仅在可信环境使用">
+                AI 高权限
+              </span>
+              {aiCommands.map((ai) => (
+                <button
+                  key={ai.label}
+                  onClick={() => sendToTerminal(ai.cmd)}
+                  disabled={!connected}
+                  className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-violet-500/30 bg-violet-500/15 px-2 py-1 text-[11px] font-semibold text-violet-200 transition hover:bg-violet-500/25 disabled:opacity-40"
+                  title={ai.title}
+                >
+                  <Code className="h-2.5 w-2.5 text-violet-300" />
+                  <span>{ai.label}</span>
+                </button>
+              ))}
+
               <button
                 onClick={() => xtermInstance.current?.clear()}
                 className="shrink-0 whitespace-nowrap rounded-md bg-slate-800 px-2 py-1 text-[11px] text-slate-300 transition hover:bg-slate-700"
@@ -677,6 +715,7 @@ export const TerminalPage: React.FC = () => {
               }
             }}
             disabled={!connected}
+            prefill={prefill}
           />
         </div>
       </div>

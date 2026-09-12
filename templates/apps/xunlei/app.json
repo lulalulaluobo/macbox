@@ -1,0 +1,22 @@
+{
+  "id": "xunlei",
+  "name": "迅雷下载",
+  "description": "迅雷 Linux 容器版远程下载工具，支持迅雷云盘任务与本地下载目录管理。运行需要 SYS_ADMIN 能力，请仅在可信的局域网环境使用。",
+  "version": "beta",
+  "icon": "download",
+  "category": "下载工具",
+  "port": 2345,
+  "webUrl": "http://{{.HostIP}}:2345",
+  "ports": [
+    {"hostPort": 2345, "containerPort": 2345, "protocol": "tcp", "description": "迅雷远程控制 Web 面板端口"}
+  ],
+  "volumes": [
+    {"host": "/data/appdata/xunlei/data", "container": "/xunlei/data", "description": "迅雷登录信息、插件与运行数据"},
+    {"host": "/data/appdata/xunlei/cache", "container": "/xunlei/var/packages/pan-xunlei-com", "description": "迅雷套件缓存，避免重复下载"},
+    {"host": "/data/downloads", "container": "/xunlei/downloads", "description": "迅雷下载文件目录"}
+  ],
+  "env": [
+    {"key": "XL_UID", "value": "0", "description": "下载目录用户 ID（MacNAS 数据目录默认由 root 管理）"},
+    {"key": "XL_GID", "value": "0", "description": "下载目录用户组 ID"}
+  ]
+}

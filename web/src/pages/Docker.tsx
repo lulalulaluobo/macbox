@@ -8,7 +8,11 @@ import { DockerNetworks } from './docker/DockerNetworks';
 
 type DockerTab = 'overview' | 'containers' | 'compose' | 'images' | 'networks';
 
-export const Docker: React.FC = () => {
+interface DockerProps {
+  onOpenTerminalWithLogs?: (payload: { containerName: string; logs: string }) => void;
+}
+
+export const Docker: React.FC<DockerProps> = ({ onOpenTerminalWithLogs }) => {
   const [activeTab, setActiveTab] = useState<DockerTab>('overview');
 
   const navItems: { id: DockerTab; label: string; icon: React.ReactNode; badge?: string }[] = [
@@ -57,7 +61,7 @@ export const Docker: React.FC = () => {
       {/* Main Workspace Area */}
       <div className="min-h-0 w-full flex-1 overflow-hidden">
         {activeTab === 'overview' && <DockerOverview onNavigateTab={setActiveTab} />}
-        {activeTab === 'containers' && <DockerContainers />}
+        {activeTab === 'containers' && <DockerContainers onOpenTerminalWithLogs={onOpenTerminalWithLogs} />}
         {activeTab === 'compose' && <DockerCompose />}
         {activeTab === 'images' && <DockerImages />}
         {activeTab === 'networks' && <DockerNetworks />}

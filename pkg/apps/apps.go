@@ -145,71 +145,10 @@ func generateAppSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-type composePortService struct {
-	Ports []interface{} `yaml:"ports"`
-}
-
-type composePortDocument struct {
-	Services map[string]composePortService `yaml:"services"`
-}
-
-func publishedPortValue(value interface{}) (int, bool) {
-	switch v := value.(type) {
-	case int:
-		return v, v >= 1 && v <= 65535
-	case int64:
-		return int(v), v >= 1 && v <= 65535
-	case uint64:
-		return int(v), v >= 1 && v <= 65535
-	case string:
-		spec := strings.Trim(strings.TrimSpace(v), "\"'")
-		if slash := strings.LastIndex(spec, "/"); slash >= 0 {
-			spec = spec[:slash]
-		}
-		parts := strings.Split(spec, ":")
-		if len(parts) < 2 {
-			return 0, false
-		}
-		// Compose accepts [host_ip:]published:target. The published
-		// port is therefore the field immediately before the target.
-		value, err := strconv.Atoi(strings.TrimSpace(parts[len(parts)-2]))
-		return value, err == nil && value >= 1 && value <= 65535
-	case map[string]interface{}:
-		for _, key := range []string{"published", "host_port"} {
-			if port, ok := v[key]; ok {
-				return publishedPortValue(port)
-			}
-		}
-	case map[interface{}]interface{}:
-		for _, key := range []string{"published", "host_port"} {
-			if port, ok := v[key]; ok {
-				return publishedPortValue(port)
-			}
-		}
-	}
-	return 0, false
-}
-
+// Keep this small package-local wrapper for existing tests and callers while
+// sharing the parser with the Docker Compose deployment path.
 func publishedHostPorts(content string) ([]int, error) {
-	var document composePortDocument
-	if err := yaml.Unmarshal([]byte(content), &document); err != nil {
-		return nil, err
-	}
-
-	seen := make(map[int]struct{})
-	ports := make([]int, 0)
-	for _, service := range document.Services {
-		for _, rawPort := range service.Ports {
-			if port, ok := publishedPortValue(rawPort); ok {
-				if _, exists := seen[port]; !exists {
-					seen[port] = struct{}{}
-					ports = append(ports, port)
-				}
-			}
-		}
-	}
-	sort.Ints(ports)
-	return ports, nil
+	return docker.PublishedHostPorts(content)
 }
 
 func composeEnvironmentItem(key, value string) string {
@@ -434,6 +373,7 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 
 	var finalYAML string
 	var aria2Secret string
+	var baiduVNCPassword string
 	if strings.TrimSpace(cfg.CustomYaml) != "" {
 		finalYAML = cfg.CustomYaml
 		fmt.Fprintln(out, "📝 使用用户自定义的高级 Compose YAML 配置")
@@ -487,6 +427,17 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 			})
 		}
 	}
+	// The Baidu Netdisk image has a known fallback VNC password. Replace the
+	// catalog marker with a fresh short secret for every guided installation,
+	// including an untouched copy submitted from advanced YAML mode.
+	if id == "baidunetdisk" && strings.Contains(finalYAML, "VNC_SERVER_PASSWD=macnas-change-me") {
+		secret, secretErr := generateAppSecret()
+		if secretErr != nil {
+			return secretErr
+		}
+		baiduVNCPassword = secret[:8]
+		finalYAML = strings.ReplaceAll(finalYAML, "VNC_SERVER_PASSWD=macnas-change-me", "VNC_SERVER_PASSWD="+baiduVNCPassword)
+	}
 	if len([]byte(finalYAML)) > maxComposeYAMLBytes {
 		return fmt.Errorf("最终 Docker Compose YAML 内容不能超过 8 MB")
 	}
@@ -537,12 +488,21 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 		fmt.Fprintf(out, "❌ 启动容器失败: %v\n", err)
 		return fmt.Errorf("docker compose up failed: %w", err)
 	}
+	portsChanged := false
 	if len(forwardedPorts) > 0 {
-		if err := m.vmMgr.AddForwardedPorts(forwardedPorts...); err != nil {
-			fmt.Fprintf(out, "⚠️ 应用已启动，但记录端口转发失败，请重试或手动重启配置: %v\n", err)
-		} else {
-			fmt.Fprintf(out, "🔌 已记录端口转发 %v；VM 重启后生效。\n", forwardedPorts)
+		var err error
+		portsChanged, err = m.vmMgr.AddForwardedPortsChanged(forwardedPorts...)
+		if err != nil {
+			fmt.Fprintf(out, "❌ 应用已启动，但记录局域网端口失败: %v\n", err)
+			return fmt.Errorf("记录应用端口转发失败: %w", err)
 		}
+		if portsChanged {
+			fmt.Fprintf(out, "🔌 检测到并登记局域网端口: %v\n", forwardedPorts)
+		}
+		// A previous deployment may have persisted a forwarding entry without
+		// restarting the running VM. Treat that pending configuration as a
+		// reason to apply it now as well.
+		portsChanged = portsChanged || m.vmMgr.IsConfigDirty()
 	}
 
 	// Special post-install setups
@@ -570,6 +530,17 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	}
 	if aria2Secret != "" {
 		fmt.Fprintf(out, "🔑 Aria2 RPC 密钥（仅显示一次）：%s\n", aria2Secret)
+	}
+	if baiduVNCPassword != "" {
+		fmt.Fprintf(out, "🔑 百度网盘 VNC 密码（仅显示一次）：%s\n", baiduVNCPassword)
+	}
+	if portsChanged {
+		fmt.Fprintln(out, "🔄 正在重启虚拟机以启用局域网访问...")
+		if err := m.vmMgr.RestartForPortForwarding(ctx, m.projectRoot); err != nil {
+			fmt.Fprintf(out, "❌ 应用已启动，但局域网端口尚未生效: %v\n", err)
+			return fmt.Errorf("启用应用局域网端口失败: %w", err)
+		}
+		fmt.Fprintln(out, "✅ 新端口已绑定到局域网地址")
 	}
 
 	fmt.Fprintf(out, "\n🎉 应用 [%s] 部署完成并已成功上线运行！\n", id)

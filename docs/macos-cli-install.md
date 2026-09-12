@@ -1,10 +1,12 @@
 # MacNAS macOS Web 服务发行版
 
-MacNAS 正式发行版是 macOS 命令行安装包，不提供 DMG 或桌面 App。安装后，MacNAS 作为一个前台 Go Web 服务运行，浏览器负责全部管理操作；Lima 提供 Linux 虚拟机，Docker、Samba、文件管理和终端均由 Web 控制台管理。
+MacNAS 正式发行版是 macOS Web 服务压缩包，不提供 DMG。发行包根目录提供可选的原生 `MacNASMenu.app` 菜单栏助手、备用 `MacNAS.command` 控制器，以及 `install.sh`/`uninstall.sh` 命令。MacNAS 作为 Go Web 服务运行，浏览器负责全部管理操作；Lima 提供 Linux 虚拟机，Docker、Samba、文件管理和终端均由 Web 控制台管理。
 
 ## 安装
 
-下载与你的 Mac 架构匹配的 `MacNAS_*_macos_aarch64.tar.gz`（Apple Silicon）或 `MacNAS_*_macos_x86_64.tar.gz`（Intel），解压后执行：
+下载与你的 Mac 架构匹配的 `MacNAS_*_macos_aarch64.tar.gz`（Apple Silicon）或 `MacNAS_*_macos_x86_64.tar.gz`（Intel），解压后双击根目录的 `MacNASMenu.app`，再从顶部栏选择“启动后端服务”即可。首次运行未签名开源 App 时，如果 macOS 阻止打开，请在 Finder 中右键选择“打开”。
+
+首次双击会在发现尚未安装时询问是否安装程序，并沿用安装器的 Lima 检查流程。也可以从终端执行：
 
 ```bash
 cd MacNAS_*
@@ -39,7 +41,35 @@ macnas --lan
 局域网访问：http://192.168.1.20:19808
 ```
 
-然后在本机浏览器打开 `http://127.0.0.1:19808`。首次管理员初始化只允许在运行 MacNAS 的 Mac 本机完成，固定账号是 `admin`，初始密码是 `admin123`；初始化完成后，局域网其他设备即可登录。
+然后从顶部栏 MacNAS 菜单选择“启动后端服务”；助手会后台启动服务并自动打开本机浏览器。首次管理员初始化只允许在运行 MacNAS 的 Mac 本机完成，固定账号是 `admin`，初始密码是 `admin123`；初始化完成后，局域网其他设备即可登录。
+
+## Docker 服务的局域网访问
+
+应用商城和 Docker Compose 页面部署服务时，在 Compose 的 `ports` 中声明宿主机端口即可。MacNAS 会自动登记这些端口并在发现新端口时重启 Lima，使它们绑定到 `0.0.0.0`，无需手动编辑 Lima 配置或重启服务。例如：
+
+```yaml
+services:
+  app:
+    image: example/app:latest
+    ports:
+      - "8088:80"
+```
+
+部署日志会显示端口登记和虚拟机重启过程。重启完成后，局域网设备访问 `http://<Mac局域网IP>:8088`。停止或删除项目不会自动移除端口白名单，因为同一个端口可能被其他项目复用；没有容器监听时该转发不会产生服务响应。
+
+## 使用 AI 维护 Docker 容器
+
+Web 终端顶部提供三个 AI CLI 快捷按钮：`Codex`、`Claude`、`Anti Gravity`。它们分别输入以下命令并直接启动交互会话：
+
+```text
+codex --dangerously-bypass-approvals-and-sandbox
+claude --dangerously-skip-permissions
+agy --dangerously-skip-permissions
+```
+
+请先在 Lima 虚拟机中安装并登录这些 CLI。上述参数会跳过安全审批，AI 可以直接执行当前终端用户允许的命令；MacNAS 不替用户审核 AI 生成的操作。
+
+Docker 容器管理页新增 `AI` 按钮：它会获取对应容器最近 200 行日志，自动切换到 Web 终端并放入输入框。日志不会自动发送，用户可以先启动任一 AI CLI，再检查内容后点击发送；超长日志会保留末尾最多 60,000 个字符。
 
 也可以安装后立即启动：
 
@@ -55,6 +85,8 @@ macnas --host 127.0.0.1 --port 19808
 ```
 
 按 `Ctrl+C` 停止服务。需要后台运行时，建议由用户自行选择 `tmux`、`nohup` 或 macOS LaunchAgent；安装器不会把启动失败隐藏在后台。
+
+菜单栏助手启动的服务日志位于 `~/.macnas/macnas.menu.log`；备用控制器启动的日志位于 `~/.macnas/macnas.command.log`。从顶部栏选择“停止后端服务”或双击 `MacNAS.command` 并选择停止即可，不需要查找进程号。
 
 ## 数据和磁盘说明
 
@@ -79,6 +111,8 @@ macnas --host 127.0.0.1 --port 19808
 ```bash
 ./uninstall.sh --purge --uninstall-lima
 ```
+
+菜单栏助手的“彻底卸载”会先进行二次确认，然后只删除 MacNAS 实例、管理盘、数据镜像、Docker 资源和配置；菜单中的“卸载程序”则保留这些运行数据。
 
 破坏性命令必须手动输入 `DELETE`。它不会删除其他 Lima 实例、Homebrew、宿主机无关 Docker 数据或整个 `~/MacNAS` 目录，只处理 MacNAS 固定资源。
 

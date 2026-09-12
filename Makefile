@@ -1,4 +1,4 @@
-.PHONY: all build build-web build-backend release-mac release-mac-cli dev dev-backend dev-backend-lan dev-web test clean
+.PHONY: all build build-web build-backend build-mac-menu release-mac release-mac-cli dev dev-backend dev-backend-lan dev-web test clean
 
 all: build
 
@@ -13,6 +13,10 @@ build-backend:
 
 build: build-web build-backend
 	@echo "==> MacNAS 构建完成！运行 ./bin/macnas 即可启动。"
+
+build-mac-menu:
+	@echo "==> 构建 macOS 顶部菜单栏助手..."
+	bash scripts/build-macos-menu-app.sh
 
 release-mac:
 	@echo "==> 构建 macOS Web 服务发行包..."

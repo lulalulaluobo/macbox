@@ -1,0 +1,19 @@
+services:
+  xunlei:
+    image: cnk3x/xunlei:beta
+    container_name: macnas-xunlei
+    hostname: macnas-xunlei
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor=unconfined
+    ports:
+      - "2345:2345/tcp"
+    environment:
+      - XL_UID=0
+      - XL_GID=0
+    volumes:
+      - /data/downloads:/xunlei/downloads
+      - /data/appdata/xunlei/data:/xunlei/data
+      - /data/appdata/xunlei/cache:/xunlei/var/packages/pan-xunlei-com

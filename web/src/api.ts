@@ -1,4 +1,4 @@
-import { SystemOverview, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, VMPrerequisites, BackgroundJob, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult, NASUser, AuthResponse, CreateNASUserRequest, UpdateNASUserRequest } from './types';
+import { SystemOverview, SystemDiagnostics, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, VMPrerequisites, BackgroundJob, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult, NASUser, AuthResponse, CreateNASUserRequest, UpdateNASUserRequest } from './types';
 
 const BASE_URL = '/api';
 
@@ -28,6 +28,7 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 export const api = {
   // System Overview
   getOverview: () => fetchJSON<SystemOverview>(`${BASE_URL}/system/status`),
+  getDiagnostics: () => fetchJSON<SystemDiagnostics>(`${BASE_URL}/system/diagnostics`),
 
   // VM Controls
   getVMPrerequisites: () => fetchJSON<VMPrerequisites>(`${BASE_URL}/vm/prerequisites`),
@@ -237,6 +238,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(cfg),
   }),
+  getJobs: () => fetchJSON<{ jobs: BackgroundJob[] }>(`${BASE_URL}/jobs`),
   getJob: (id: string) => fetchJSON<BackgroundJob>(`${BASE_URL}/jobs/${encodeURIComponent(id)}`),
 
   // Web Terminal & File System

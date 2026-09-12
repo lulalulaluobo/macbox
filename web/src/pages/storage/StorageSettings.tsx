@@ -3,7 +3,7 @@ import {
   HardDrive, Check, Copy, KeyRound, CheckCircle2, AlertCircle, RefreshCw, FolderLock, RotateCw,
   X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, ShieldCheck, Plus, Folder, Lock, Unlock, Edit3, Zap, Power, ArrowLeft, FolderOpen
 } from 'lucide-react';
-import { DiskInfo, ManagedDisk, SambaStatus, LocalMount, SMBShare, FileItem } from '../../types';
+import { DiskInfo, ManagedDisk, SambaStatus, LocalMount, LocalMountCandidate, LocalMountHealth, SMBShare, FileItem } from '../../types';
 import { api } from '../../api';
 
 export interface StorageSettingsProps {
@@ -42,6 +42,8 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   // Local Mounts (VirtioFS)
   const [localMounts, setLocalMounts] = useState<LocalMount[]>([]);
   const [, setRecommendedMounts] = useState<LocalMount[]>([]);
+  const [mountCandidates, setMountCandidates] = useState<LocalMountCandidate[]>([]);
+  const [mountHealth, setMountHealth] = useState<LocalMountHealth[]>([]);
   const [showAddMountModal, setShowAddMountModal] = useState(false);
   const [showMountManager, setShowMountManager] = useState(false);
   const [newMountPath, setNewMountPath] = useState('');
@@ -70,6 +72,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   const [secondaryTargetDisk, setSecondaryTargetDisk] = useState<DiskInfo | null>(null);
   const [secondaryCustomDir, setSecondaryCustomDir] = useState('');
   const [bindingSecondary, setBindingSecondary] = useState(false);
+  const [scanningSecondaryPath, setScanningSecondaryPath] = useState(false);
 
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -79,7 +82,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       const [storageRes, sambaRes, mountsRes] = await Promise.all([
         api.getDisks(),
         api.getSambaStatus(),
-        api.getLocalMounts().catch(() => ({ mounts: [], recommended: [] })),
+        api.getLocalMounts().catch(() => ({ mounts: [], recommended: [], candidates: [], health: [] })),
       ]);
       setDisks(storageRes.disks || []);
       setManagedDisks(storageRes.managedDisks || []);
@@ -89,6 +92,8 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       setSamba(sambaRes);
       setLocalMounts(mountsRes.mounts || []);
       setRecommendedMounts(mountsRes.recommended || []);
+      setMountCandidates(mountsRes.candidates || []);
+      setMountHealth(mountsRes.health || []);
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `加载存储数据失败: ${err.message}` });
     } finally {
@@ -99,6 +104,18 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   useEffect(() => {
     loadData();
   }, []);
+
+  const refreshMountData = async () => {
+    try {
+      const mountsRes = await api.getLocalMounts();
+      setLocalMounts(mountsRes.mounts || []);
+      setRecommendedMounts(mountsRes.recommended || []);
+      setMountCandidates(mountsRes.candidates || []);
+      setMountHealth(mountsRes.health || []);
+    } catch {
+      // Keep the mutation response visible if a follow-up probe is unavailable.
+    }
+  };
 
   const handleOpenBindModal = (disk: DiskInfo) => {
     setBindingDisk(disk);
@@ -143,8 +160,32 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
 
   const handleOpenSecondaryModal = (disk: DiskInfo) => {
     setSecondaryTargetDisk(disk);
-    setSecondaryCustomDir('');
+    setSecondaryCustomDir(disk.recommendedTargetDir || '');
     setShowSecondaryModal(true);
+  };
+
+  const handleRescanSecondaryPath = async () => {
+    if (!secondaryTargetDisk) return;
+    setScanningSecondaryPath(true);
+    try {
+      const storageRes = await api.getDisks();
+      const refreshedDisk = (storageRes.disks || []).find(
+        (disk) => disk.identifier === secondaryTargetDisk.identifier
+      );
+      setDisks(storageRes.disks || []);
+      if (!refreshedDisk) {
+        throw new Error('未重新扫描到这块磁盘，请确认磁盘仍已挂载');
+      }
+      setSecondaryTargetDisk(refreshedDisk);
+      setSecondaryCustomDir(refreshedDisk.recommendedTargetDir || '');
+      if (!refreshedDisk.recommendedTargetDir) {
+        throw new Error('未找到可用的本机存储目录，请先在 macOS 中挂载可写的数据卷');
+      }
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `扫描本机存储目录失败: ${err.message}` });
+    } finally {
+      setScanningSecondaryPath(false);
+    }
   };
 
   const handleConfirmBindSecondary = async () => {
@@ -188,6 +229,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       const res = await api.toggleLocalMount(id);
       setLocalMounts(res.mounts);
       setRecommendedMounts(res.recommended);
+      void refreshMountData();
       setRestartPrompt(true);
       setAlertMsg({ type: 'success', text: res.message });
     } catch (err: any) {
@@ -200,6 +242,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       const res = await api.toggleLocalMountWritable(id, writable);
       setLocalMounts(res.mounts);
       setRecommendedMounts(res.recommended);
+      void refreshMountData();
       setAlertMsg({ type: 'success', text: res.message });
       onRefreshOverview?.();
     } catch (err: any) {
@@ -213,10 +256,20 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       const res = await api.deleteLocalMount(id);
       setLocalMounts(res.mounts);
       setRecommendedMounts(res.recommended);
+      void refreshMountData();
       setRestartPrompt(true);
       setAlertMsg({ type: 'success', text: res.message });
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `删除失败: ${err.message}` });
+    }
+  };
+
+  const selectMountCandidate = (candidate: LocalMountCandidate) => {
+    if (!candidate.available || candidate.configured) return;
+    setNewMountPath(candidate.hostPath);
+    setNewMountName(candidate.name);
+    if (candidate.category === 'media' || candidate.category === 'downloads' || candidate.category === 'pictures' || candidate.category === 'custom') {
+      setNewMountCategory(candidate.category);
     }
   };
 
@@ -243,6 +296,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       });
       setLocalMounts(res.mounts);
       setRecommendedMounts(res.recommended);
+      void refreshMountData();
       setShowAddMountModal(false);
       setNewMountPath('');
       setNewMountName('');
@@ -773,6 +827,11 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                 <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-500 dark:border-slate-800">还没有直通目录</div>
               ) : localMounts.map((m) => (
                 <article key={m.id} className={`rounded-2xl border p-3 ${m.enabled ? 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900' : 'border-slate-200 bg-slate-50 opacity-60 dark:border-slate-800 dark:bg-slate-900/50'}`}>
+                  {(() => {
+                    const health = mountHealth.find((item) => item.id === m.id);
+                    const healthClass = health?.healthy ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : health?.status === 'disabled' ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200';
+                    return health ? <p className={`mb-2 rounded-xl px-3 py-2 text-[11px] font-semibold ${healthClass}`}>探针：{health.message}</p> : null;
+                  })()}
                   <div className="flex min-w-0 items-center gap-3">
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400"><Folder className="h-5 w-5" /></span>
                     <div className="min-w-0 flex-1"><h4 className="truncate text-sm font-bold text-slate-900 dark:text-white">{m.name}</h4><p className="truncate text-[11px] text-slate-500" title={m.hostPath}>{m.hostPath}</p></div>
@@ -1270,6 +1329,31 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
             </div>
 
             <form onSubmit={handleAddCustomMount} className="space-y-4 text-xs">
+              <div className="rounded-xl border border-sky-100 bg-sky-50/70 p-3 dark:border-sky-900/60 dark:bg-sky-500/10">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="font-bold text-slate-800 dark:text-slate-100">选择本机目录</p>
+                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">MacNAS 已扫描常用目录和已挂载外部卷</p>
+                  </div>
+                  <FolderOpen className="h-4 w-4 text-sky-500" />
+                </div>
+                <div className="mt-2 grid max-h-36 gap-2 overflow-y-auto sm:grid-cols-2">
+                  {mountCandidates.filter((candidate) => candidate.available).map((candidate) => (
+                    <button
+                      key={candidate.hostPath}
+                      type="button"
+                      disabled={candidate.configured}
+                      onClick={() => selectMountCandidate(candidate)}
+                      className={`rounded-xl border px-3 py-2 text-left transition ${candidate.configured ? 'cursor-not-allowed border-slate-200 bg-slate-100/80 text-slate-400 dark:border-slate-800 dark:bg-slate-800/60' : newMountPath === candidate.hostPath ? 'border-sky-400 bg-white text-sky-700 shadow-sm dark:bg-slate-900 dark:text-sky-300' : 'border-white bg-white/80 text-slate-700 hover:border-sky-300 dark:border-slate-800 dark:bg-slate-900/70 dark:text-slate-200'}`}
+                    >
+                      <span className="block truncate text-xs font-bold">{candidate.name}{candidate.configured ? ' · 已配置' : ''}</span>
+                      <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-500" title={candidate.hostPath}>{candidate.hostPath}</span>
+                    </button>
+                  ))}
+                </div>
+                {mountCandidates.every((candidate) => !candidate.available) && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">未扫描到可读的常用目录，请确认磁盘已挂载或使用下方高级路径。</p>}
+              </div>
+
               <div>
                 <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Mac 本地文件夹 <span className="text-rose-500">*</span>
@@ -1282,7 +1366,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   className="w-full rounded-xl border border-sky-300 bg-sky-50 px-4 py-3 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-sky-500/50 dark:bg-sky-500/10 dark:text-white"
                 />
                 <p className="mt-1.5 text-[11px] leading-5 text-slate-500 dark:text-slate-400">
-                  纯 Web 版无法调用 macOS 文件夹选择器，请填写运行 MacNAS 的 Mac 本机绝对路径。文件仍保留在原位置，不会复制进 NAS 镜像。
+                  已选择的目录会以 VirtioFS 直通到 Linux；文件仍保留在 Mac 原位置，不会复制进 NAS 镜像。未扫描到的目录可在此填写绝对路径。
                 </p>
               </div>
 
@@ -1433,18 +1517,29 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
             </div>
 
             <div className="space-y-1.5 text-xs">
+              <div className="flex items-center justify-between gap-3">
                 <label className="block font-semibold text-slate-700 dark:text-slate-300">
-                Mac 本机高速存储池文件夹
-              </label>
-              <input
-                type="text"
-                value={secondaryCustomDir}
-                onChange={(e) => setSecondaryCustomDir(e.target.value)}
-                placeholder="例如：/Volumes/Data/MacNAS-SSD-Pool"
-                className="w-full rounded-xl border border-purple-300 bg-purple-50 px-4 py-3 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20 dark:border-purple-500/50 dark:bg-purple-500/10 dark:text-white"
-              />
+                  Mac 本机高速存储池文件夹
+                </label>
+                <button
+                  type="button"
+                  onClick={handleRescanSecondaryPath}
+                  disabled={scanningSecondaryPath}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-purple-600 hover:bg-purple-50 disabled:opacity-50 dark:text-purple-300 dark:hover:bg-purple-500/10"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${scanningSecondaryPath ? 'animate-spin' : ''}`} />
+                  {scanningSecondaryPath ? '扫描中...' : '重新扫描'}
+                </button>
+              </div>
+              <div className="flex min-h-12 items-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-4 py-3 dark:border-purple-500/50 dark:bg-purple-500/10">
+                <FolderOpen className="h-4 w-4 shrink-0 text-purple-600 dark:text-purple-300" />
+                <span className="min-w-0 flex-1 truncate font-mono text-sm text-slate-900 dark:text-white" title={secondaryCustomDir}>
+                  {secondaryCustomDir || '未找到可用目录'}
+                </span>
+                {secondaryCustomDir && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />}
+              </div>
               <p className="text-[11px] leading-5 text-slate-500 dark:text-slate-400">
-                纯 Web 版请填写运行 MacNAS 的 Mac 本机目录；请选择 256GB 磁盘中的普通文件夹，不能直接选择磁盘根目录。
+                已由 MacNAS 根据这块磁盘的实际挂载状态自动扫描并推荐目录。该目录只存放扩展盘镜像；虚拟机内固定访问路径为 /data/volume2-ssd。
               </p>
             </div>
 

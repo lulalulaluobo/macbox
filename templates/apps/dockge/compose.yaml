@@ -1,0 +1,13 @@
+services:
+  dockge:
+    image: louislam/dockge:1
+    container_name: macnas-dockge
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /data/appdata/dockge/data:/app/data
+      - /data:/data
+    environment:
+      - DOCKGE_STACKS_DIR=/data/appdata

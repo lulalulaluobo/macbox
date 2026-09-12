@@ -15,18 +15,27 @@ interface TerminalInputBarProps {
   onSendRaw: (data: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  prefill?: { id: number; text: string } | null;
 }
 
 export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
   onSendRaw,
   disabled = false,
   placeholder = '在此输入文本、长命令或与终端 LLM 对话 (Enter 发送，Shift+Enter 换行)...',
+  prefill = null,
 }) => {
   const [inputText, setInputText] = useState('');
   const [isMultiline, setIsMultiline] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!prefill) return;
+    setInputText(prefill.text);
+    setIsMultiline(true);
+    setHistoryIndex(-1);
+  }, [prefill?.id]);
 
   // Send input content to terminal
   const handleSend = () => {

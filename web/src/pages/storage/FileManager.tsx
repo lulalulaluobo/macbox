@@ -588,10 +588,13 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     .filter((mount) => mount.enabled && !mount.guestTarget.includes('/') && (mount.guestTarget.toLowerCase().includes('volume') || mount.name.includes('存储空间') || mount.name.includes('硬盘')))
     .map((mount) => ({ id: `mount-${mount.id}`, path: `/data/${mount.guestTarget}` }))
     .filter((mount) => !secondaryDiskOptions.some((disk) => disk.path === mount.path));
+  const localMountOptions = localMounts
+    .filter((mount) => mount.enabled && mount.category !== 'volume2')
+    .map((mount) => ({ id: `mount-${mount.id}`, path: toGuestPath(mount.guestTarget) }));
   const discoveredOptions = discoveredDrivePaths
     .map((path) => ({ id: `folder-${path}`, path }))
     .filter((drive) => !secondaryDiskOptions.some((disk) => disk.path === drive.path) && !secondaryMountOptions.some((mount) => mount.path === drive.path));
-  const secondaryOptions = [...secondaryDiskOptions, ...secondaryMountOptions, ...discoveredOptions]
+  const secondaryOptions = [...secondaryDiskOptions, ...secondaryMountOptions, ...localMountOptions, ...discoveredOptions]
     .filter((drive, index, all) => all.findIndex((candidate) => candidate.path === drive.path) === index);
   const driveOptions = [
     {
@@ -614,7 +617,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       const matchedMount = localMounts.find((m) => m.enabled && toGuestPath(m.guestTarget) === disk.path);
       return {
         id: disk.id,
-        defaultName: `硬盘 ${index + 2}`,
+        defaultName: matchedMount?.name || `硬盘 ${index + 2}`,
         path: disk.path,
         detail: {
           kind: matchedDisk ? '扩展存储' : matchedMount ? '本机目录直通' : '已发现目录',

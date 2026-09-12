@@ -3,6 +3,7 @@ package api
 func (s *Server) registerRoutes() {
 	// 1. System
 	s.mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
+	s.mux.HandleFunc("GET /api/system/diagnostics", s.adminOnly(s.handleSystemDiagnostics))
 	s.mux.HandleFunc("GET /api/system/power", s.handleSystemPower)
 	s.mux.HandleFunc("POST /api/system/power/toggle", s.adminOnly(s.handleSystemPowerToggle))
 	s.mux.HandleFunc("GET /api/system/service", s.handleSystemServiceStatus)

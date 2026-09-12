@@ -73,14 +73,17 @@ func (s *Server) handleVMInstallLima(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	ctx, cancel := s.operationContext(20 * time.Minute)
-	job := s.jobs.add("lima.install", "正在通过 Homebrew 安装 Lima", cancel)
+	job := s.jobs.addWithStage("lima.install", "installing", 10, "正在通过 Homebrew 安装 Lima", cancel)
 	go func() {
 		defer s.endBackgroundWork()
 		defer s.vmMgr.EndVMAction()
 		defer cancel()
+		s.jobs.update(job.ID, "installing", 55, "Homebrew 正在下载并安装 Lima")
 		err := vm.InstallLima(ctx)
 		if err != nil {
 			log.Printf("[MacNAS] Lima install error: %v", err)
+		} else {
+			s.jobs.update(job.ID, "verifying", 90, "Lima 已安装，正在验证 limactl")
 		}
 		s.jobs.finish(job.ID, err)
 	}()
@@ -98,12 +101,14 @@ func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := s.operationContext(10 * time.Minute)
-	job := s.jobs.add("vm.start", "虚拟机启动中", cancel)
+	job := s.jobs.addWithStage("vm.start", "checking", 0, "正在检查 Lima、数据盘和虚拟机配置", cancel)
 	go func() {
 		defer s.endBackgroundWork()
 		defer s.vmMgr.EndVMAction()
 		defer cancel()
-		err := s.vmMgr.Start(ctx, s.projectRoot)
+		err := s.vmMgr.StartWithProgress(ctx, s.projectRoot, func(stage string, progress int, message string) {
+			s.jobs.update(job.ID, stage, progress, message)
+		})
 		if err != nil {
 			log.Printf("[MacNAS] VM Start error: %v", err)
 		} else {

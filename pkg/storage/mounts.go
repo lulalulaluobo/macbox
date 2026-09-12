@@ -5,9 +5,116 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/luluen/mac-nas/pkg/config"
 )
+
+// LocalMountCandidate is a safe, shallow scan result for the folder picker in
+// the Web UI. A browser cannot disclose the Mac's absolute path to a server,
+// so MacNAS offers well-known user folders and first-level mounted volumes as
+// selectable candidates while retaining a manual path fallback for advanced
+// users.
+type LocalMountCandidate struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	HostPath    string `json:"hostPath"`
+	Category    string `json:"category"`
+	Description string `json:"description,omitempty"`
+	Available   bool   `json:"available"`
+	Configured  bool   `json:"configured"`
+	Enabled     bool   `json:"enabled"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// LocalMountHealth is the API-level desired-vs-observed contract for a mount.
+// The desired state stays in config.LocalMount; these fields are recomputed
+// and never persisted as they describe the current VM session.
+type LocalMountHealth struct {
+	ID              string    `json:"id"`
+	ExpectedEnabled bool      `json:"expectedEnabled"`
+	HostReady       bool      `json:"hostReady"`
+	SourceMounted   bool      `json:"sourceMounted"`
+	TargetMounted   bool      `json:"targetMounted"`
+	Healthy         bool      `json:"healthy"`
+	Status          string    `json:"status"`
+	Message         string    `json:"message"`
+	CheckedAt       time.Time `json:"checkedAt"`
+}
+
+// ScanLocalMountCandidates deliberately stays shallow and allowlisted. It
+// never walks a user's entire home directory or an external volume, avoiding
+// both latency spikes and accidental disclosure of arbitrary filesystem
+// contents.
+func ScanLocalMountCandidates(cfg *config.Config) []LocalMountCandidate {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	type candidateSpec struct {
+		path, name, category, description string
+	}
+	specs := []candidateSpec{
+		{filepath.Join(home, "Downloads"), "Downloads", "downloads", "Mac 下载目录，可映射到 /data/downloads"},
+		{filepath.Join(home, "Movies"), "Movies", "media", "Mac 影音目录，可映射到 /data/media"},
+		{filepath.Join(home, "Pictures"), "Pictures", "pictures", "Mac 照片目录，可映射到 /data/photos"},
+		{filepath.Join(home, "Documents"), "Documents", "custom", "Mac 文档目录，可映射到 /data/shared"},
+		{filepath.Join(home, "Desktop"), "Desktop", "custom", "Mac 桌面目录，可映射到 /data/shared"},
+		{filepath.Join(home, "Public"), "Public", "custom", "Mac 公共目录，可映射到 /data/shared"},
+	}
+	if entries, readErr := os.ReadDir("/Volumes"); readErr == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+				specs = append(specs, candidateSpec{
+					path: filepath.Join("/Volumes", entry.Name()), name: entry.Name(), category: "custom",
+					description: "已挂载的外部卷，可选择其中的具体数据目录",
+				})
+			}
+		}
+	}
+
+	configured := make(map[string]config.LocalMount)
+	if cfg != nil {
+		if snapshot, snapshotErr := config.Snapshot(cfg); snapshotErr == nil {
+			for _, mount := range snapshot.Storage.LocalMounts {
+				configured[filepath.Clean(mount.HostPath)] = mount
+			}
+		}
+	}
+	seen := make(map[string]struct{}, len(specs))
+	result := make([]LocalMountCandidate, 0, len(specs))
+	for _, spec := range specs {
+		cleanPath := filepath.Clean(spec.path)
+		if _, ok := seen[cleanPath]; ok {
+			continue
+		}
+		seen[cleanPath] = struct{}{}
+		candidate := LocalMountCandidate{
+			ID:          "candidate-" + strings.ToLower(strings.ReplaceAll(filepath.Base(cleanPath), " ", "-")),
+			Name:        spec.name,
+			HostPath:    cleanPath,
+			Category:    spec.category,
+			Description: spec.description,
+		}
+		if mount, ok := configured[cleanPath]; ok {
+			candidate.Configured = true
+			candidate.Enabled = mount.Enabled
+		}
+		info, statErr := os.Stat(cleanPath)
+		if statErr != nil {
+			candidate.Reason = "目录不存在或尚未挂载"
+		} else if !info.IsDir() {
+			candidate.Reason = "路径不是目录"
+		} else if directory, openErr := os.Open(cleanPath); openErr != nil {
+			candidate.Reason = "当前进程无权读取"
+		} else {
+			_ = directory.Close()
+			candidate.Available = true
+		}
+		result = append(result, candidate)
+	}
+	return result
+}
 
 // GetDefaultMacMounts detects standard Mac user directories
 func GetDefaultMacMounts() []config.LocalMount {

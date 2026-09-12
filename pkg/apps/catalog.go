@@ -428,6 +428,136 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
       - /data/appdata/audiobookshelf/config:/config
       - /data/appdata/audiobookshelf/metadata:/metadata
       - /data/media/audiobooks:/audiobooks
+			`,
+		},
+
+		// 13. Docker Compose / Dockge
+		// Compose itself is the Docker orchestration CLI/specification, so the
+		// store exposes Dockge as the installable web UI for managing Compose
+		// stacks. The Docker socket and /data mount are intentional and must
+		// remain clearly visible in the install dialog.
+		{
+			Metadata: AppMetadata{
+				ID:          "dockge",
+				Name:        "Docker Compose（Dockge）",
+				Description: "面向 compose.yaml 的可视化编排管理器，可创建、编辑、启动、停止和更新 Docker Compose 堆栈。需要访问 Docker Socket，请仅授予管理员使用。",
+				Version:     "1.x",
+				Icon:        "layers",
+				Category:    "系统运维",
+				Port:        5001,
+				Source:      "community",
+				Ports: []AppPort{
+					{HostPort: 5001, ContainerPort: 5001, Protocol: "tcp", Description: "Dockge Compose 堆栈管理 Web 端口"},
+				},
+				Volumes: []AppVolume{
+					{Host: "/var/run/docker.sock", Container: "/var/run/docker.sock", Description: "Docker Engine 控制套接字（高权限）"},
+					{Host: "/data/appdata/dockge/data", Container: "/app/data", Description: "Dockge 登录与界面配置"},
+					{Host: "/data", Container: "/data", Description: "Compose 堆栈目录与 NAS 数据路径（保持宿主机路径一致）"},
+				},
+				Env: []AppEnv{
+					{Key: "DOCKGE_STACKS_DIR", Value: "/data/appdata", Description: "MacNAS Compose 堆栈目录"},
+				},
+			},
+			YAML: `services:
+  dockge:
+    image: louislam/dockge:1
+    container_name: macnas-dockge
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /data/appdata/dockge/data:/app/data
+      - /data:/data
+    environment:
+      - DOCKGE_STACKS_DIR=/data/appdata
+`,
+		},
+
+		// 14. Xunlei
+		{
+			Metadata: AppMetadata{
+				ID:          "xunlei",
+				Name:        "迅雷下载",
+				Description: "迅雷 Linux 容器版远程下载工具，支持迅雷云盘任务与本地下载目录管理。运行需要 SYS_ADMIN 能力，请仅在可信的局域网环境使用。",
+				Version:     "beta",
+				Icon:        "download",
+				Category:    "下载工具",
+				Port:        2345,
+				Source:      "community",
+				Ports: []AppPort{
+					{HostPort: 2345, ContainerPort: 2345, Protocol: "tcp", Description: "迅雷远程控制 Web 面板端口"},
+				},
+				Volumes: []AppVolume{
+					{Host: "/data/appdata/xunlei/data", Container: "/xunlei/data", Description: "迅雷登录信息、插件与运行数据"},
+					{Host: "/data/appdata/xunlei/cache", Container: "/xunlei/var/packages/pan-xunlei-com", Description: "迅雷套件缓存，避免重复下载"},
+					{Host: "/data/downloads", Container: "/xunlei/downloads", Description: "迅雷下载文件目录"},
+				},
+				Env: []AppEnv{
+					{Key: "XL_UID", Value: "0", Description: "下载目录用户 ID（MacNAS 数据目录默认由 root 管理）"},
+					{Key: "XL_GID", Value: "0", Description: "下载目录用户组 ID"},
+				},
+			},
+			YAML: `services:
+  xunlei:
+    image: cnk3x/xunlei:beta
+    container_name: macnas-xunlei
+    hostname: macnas-xunlei
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor=unconfined
+    ports:
+      - "2345:2345/tcp"
+    environment:
+      - XL_UID=0
+      - XL_GID=0
+    volumes:
+      - /data/downloads:/xunlei/downloads
+      - /data/appdata/xunlei/data:/xunlei/data
+      - /data/appdata/xunlei/cache:/xunlei/var/packages/pan-xunlei-com
+`,
+		},
+
+		// 15. Baidu Netdisk
+		{
+			Metadata: AppMetadata{
+				ID:          "baidunetdisk",
+				Name:        "百度网盘",
+				Description: "百度网盘 Linux 客户端容器，提供浏览器版远程桌面登录与下载；支持 macOS Apple Silicon 与 Intel 对应的 ARM64/AMD64 镜像，安装时会自动生成一次性 VNC 密码。",
+				Version:     "4.17.7",
+				Icon:        "cloud",
+				Category:    "下载工具",
+				Port:        6080,
+				Source:      "community",
+				Ports: []AppPort{
+					{HostPort: 6080, ContainerPort: 6080, Protocol: "tcp", Description: "百度网盘浏览器远程桌面入口"},
+					{HostPort: 5900, ContainerPort: 5900, Protocol: "tcp", Description: "可选 VNC 客户端连接端口"},
+				},
+				Volumes: []AppVolume{
+					{Host: "/data/appdata/baidunetdisk/config", Container: "/root/baidunetdisk", Description: "百度网盘客户端配置与登录状态"},
+					{Host: "/data/downloads", Container: "/root/baidunetdiskdownload", Description: "百度网盘下载文件目录"},
+				},
+				Env: []AppEnv{
+					{Key: "VNC_SERVER_PASSWD", Value: "macnas-change-me", Description: "VNC 密码（保留默认标记时自动随机生成）"},
+					{Key: "TZ", Value: "Asia/Shanghai", Description: "系统时区"},
+				},
+			},
+			YAML: `services:
+  baidunetdisk:
+    image: tzuhsiao/baidunetdisk:latest
+    container_name: macnas-baidunetdisk
+    restart: unless-stopped
+    ports:
+      - "6080:6080"
+      - "5900:5900"
+    environment:
+      - TZ=Asia/Shanghai
+      - VNC_SERVER_PASSWD=macnas-change-me
+    volumes:
+      - /data/appdata/baidunetdisk/config:/root/baidunetdisk
+      - /data/downloads:/root/baidunetdiskdownload
 `,
 		},
 	}

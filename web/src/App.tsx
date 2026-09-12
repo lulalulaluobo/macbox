@@ -9,7 +9,7 @@ import { Settings } from './pages/Settings';
 import { StorageSettings } from './pages/storage/StorageSettings';
 import { InitializationWizard } from './pages/InitializationWizard';
 import { LoginPage } from './pages/LoginPage';
-import { SystemOverview, NASUser } from './types';
+import { SystemOverview, NASUser, TerminalPrefill } from './types';
 import { api } from './api';
 import { useTheme } from './theme';
 import { Key, X, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -23,6 +23,8 @@ export const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [swUpdateReady, setSwUpdateReady] = useState(false);
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  const terminalPrefillSequence = useRef(0);
+  const [terminalPrefill, setTerminalPrefill] = useState<TerminalPrefill | null>(null);
 
   // Self Change Password Modal State
   const [showChangePwdModal, setShowChangePwdModal] = useState(false);
@@ -59,6 +61,16 @@ export const App: React.FC = () => {
   const navigate = (tab: typeof activeTab) => {
     if (needsInitialization && tab !== 'dashboard' && tab !== 'storage_settings') return;
     setActiveTab(tab);
+  };
+
+  const openTerminalWithContainerLogs = ({ containerName, logs }: { containerName: string; logs: string }) => {
+    terminalPrefillSequence.current += 1;
+    setTerminalPrefill({
+      id: terminalPrefillSequence.current,
+      source: containerName,
+      text: logs,
+    });
+    setActiveTab('terminal');
   };
 
   useEffect(() => {
@@ -241,11 +253,11 @@ export const App: React.FC = () => {
           <Storage />
         )}
 
-        {activeTab === 'docker' && <Docker />}
+        {activeTab === 'docker' && <Docker onOpenTerminalWithLogs={openTerminalWithContainerLogs} />}
 
         {activeTab === 'apps' && <Apps />}
 
-        {activeTab === 'terminal' && <TerminalPage />}
+        {activeTab === 'terminal' && <TerminalPage prefill={terminalPrefill} />}
 
         {activeTab === 'storage_settings' && <StorageSettings mode="storage" configDirty={overview?.configDirty} onRefreshOverview={refreshData} />}
 

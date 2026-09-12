@@ -9,17 +9,94 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 var validProjectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 const maxComposeYAMLBytes = 8 << 20
 
+type composePortService struct {
+	Ports []interface{} `yaml:"ports"`
+}
+
+type composePortDocument struct {
+	Services map[string]composePortService `yaml:"services"`
+}
+
 type composeLsItem struct {
 	Name        string `json:"Name"`
 	Status      string `json:"Status"`
 	ConfigFiles string `json:"ConfigFiles"`
+}
+
+// publishedPortValue extracts the host-side port from either Compose's short
+// or long port syntax. A bare container port is intentionally ignored because
+// it does not publish anything on the host.
+func publishedPortValue(value interface{}) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, v >= 1 && v <= 65535
+	case int64:
+		return int(v), v >= 1 && v <= 65535
+	case uint64:
+		return int(v), v >= 1 && v <= 65535
+	case string:
+		spec := strings.Trim(strings.TrimSpace(v), "\"'")
+		if slash := strings.LastIndex(spec, "/"); slash >= 0 {
+			spec = spec[:slash]
+		}
+		parts := strings.Split(spec, ":")
+		if len(parts) < 2 {
+			return 0, false
+		}
+		// Compose accepts [host_ip:]published:target. The published
+		// port is therefore the field immediately before the target.
+		value, err := strconv.Atoi(strings.TrimSpace(parts[len(parts)-2]))
+		return value, err == nil && value >= 1 && value <= 65535
+	case map[string]interface{}:
+		for _, key := range []string{"published", "host_port"} {
+			if port, ok := v[key]; ok {
+				return publishedPortValue(port)
+			}
+		}
+	case map[interface{}]interface{}:
+		for _, key := range []string{"published", "host_port"} {
+			if port, ok := v[key]; ok {
+				return publishedPortValue(port)
+			}
+		}
+	}
+	return 0, false
+}
+
+// PublishedHostPorts returns the unique host ports published by a Compose
+// document. MacNAS forwards these ports through Lima so services are
+// reachable from other devices on the configured LAN interface.
+func PublishedHostPorts(content string) ([]int, error) {
+	var document composePortDocument
+	if err := yaml.Unmarshal([]byte(content), &document); err != nil {
+		return nil, err
+	}
+
+	seen := make(map[int]struct{})
+	ports := make([]int, 0)
+	for _, service := range document.Services {
+		for _, rawPort := range service.Ports {
+			if port, ok := publishedPortValue(rawPort); ok {
+				if _, exists := seen[port]; !exists {
+					seen[port] = struct{}{}
+					ports = append(ports, port)
+				}
+			}
+		}
+	}
+	sort.Ints(ports)
+	return ports, nil
 }
 
 func (c *Client) ListComposeProjects(ctx context.Context) ([]ComposeProject, error) {
@@ -220,6 +297,44 @@ func (c *Client) GetComposeYaml(ctx context.Context, name string) (string, error
 	return "", err
 }
 
+func (c *Client) registerPublishedPorts(content string, out io.Writer) (bool, error) {
+	ports, err := PublishedHostPorts(content)
+	if err != nil {
+		return false, fmt.Errorf("解析 Compose 端口失败: %w", err)
+	}
+	if len(ports) == 0 {
+		return false, nil
+	}
+
+	changed, err := c.vmMgr.AddForwardedPortsChanged(ports...)
+	if err != nil {
+		return false, err
+	}
+	if changed {
+		fmt.Fprintf(out, "🔌 检测到并登记局域网端口: %v\n", ports)
+	}
+	// A previous operation may have persisted forwarding entries while the
+	// running VM still uses an older Lima configuration. Apply that pending
+	// configuration on the next Compose start/deploy too.
+	return changed || c.vmMgr.IsConfigDirty(), nil
+}
+
+func (c *Client) restartForPublishedPorts(ctx context.Context, changed bool, out io.Writer) error {
+	if !changed {
+		return nil
+	}
+	if strings.TrimSpace(c.projectRoot) == "" {
+		return fmt.Errorf("无法启用局域网端口：缺少项目配置目录")
+	}
+
+	fmt.Fprintln(out, "🔄 检测到新端口，正在重启虚拟机以启用局域网访问...")
+	if err := c.vmMgr.RestartForPortForwarding(ctx, c.projectRoot); err != nil {
+		return fmt.Errorf("启用局域网端口失败: %w", err)
+	}
+	fmt.Fprintln(out, "✅ 新端口已绑定到局域网地址")
+	return nil
+}
+
 func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent string, out io.Writer) error {
 	name = strings.TrimSpace(name)
 	if !validProjectName.MatchString(name) {
@@ -232,6 +347,9 @@ func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent str
 	}
 	if len([]byte(yamlContent)) > maxComposeYAMLBytes {
 		return fmt.Errorf("Compose 配置内容不能超过 8 MB")
+	}
+	if _, err := PublishedHostPorts(yamlContent); err != nil {
+		return fmt.Errorf("解析 Compose 端口失败: %w", err)
 	}
 
 	fmt.Fprintf(out, "🚀 开始部署 Docker Compose 项目: %s\n", name)
@@ -255,6 +373,16 @@ func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent str
 	fmt.Fprintln(out, "⚙️ 正在执行 docker compose up -d ...")
 	if err := c.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", composePath, "up", "-d", "--remove-orphans"); err != nil {
 		fmt.Fprintf(out, "❌ 部署执行失败: %v\n", err)
+		return err
+	}
+
+	portsChanged, err := c.registerPublishedPorts(yamlContent, out)
+	if err != nil {
+		fmt.Fprintf(out, "⚠️ 项目已启动，但登记局域网端口失败: %v\n", err)
+		return err
+	}
+	if err := c.restartForPublishedPorts(ctx, portsChanged, out); err != nil {
+		fmt.Fprintf(out, "❌ 项目已启动，但局域网端口尚未生效: %v\n", err)
 		return err
 	}
 
@@ -288,8 +416,31 @@ func (c *Client) ComposeAction(ctx context.Context, name string, action string, 
 		return fmt.Errorf("不支持的项目动作: %s", action)
 	}
 
+	var portsChanged bool
+	if action == "start" || action == "restart" {
+		yamlContent, readErr := c.vmMgr.Exec(ctx, "cat", filePath)
+		if readErr != nil {
+			return fmt.Errorf("读取 Compose 配置失败: %w", readErr)
+		}
+		if _, parseErr := PublishedHostPorts(yamlContent); parseErr != nil {
+			return fmt.Errorf("解析 Compose 端口失败: %w", parseErr)
+		}
+		// Registration is intentionally done before the action. If the action
+		// succeeds, the VM can be restarted immediately; if it fails, the
+		// saved forwarding entry is harmless and will be usable on the next
+		// start.
+		portsChanged, err = c.registerPublishedPorts(yamlContent, out)
+		if err != nil {
+			return err
+		}
+	}
+
 	if err := c.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", filePath, composeAction); err != nil {
 		fmt.Fprintf(out, "❌ 操作失败: %v\n", err)
+		return err
+	}
+	if err := c.restartForPublishedPorts(ctx, portsChanged, out); err != nil {
+		fmt.Fprintf(out, "❌ 项目操作已完成，但局域网端口尚未生效: %v\n", err)
 		return err
 	}
 	fmt.Fprintf(out, "✅ 操作 [%s] 成功完成\n", action)

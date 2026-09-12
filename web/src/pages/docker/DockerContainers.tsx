@@ -15,12 +15,19 @@ import {
   Cpu,
   Layers,
   X,
+  Sparkles,
 } from 'lucide-react';
 import { ContainerInfo } from '../../types';
 import { api } from '../../api';
 import { ContainerTerminalModal } from './ContainerTerminalModal';
 
-export const DockerContainers: React.FC = () => {
+interface DockerContainersProps {
+  onOpenTerminalWithLogs?: (payload: { containerName: string; logs: string }) => void;
+}
+
+const MAX_LOGS_FOR_AI = 60_000;
+
+export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTerminalWithLogs }) => {
   const [containers, setContainers] = useState<ContainerInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -109,6 +116,35 @@ export const DockerContainers: React.FC = () => {
     navigator.clipboard.writeText(logs);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const sendLogsToTerminal = (containerName: string, rawLogs: string) => {
+    const cleaned = rawLogs.replace(/(?:\u001b)?\[[0-9;]*m/g, '').trim();
+    if (!cleaned) {
+      setAlertMsg({ type: 'error', text: '当前容器没有可发送的日志' });
+      return;
+    }
+    const clipped = cleaned.length > MAX_LOGS_FOR_AI
+      ? `[MacNAS] 日志过长，已保留最后 ${MAX_LOGS_FOR_AI.toLocaleString()} 个字符。\n\n${cleaned.slice(-MAX_LOGS_FOR_AI)}`
+      : cleaned;
+    onOpenTerminalWithLogs?.({
+      containerName,
+      logs: `[MacNAS 容器日志] ${containerName}\n以下为最近容器输出，请先分析问题再提出或执行修复：\n\n${clipped}`,
+    });
+    setActiveLogContainer(null);
+    setAlertMsg({ type: 'success', text: `已将 ${containerName} 的日志放入 Web 终端输入框，请选择 AI 并发送` });
+  };
+
+  const handleSendLogsToTerminal = async (id: string, containerName: string) => {
+    setLogsLoading(true);
+    try {
+      const res = await api.getContainerLogs(id, 200);
+      sendLogsToTerminal(containerName, res.logs || '');
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `获取容器日志失败: ${err.message}` });
+    } finally {
+      setLogsLoading(false);
+    }
   };
 
   const filteredContainers = containers.filter(c => {
@@ -347,6 +383,16 @@ export const DockerContainers: React.FC = () => {
                     <span className="hidden sm:inline">日志</span>
                   </button>
 
+                  <button
+                    onClick={() => handleSendLogsToTerminal(container.id, container.name || container.id)}
+                    disabled={logsLoading}
+                    className="flex items-center space-x-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300 dark:hover:bg-violet-500/20"
+                    title="获取最近 200 行日志并放入 Web 终端输入框"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">AI</span>
+                  </button>
+
                   {isRunning && (
                     <button
                       onClick={() => setActiveTerminalContainer(container.name || container.id)}
@@ -395,6 +441,16 @@ export const DockerContainers: React.FC = () => {
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   <span className="hidden sm:inline">{copied ? '已复制' : '复制日志'}</span>
+                </button>
+
+                <button
+                  onClick={() => sendLogsToTerminal(activeLogContainer, logs)}
+                  disabled={logsLoading || !logs}
+                  className="flex h-10 items-center justify-center gap-1.5 rounded-xl bg-violet-500 px-3 text-xs font-semibold text-white transition hover:bg-violet-400 disabled:opacity-40"
+                  title="关闭日志并将内容放入 Web 终端输入框"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">发给终端 AI</span>
                 </button>
 
                 <button

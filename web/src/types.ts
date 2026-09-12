@@ -45,6 +45,7 @@ export interface DiskInfo {
   usedPercent: number;
   mounted: boolean;
   mountPoint: string;
+  recommendedTargetDir?: string;
   fileSystem: string;
   isExternal: boolean;
   isSSD: boolean;
@@ -76,9 +77,36 @@ export interface LocalMount {
   description?: string;
 }
 
+export interface LocalMountCandidate {
+  id: string;
+  name: string;
+  hostPath: string;
+  category: string;
+  description?: string;
+  available: boolean;
+  configured: boolean;
+  enabled: boolean;
+  reason?: string;
+}
+
+export interface LocalMountHealth {
+  id: string;
+  expectedEnabled: boolean;
+  hostReady: boolean;
+  sourceMounted: boolean;
+  targetMounted: boolean;
+  healthy: boolean;
+  status: string;
+  message: string;
+  checkedAt: string;
+}
+
 export interface LocalMountsResponse {
   mounts: LocalMount[];
   recommended: LocalMount[];
+  candidates?: LocalMountCandidate[];
+  health?: LocalMountHealth[];
+  healthError?: string;
 }
 
 export interface PortMapping {
@@ -103,6 +131,12 @@ export interface ContainerInfo {
   netIo?: string;
   blockIo?: string;
   project?: string;
+}
+
+export interface TerminalPrefill {
+  id: number;
+  text: string;
+  source?: string;
 }
 
 export interface ImageInfo {
@@ -318,10 +352,28 @@ export interface BackgroundJob {
   id: string;
   kind: string;
   status: 'running' | 'succeeded' | 'failed' | 'cancelled' | string;
+  stage?: string;
+  progress?: number;
   message?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DiagnosticCheck {
+  id: string;
+  title: string;
+  status: 'pass' | 'warn' | 'fail' | string;
+  message: string;
+  detail?: string;
+  repair?: string;
+}
+
+export interface SystemDiagnostics {
+  ok: boolean;
+  checkedAt: string;
+  instanceName: string;
+  checks: DiagnosticCheck[];
 }
 
 export interface FileItem {

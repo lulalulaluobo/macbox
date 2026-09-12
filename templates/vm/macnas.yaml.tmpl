@@ -124,10 +124,11 @@ provision:
     if mountpoint -q "$TARGET_DIR"; then
       umount "$TARGET_DIR" 2>/dev/null || true
     fi
-    if ! mountpoint -q "$TARGET_DIR"; then
-      mount --bind "$SOURCE_PATH" "$TARGET_DIR"
-      echo "[macnas-mounts] bind mounted {{shellQuote .ID}} -> $TARGET_DIR"
-    fi
+    # A stale Lima-managed VirtioFS mount at TARGET_DIR cannot always be
+    # unmounted from inside the guest. Bind over it so the configured source
+    # remains visible; a later run removes the top bind layer first.
+    mount --bind "$SOURCE_PATH" "$TARGET_DIR"
+    echo "[macnas-mounts] bind mounted {{shellQuote .ID}} -> $TARGET_DIR"
     mount -o remount,{{if .Writable}}rw{{else}}ro{{end}} "$TARGET_DIR" 2>/dev/null || true
     ENTRY_END
     {{end}}

@@ -100,7 +100,8 @@ textarea:focus-visible {
 @media (max-width: 479px) {
   .sora-app-content:not(.terminal-app-content) {
     padding-top: 1rem;
-    padding-bottom: 1.5rem;
+    /* Keep the last card/action row scrollable above the fixed mobile nav. */
+    padding-bottom: calc(8rem + env(safe-area-inset-bottom));
   }
 
   .pwa-update-banner {

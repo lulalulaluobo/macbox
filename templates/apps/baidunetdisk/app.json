@@ -1,0 +1,22 @@
+{
+  "id": "baidunetdisk",
+  "name": "百度网盘",
+  "description": "百度网盘 Linux 客户端容器，提供浏览器版远程桌面登录与下载；支持 macOS Apple Silicon 与 Intel 对应的 ARM64/AMD64 镜像，安装时会自动生成一次性 VNC 密码。",
+  "version": "4.17.7",
+  "icon": "cloud",
+  "category": "下载工具",
+  "port": 6080,
+  "webUrl": "http://{{.HostIP}}:6080",
+  "ports": [
+    {"hostPort": 6080, "containerPort": 6080, "protocol": "tcp", "description": "百度网盘浏览器远程桌面入口"},
+    {"hostPort": 5900, "containerPort": 5900, "protocol": "tcp", "description": "可选 VNC 客户端连接端口"}
+  ],
+  "volumes": [
+    {"host": "/data/appdata/baidunetdisk/config", "container": "/root/baidunetdisk", "description": "百度网盘客户端配置与登录状态"},
+    {"host": "/data/downloads", "container": "/root/baidunetdiskdownload", "description": "百度网盘下载文件目录"}
+  ],
+  "env": [
+    {"key": "VNC_SERVER_PASSWD", "value": "macnas-change-me", "description": "VNC 密码，保留默认标记时自动随机生成"},
+    {"key": "TZ", "value": "Asia/Shanghai", "description": "系统时区"}
+  ]
+}

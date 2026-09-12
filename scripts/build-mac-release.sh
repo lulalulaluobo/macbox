@@ -50,13 +50,16 @@ cp -R "$ROOT_DIR/templates" "$PACKAGE_DIR/templates"
 cp "$ROOT_DIR/scripts/install.sh" "$PACKAGE_DIR/install.sh"
 cp "$ROOT_DIR/scripts/uninstall.sh" "$PACKAGE_DIR/uninstall.sh"
 cp "$ROOT_DIR/docs/macos-cli-install.md" "$PACKAGE_DIR/README.md"
-chmod 0755 "$PACKAGE_DIR/bin/macnas" "$PACKAGE_DIR/install.sh" "$PACKAGE_DIR/uninstall.sh"
+cp "$ROOT_DIR/scripts/macnas.command" "$PACKAGE_DIR/MacNAS.command"
+chmod 0755 "$PACKAGE_DIR/bin/macnas" "$PACKAGE_DIR/install.sh" "$PACKAGE_DIR/uninstall.sh" "$PACKAGE_DIR/MacNAS.command"
+
+"$ROOT_DIR/scripts/build-macos-menu-app.sh" "$PACKAGE_DIR/MacNASMenu.app"
 
 (
   cd "$PACKAGE_DIR"
   {
-    find bin templates -type f -print
-    printf '%s\n' install.sh uninstall.sh
+    find bin templates MacNASMenu.app/Contents -type f -print
+    printf '%s\n' MacNAS.command install.sh uninstall.sh
   } | sort | xargs shasum -a 256
 ) > "$PACKAGE_DIR/checksums.txt"
 
@@ -67,4 +70,4 @@ shasum -a 256 "$ARCHIVE_PATH" > "$ARCHIVE_PATH.sha256"
 
 printf '\n[MacNAS] 构建完成：%s\n' "$ARCHIVE_PATH"
 printf '[MacNAS] SHA-256：%s\n' "$(awk '{print $1}' "$ARCHIVE_PATH.sha256")"
-printf '[MacNAS] 包含：install.sh、uninstall.sh、预编译 macnas、templates；不包含 DMG、Docker 镜像、容器或用户数据。\n'
+printf '[MacNAS] 包含：MacNASMenu.app、MacNAS.command、install.sh、uninstall.sh、预编译 macnas、templates；不包含 DMG、Docker 镜像、容器或用户数据。\n'

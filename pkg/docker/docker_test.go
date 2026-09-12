@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,29 @@ func TestCappedDockerOutput(t *testing.T) {
 	result := output.Bytes()
 	if len(result) <= maxDockerCommandOutputBytes || !strings.Contains(string(result), "Docker 命令输出已截断") {
 		t.Fatalf("capped output did not include bounded diagnostic marker: len=%d", len(result))
+	}
+}
+
+func TestPublishedHostPorts(t *testing.T) {
+	content := `services:
+  app:
+    ports:
+      - "8082:80"
+      - "127.0.0.1:8085:8080/tcp"
+      - "53:53/udp"
+  long-form:
+    ports:
+      - target: 80
+        published: 8080
+`
+
+	got, err := PublishedHostPorts(content)
+	if err != nil {
+		t.Fatalf("PublishedHostPorts() error = %v", err)
+	}
+	want := []int{53, 8080, 8082, 8085}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("PublishedHostPorts() = %v, want %v", got, want)
 	}
 }
 

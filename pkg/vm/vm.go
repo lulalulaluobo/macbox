@@ -37,6 +37,25 @@ type VMStatus struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
+// StartProgress is deliberately coarse-grained. Lima does not expose a
+// stable percentage for image creation, so the API reports meaningful
+// lifecycle checkpoints instead of pretending to know byte-level progress.
+type StartProgress func(stage string, progress int, message string)
+
+type LocalMountProbe struct {
+	ID              string    `json:"id"`
+	HostPath        string    `json:"hostPath"`
+	GuestTarget     string    `json:"guestTarget"`
+	ExpectedEnabled bool      `json:"expectedEnabled"`
+	HostReady       bool      `json:"hostReady"`
+	SourceMounted   bool      `json:"sourceMounted"`
+	TargetMounted   bool      `json:"targetMounted"`
+	Healthy         bool      `json:"healthy"`
+	Status          string    `json:"status"`
+	Message         string    `json:"message"`
+	CheckedAt       time.Time `json:"checkedAt"`
+}
+
 type LimaInstanceJSON struct {
 	Name         string   `json:"name"`
 	Status       string   `json:"status"`
@@ -178,13 +197,13 @@ func (m *Manager) IsConfigDirty() bool {
 	return m.configDirty
 }
 
-// AddForwardedPorts records only the host ports explicitly published by an
-// installed Compose application. The next VM restart will render these as
-// individual Lima forwards instead of exposing the entire guest port range.
-func (m *Manager) AddForwardedPorts(ports ...int) error {
+// AddForwardedPortsChanged records only the host ports explicitly published
+// by an installed Compose application and reports whether the VM forwarding
+// configuration gained a new port.
+func (m *Manager) AddForwardedPortsChanged(ports ...int) (bool, error) {
 	ports = config.NormalizeForwardedPorts(ports)
 	if len(ports) == 0 {
-		return nil
+		return false, nil
 	}
 
 	changed := false
@@ -208,15 +227,38 @@ func (m *Manager) AddForwardedPorts(ports ...int) error {
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("保存端口转发配置失败: %w", err)
+		return false, fmt.Errorf("保存端口转发配置失败: %w", err)
 	}
 	if !changed {
-		return nil
+		return false, nil
 	}
 	m.mu.Lock()
 	m.configDirty = true
 	m.cachedStatus = nil
 	m.mu.Unlock()
+	return true, nil
+}
+
+// AddForwardedPorts preserves the original fire-and-forget API for callers
+// that only need to persist forwarding entries.
+func (m *Manager) AddForwardedPorts(ports ...int) error {
+	_, err := m.AddForwardedPortsChanged(ports...)
+	return err
+}
+
+// RestartForPortForwarding serializes the short VM restart needed to apply a
+// newly discovered Compose port. This prevents an automatic restart from
+// racing with a user-triggered VM lifecycle action.
+func (m *Manager) RestartForPortForwarding(ctx context.Context, projectRoot string) error {
+	if !m.BeginVMAction("restarting-for-port-forwarding") {
+		return fmt.Errorf("已有虚拟机操作正在进行")
+	}
+	defer m.EndVMAction()
+
+	if err := m.Restart(ctx, projectRoot); err != nil {
+		return err
+	}
+	m.SetConfigDirty(false)
 	return nil
 }
 
@@ -678,14 +720,27 @@ func (m *Manager) restoreSpecs(cpus, memory, diskSize int) {
 
 // Start launches the Lima VM
 func (m *Manager) Start(ctx context.Context, projectRoot string) error {
+	return m.StartWithProgress(ctx, projectRoot, nil)
+}
+
+// StartWithProgress launches the Lima VM and reports recoverable lifecycle
+// checkpoints to the caller. The callback must be non-blocking; it is invoked
+// from the operation goroutine and is normally backed by the job manager.
+func (m *Manager) StartWithProgress(ctx context.Context, projectRoot string, report StartProgress) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if report != nil {
+		report("checking", 5, "检查 Lima、数据盘和虚拟机配置")
 	}
 	m.InvalidateCache()
 	err := m.startInternal(ctx, projectRoot)
 	if err != nil {
 		m.SetLastError(err.Error())
 	} else {
+		if report != nil {
+			report("waiting-ssh", 45, "虚拟机已启动，等待 SSH 和系统服务就绪")
+		}
 		if accessErr := m.EnsureRuntimeAccess(ctx); accessErr != nil {
 			err = accessErr
 			m.SetLastError(accessErr.Error())
@@ -693,16 +748,111 @@ func (m *Manager) Start(ctx context.Context, projectRoot string) error {
 			err = waitErr
 			m.SetLastError(waitErr.Error())
 		} else {
+			if report != nil {
+				report("syncing-mounts", 75, "校验数据盘并同步本机目录直通")
+			}
 			m.SetLastError("")
 			if syncErr := m.SyncMounts(ctx); syncErr != nil {
 				log.Printf("[MacNAS VM] mount sync failed after start: %v", syncErr)
 				err = syncErr
 				m.SetLastError(syncErr.Error())
+			} else if report != nil {
+				report("verifying-services", 92, "校验 Docker、文件服务和直通目录")
 			}
 		}
 	}
+	if err == nil && report != nil {
+		report("completed", 100, "虚拟机和 MacNAS 服务已就绪")
+	}
 	m.InvalidateCache()
 	return err
+}
+
+// ProbeLocalMounts checks the full desired-vs-observed contract for every
+// configured passthrough mount. A missing host folder or guest mount is
+// returned as a health result rather than being hidden behind a generic 500.
+func (m *Manager) ProbeLocalMounts(ctx context.Context) ([]LocalMountProbe, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return nil, fmt.Errorf("读取本地挂载配置失败: %w", err)
+	}
+	status, statusErr := m.GetStatusContext(ctx)
+	if statusErr != nil {
+		return nil, statusErr
+	}
+	probes := make([]LocalMountProbe, 0, len(cfgSnapshot.Storage.LocalMounts))
+	for _, mount := range cfgSnapshot.Storage.LocalMounts {
+		checkedAt := time.Now().UTC()
+		probe := LocalMountProbe{
+			ID:              mount.ID,
+			HostPath:        mount.HostPath,
+			GuestTarget:     mount.GuestTarget,
+			ExpectedEnabled: mount.Enabled,
+			CheckedAt:       checkedAt,
+		}
+		if !mount.Enabled {
+			probe.Healthy = true
+			probe.Status = "disabled"
+			probe.Message = "已停用，等待启用后挂载"
+			probes = append(probes, probe)
+			continue
+		}
+
+		if info, statErr := os.Stat(mount.HostPath); statErr == nil && info.IsDir() {
+			if directory, openErr := os.Open(mount.HostPath); openErr == nil {
+				_ = directory.Close()
+				probe.HostReady = true
+			}
+		}
+		if !probe.HostReady {
+			probe.Status = "host-missing"
+			probe.Message = "本机目录不存在或当前进程无权读取"
+			probes = append(probes, probe)
+			continue
+		}
+		if status.Status != "Running" {
+			probe.Status = "vm-stopped"
+			probe.Message = "虚拟机未运行，暂时无法验证 Linux 挂载"
+			probes = append(probes, probe)
+			continue
+		}
+
+		mountID, idErr := config.NormalizeLocalMountID(mount.ID)
+		if idErr != nil {
+			probe.Status = "invalid-config"
+			probe.Message = "直通目录 ID 配置无效"
+			probes = append(probes, probe)
+			continue
+		}
+		sourcePath := "/mnt/macnas-mounts/" + mountID
+		if _, sourceErr := m.Exec(ctx, "mountpoint", "-q", sourcePath); sourceErr == nil {
+			probe.SourceMounted = true
+		}
+		guestTarget, targetErr := config.NormalizeGuestTarget(mount.GuestTarget)
+		if targetErr == nil {
+			targetPath := "/data/" + guestTarget
+			if _, targetMountErr := m.Exec(ctx, "mountpoint", "-q", targetPath); targetMountErr == nil {
+				probe.TargetMounted = true
+			}
+		}
+		probe.Healthy = probe.SourceMounted && probe.TargetMounted
+		switch {
+		case probe.Healthy:
+			probe.Status = "healthy"
+			probe.Message = "本机目录已挂载到 NAS 目标目录"
+		case !probe.SourceMounted:
+			probe.Status = "source-missing"
+			probe.Message = "Lima 未挂载本机目录，请确认配置已启用并重启虚拟机"
+		case !probe.TargetMounted:
+			probe.Status = "target-missing"
+			probe.Message = "本机目录已进入虚拟机，但 /data 目标目录未完成绑定"
+		}
+		probes = append(probes, probe)
+	}
+	return probes, nil
 }
 
 // EnsureRuntimeAccess repairs the fixed Lima management account's
@@ -884,13 +1034,18 @@ func (m *Manager) SyncMounts(ctx context.Context) error {
 				"REAL_DATA=\"$(readlink -f /data || echo /data)\"\n"+
 				"TARGET_DIR=\"$REAL_DATA\"/%s\n"+
 				"mkdir -p \"$TARGET_DIR\"\n"+
+				// A previous Lima configuration may have mounted the host folder
+				// directly at TARGET_DIR. Lima-owned VirtioFS mounts cannot always be
+				// unmounted from inside the guest; layer our bind mount over it so the
+				// configured source still becomes visible instead of treating the
+				// stale mount as success.
 				"if mountpoint -q \"$TARGET_DIR\"; then\n"+
 				"  umount \"$TARGET_DIR\" 2>/dev/null || true\n"+
 				"fi\n"+
-				"if ! mountpoint -q \"$TARGET_DIR\"; then\n"+
-				"  mount --bind \"$SOURCE_PATH\" \"$TARGET_DIR\"\n"+
-				"  echo \"[macnas-mounts] mounted %s -> $TARGET_DIR\"\n"+
-				"fi\n"+
+				"# If an old Lima-managed mount remains, bind over it. On the next run\n"+
+				"# the top bind layer is removed first and then recreated exactly once.\n"+
+				"mount --bind \"$SOURCE_PATH\" \"$TARGET_DIR\"\n"+
+				"echo \"[macnas-mounts] bind mounted %s -> $TARGET_DIR\"\n"+
 				"mount -o remount,%s \"$TARGET_DIR\" 2>/dev/null || true\n",
 			shellQuote(sourcePath), mode, shellQuote(guestTarget), shellQuote(mount.ID), mode,
 		)

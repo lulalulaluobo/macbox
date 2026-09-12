@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,6 +19,8 @@ type backgroundJob struct {
 	ID        string             `json:"id"`
 	Kind      string             `json:"kind"`
 	Status    string             `json:"status"`
+	Stage     string             `json:"stage,omitempty"`
+	Progress  int                `json:"progress,omitempty"`
 	Message   string             `json:"message,omitempty"`
 	Error     string             `json:"error,omitempty"`
 	CreatedAt time.Time          `json:"createdAt"`
@@ -44,6 +47,7 @@ func newJobManager(storagePath string) *jobManager {
 				}
 				if job.Status == "running" {
 					job.Status = "failed"
+					job.Stage = "failed"
 					job.Error = "服务重启，任务执行状态已中断"
 					job.UpdatedAt = now
 				}
@@ -95,8 +99,12 @@ func newJobID() string {
 }
 
 func (m *jobManager) add(kind, message string, cancel context.CancelFunc) *backgroundJob {
+	return m.addWithStage(kind, "starting", 0, message, cancel)
+}
+
+func (m *jobManager) addWithStage(kind, stage string, progress int, message string, cancel context.CancelFunc) *backgroundJob {
 	now := time.Now().UTC()
-	job := &backgroundJob{ID: newJobID(), Kind: kind, Status: "running", Message: message, CreatedAt: now, UpdatedAt: now, cancel: cancel}
+	job := &backgroundJob{ID: newJobID(), Kind: kind, Status: "running", Stage: stage, Progress: clampProgress(progress), Message: message, CreatedAt: now, UpdatedAt: now, cancel: cancel}
 	m.mu.Lock()
 	if len(m.jobs) >= 100 {
 		var oldest *backgroundJob
@@ -115,6 +123,53 @@ func (m *jobManager) add(kind, message string, cancel context.CancelFunc) *backg
 	return job
 }
 
+func clampProgress(progress int) int {
+	if progress < 0 {
+		return 0
+	}
+	if progress > 100 {
+		return 100
+	}
+	return progress
+}
+
+func publicJobError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.TrimSpace(err.Error())
+	// Lima and shell errors frequently contain multi-line command output and
+	// host-specific paths. Keep that detail in server logs/diagnostics instead
+	// of putting it into a compact browser progress card.
+	if len(message) > 600 || strings.Contains(message, "time=\"") || strings.Contains(message, "/Users/") || strings.Contains(message, "/var/") {
+		return "后台操作失败，请打开诊断中心查看具体检查结果"
+	}
+	return message
+}
+
+// update records a coarse-grained stage for long-running operations. It is
+// intentionally persisted so a browser refresh still explains what the
+// server was doing before the latest poll.
+func (m *jobManager) update(id, stage string, progress int, message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job := m.jobs[id]
+	if job == nil || job.Status != "running" {
+		return
+	}
+	if stage != "" {
+		job.Stage = stage
+	}
+	if progress >= 0 {
+		job.Progress = clampProgress(progress)
+	}
+	if message != "" {
+		job.Message = message
+	}
+	job.UpdatedAt = time.Now().UTC()
+	m.saveLocked()
+}
+
 func (m *jobManager) finish(id string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -130,11 +185,14 @@ func (m *jobManager) finish(id string, err error) {
 	}
 	if err != nil {
 		job.Status = "failed"
-		job.Error = err.Error()
+		job.Stage = "failed"
+		job.Error = publicJobError(err)
 		m.saveLocked()
 		return
 	}
 	job.Status = "succeeded"
+	job.Stage = "completed"
+	job.Progress = 100
 	m.saveLocked()
 }
 
@@ -146,6 +204,7 @@ func (m *jobManager) cancelJob(id string) bool {
 		return false
 	}
 	job.Status = "cancelled"
+	job.Stage = "cancelled"
 	job.UpdatedAt = time.Now().UTC()
 	if job.cancel != nil {
 		job.cancel()

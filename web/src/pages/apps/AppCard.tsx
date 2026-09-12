@@ -75,6 +75,9 @@ export const AppCard: React.FC<AppCardProps> = ({
       case 'box':
       case 'docker':
         return <Box className="w-6 h-6 text-sky-400" />;
+      case 'layers':
+      case 'compose':
+        return <Layers className="w-6 h-6 text-violet-400" />;
       default:
         return <Box className="w-6 h-6 text-sky-400" />;
     }

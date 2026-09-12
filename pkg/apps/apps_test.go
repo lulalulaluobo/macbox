@@ -5,7 +5,54 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestBuiltinCatalogContainsComposeAndDownloadApps(t *testing.T) {
+	want := map[string]struct {
+		category string
+		port     int
+	}{
+		"dockge":       {category: "系统运维", port: 5001},
+		"xunlei":       {category: "下载工具", port: 2345},
+		"baidunetdisk": {category: "下载工具", port: 6080},
+	}
+
+	seen := make(map[string]bool)
+	for _, item := range GetBuiltinCatalog() {
+		if _, duplicate := seen[item.Metadata.ID]; duplicate {
+			t.Fatalf("builtin catalog contains duplicate app ID %q", item.Metadata.ID)
+		}
+		seen[item.Metadata.ID] = true
+		if expected, ok := want[item.Metadata.ID]; ok {
+			if item.Metadata.Category != expected.category || item.Metadata.Port != expected.port {
+				t.Fatalf("app %q metadata = category %q / port %d, want %q / %d", item.Metadata.ID, item.Metadata.Category, item.Metadata.Port, expected.category, expected.port)
+			}
+			if item.Metadata.Source != "community" {
+				t.Fatalf("app %q source = %q, want community", item.Metadata.ID, item.Metadata.Source)
+			}
+			if item.YAML == "" {
+				t.Fatalf("app %q has an empty compose template", item.Metadata.ID)
+			}
+			var document struct {
+				Services map[string]any `yaml:"services"`
+			}
+			if err := yaml.Unmarshal([]byte(item.YAML), &document); err != nil {
+				t.Fatalf("app %q compose template is invalid: %v", item.Metadata.ID, err)
+			}
+			if len(document.Services) == 0 {
+				t.Fatalf("app %q compose template has no services", item.Metadata.ID)
+			}
+		}
+	}
+
+	for id := range want {
+		if !seen[id] {
+			t.Fatalf("builtin catalog is missing app %q", id)
+		}
+	}
+}
 
 func TestPublishedHostPorts(t *testing.T) {
 	content := `services:

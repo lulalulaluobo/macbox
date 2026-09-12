@@ -22,27 +22,28 @@ import (
 )
 
 type DiskInfo struct {
-	DeviceIdentifier string  `json:"identifier"`      // e.g. "disk4"
-	DeviceNode       string  `json:"deviceNode"`      // e.g. "/dev/disk4"
-	Name             string  `json:"name"`            // e.g. "Lexar SSD THOR PRO 2TB"
-	VolumeName       string  `json:"volumeName"`      // e.g. "MacNAS Data"
-	TotalSize        uint64  `json:"totalSize"`       // bytes
-	TotalSizeString  string  `json:"totalSizeString"` // e.g. "2.0 TB"
-	UsedSpace        uint64  `json:"usedSpace"`
-	UsedSpaceString  string  `json:"usedSpaceString"`
-	FreeSpace        uint64  `json:"freeSpace"`
-	FreeSpaceString  string  `json:"freeSpaceString"`
-	UsedPercent      float64 `json:"usedPercent"`
-	Mounted          bool    `json:"mounted"`
-	MountPoint       string  `json:"mountPoint"`
-	FileSystem       string  `json:"fileSystem"`
-	IsExternal       bool    `json:"isExternal"`
-	IsSSD            bool    `json:"isSSD"`
-	IsWholeDisk      bool    `json:"isWholeDisk"`
-	IsVirtual        bool    `json:"isVirtual"`
-	IsSelected       bool    `json:"isSelected"`
-	IsSecondary      bool    `json:"isSecondary"`
-	SecondaryTarget  string  `json:"secondaryTarget,omitempty"`
+	DeviceIdentifier     string  `json:"identifier"`      // e.g. "disk4"
+	DeviceNode           string  `json:"deviceNode"`      // e.g. "/dev/disk4"
+	Name                 string  `json:"name"`            // e.g. "Lexar SSD THOR PRO 2TB"
+	VolumeName           string  `json:"volumeName"`      // e.g. "MacNAS Data"
+	TotalSize            uint64  `json:"totalSize"`       // bytes
+	TotalSizeString      string  `json:"totalSizeString"` // e.g. "2.0 TB"
+	UsedSpace            uint64  `json:"usedSpace"`
+	UsedSpaceString      string  `json:"usedSpaceString"`
+	FreeSpace            uint64  `json:"freeSpace"`
+	FreeSpaceString      string  `json:"freeSpaceString"`
+	UsedPercent          float64 `json:"usedPercent"`
+	Mounted              bool    `json:"mounted"`
+	MountPoint           string  `json:"mountPoint"`
+	RecommendedTargetDir string  `json:"recommendedTargetDir,omitempty"`
+	FileSystem           string  `json:"fileSystem"`
+	IsExternal           bool    `json:"isExternal"`
+	IsSSD                bool    `json:"isSSD"`
+	IsWholeDisk          bool    `json:"isWholeDisk"`
+	IsVirtual            bool    `json:"isVirtual"`
+	IsSelected           bool    `json:"isSelected"`
+	IsSecondary          bool    `json:"isSecondary"`
+	SecondaryTarget      string  `json:"secondaryTarget,omitempty"`
 }
 
 type ManagedDisk struct {
@@ -200,7 +201,7 @@ func pathWithin(base, candidate string) bool {
 // create/chmod an arbitrary path such as /etc or /Library. Existing symlink
 // components are rejected conservatively because MkdirAll/Chmod would follow
 // them and could otherwise escape the selected volume between checks.
-func validateStorageTargetDir(targetDir, mountPoint, home string) error {
+func validateStorageTargetDir(targetDir, mountPoint, home string, allowHome bool) error {
 	targetDir = filepath.Clean(targetDir)
 	if targetDir == "." || targetDir == "/" || !filepath.IsAbs(targetDir) {
 		return fmt.Errorf("第二存储卷目录无效")
@@ -212,11 +213,12 @@ func validateStorageTargetDir(targetDir, mountPoint, home string) error {
 	allowedBases := make([]string, 0, 2)
 	if mountPoint != "" && mountPoint != "/" {
 		allowedBases = append(allowedBases, mountPoint)
-		if mountPoint == "/System/Volumes/Data" {
-			allowedBases = append(allowedBases, home)
-		}
 	} else {
-		allowedBases = append(allowedBases, home, "/Volumes")
+		allowHome = true
+		allowedBases = append(allowedBases, "/Volumes")
+	}
+	if allowHome && strings.TrimSpace(home) != "" {
+		allowedBases = append(allowedBases, home)
 	}
 
 	type resolvedBase struct {
@@ -458,6 +460,7 @@ func listDisksAPFS(ctx context.Context, selectedDiskIdentifier, secondary string
 			disk.IsSecondary = true
 			disk.SecondaryTarget = "/data/volume2-ssd"
 		}
+		disk.RecommendedTargetDir = recommendedSecondaryTargetDir(disk.MountPoint, disk.IsExternal)
 
 		results = append(results, disk)
 	}
@@ -557,6 +560,28 @@ func isSystemHelperMountPoint(mountPoint string) bool {
 	return false
 }
 
+// recommendedSecondaryTargetDir returns the host-side directory used to
+// store the secondary volume image. The guest mount point is fixed at
+// /data/volume2-ssd; users should never need to enter that path here.
+func recommendedSecondaryTargetDir(mountPoint string, isExternal bool) string {
+	mountPoint = filepath.Clean(strings.TrimSpace(mountPoint))
+	if mountPoint == "." || mountPoint == "" || mountPoint == "/" || isSystemHelperMountPoint(mountPoint) {
+		return ""
+	}
+
+	// Internal macOS data volumes can be reported as either
+	// /System/Volumes/Data or /Volumes/Data. /Volumes/Data is root-owned on
+	// many systems, so always place the pool below the current user's home for
+	// internal disks. This also avoids asking the user to grant unnecessary
+	// access to the volume root.
+	if !isExternal || mountPoint == "/System/Volumes/Data" {
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			return filepath.Join(home, "MacNAS-SSD-Pool")
+		}
+	}
+	return filepath.Join(mountPoint, "MacNAS-SSD-Pool")
+}
+
 func listDisksFallback(ctx context.Context, selectedDiskIdentifier, secondary string) ([]DiskInfo, error) {
 	cmd := exec.CommandContext(ctx, "diskutil", "list")
 	output, err := cmd.Output()
@@ -594,6 +619,7 @@ func listDisksFallback(ctx context.Context, selectedDiskIdentifier, secondary st
 			info.IsSecondary = true
 			info.SecondaryTarget = "/data/volume2-ssd"
 		}
+		info.RecommendedTargetDir = recommendedSecondaryTargetDir(info.MountPoint, info.IsExternal)
 		results = append(results, *info)
 	}
 
@@ -1109,10 +1135,25 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 	if providedTargetDir != "" && !filepath.IsAbs(providedTargetDir) {
 		return nil, fmt.Errorf("第二存储卷目录必须使用绝对路径")
 	}
-	if targetDir == "" {
-		if mountPoint != "" {
-			targetDir = filepath.Join(mountPoint, "MacNAS-SSD-Pool")
-		} else {
+	// A legacy client used to prefill <mountPoint>/MacNAS-SSD-Pool. That is
+	// not writable for an internal macOS volume reported as /Volumes/Data;
+	// transparently migrate that exact default to the user's home directory.
+	// Explicit custom paths remain subject to the normal volume-boundary checks.
+	diskIsExternal := true
+	if diskID != "" {
+		if disks, listErr := ListDisksContext(ctx, diskID); listErr == nil {
+			for _, disk := range disks {
+				if disk.DeviceIdentifier == diskID || disk.DeviceNode == "/dev/"+diskID {
+					diskIsExternal = disk.IsExternal
+					break
+				}
+			}
+		}
+	}
+	legacyDefault := mountPoint != "" && filepath.Clean(providedTargetDir) == filepath.Join(filepath.Clean(mountPoint), "MacNAS-SSD-Pool")
+	if targetDir == "" || (!diskIsExternal && legacyDefault) {
+		targetDir = recommendedSecondaryTargetDir(mountPoint, diskIsExternal)
+		if targetDir == "" {
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return nil, err
@@ -1128,7 +1169,8 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 	if strings.IndexFunc(targetDir, unicode.IsControl) >= 0 || len(targetDir) > 4096 {
 		return nil, fmt.Errorf("第二存储卷目录无效")
 	}
-	if err := validateStorageTargetDir(targetDir, mountPoint, home); err != nil {
+	allowHomeTarget := !diskIsExternal || mountPoint == "/System/Volumes/Data"
+	if err := validateStorageTargetDir(targetDir, mountPoint, home, allowHomeTarget); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(targetDir, 0750); err != nil {

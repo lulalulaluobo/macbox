@@ -52,6 +52,11 @@ func TestLocalMounts(t *testing.T) {
 	// AddOrUpdateLocalMount and the toggle/delete helpers persist config. Use a
 	// disposable home so this test cannot modify the user's NAS configuration.
 	t.Setenv("HOME", t.TempDir())
+	for _, folder := range []string{"Downloads", "Movies", "Pictures"} {
+		if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), folder), 0755); err != nil {
+			t.Fatalf("create candidate folder: %v", err)
+		}
+	}
 
 	defaults := GetDefaultMacMounts()
 	t.Logf("Found %d default Mac user mounts", len(defaults))
@@ -61,6 +66,17 @@ func TestLocalMounts(t *testing.T) {
 
 	cfg := &config.Config{
 		Storage: config.StorageConfig{},
+	}
+	candidates := ScanLocalMountCandidates(cfg)
+	var downloadsCandidate *LocalMountCandidate
+	for i := range candidates {
+		if candidates[i].Name == "Downloads" {
+			downloadsCandidate = &candidates[i]
+			break
+		}
+	}
+	if downloadsCandidate == nil || !downloadsCandidate.Available {
+		t.Fatalf("expected Downloads to be discovered as an available candidate: %#v", downloadsCandidate)
 	}
 
 	configured, recommended := ListLocalMounts(cfg)
@@ -125,16 +141,22 @@ func TestValidateStorageTargetDir(t *testing.T) {
 	home := t.TempDir()
 	mountPoint := t.TempDir()
 
-	if err := validateStorageTargetDir(filepath.Join(mountPoint, "MacNAS-Pool"), mountPoint, home); err != nil {
+	if err := validateStorageTargetDir(filepath.Join(mountPoint, "MacNAS-Pool"), mountPoint, home, false); err != nil {
 		t.Fatalf("expected target inside selected volume to be accepted: %v", err)
 	}
-	if err := validateStorageTargetDir(filepath.Join(home, "MacNAS-Pool"), "", home); err != nil {
+	if err := validateStorageTargetDir(filepath.Join(home, "MacNAS-Pool"), "", home, false); err != nil {
 		t.Fatalf("expected target inside home to be accepted: %v", err)
 	}
-	if err := validateStorageTargetDir(filepath.Join(mountPoint, "..", "outside"), mountPoint, home); err == nil {
+	if err := validateStorageTargetDir(filepath.Join(home, "MacNAS-Pool"), "/Volumes/Data", home, true); err != nil {
+		t.Fatalf("expected internal Data volume to allow the user's home directory: %v", err)
+	}
+	if err := validateStorageTargetDir(filepath.Join(home, "MacNAS-Pool"), "/Volumes/FastSSD", home, false); err == nil {
+		t.Fatal("external volume unexpectedly accepted a target outside the selected volume")
+	}
+	if err := validateStorageTargetDir(filepath.Join(mountPoint, "..", "outside"), mountPoint, home, false); err == nil {
 		t.Fatal("target outside selected volume was accepted")
 	}
-	if err := validateStorageTargetDir("/etc/macnas", mountPoint, home); err == nil {
+	if err := validateStorageTargetDir("/etc/macnas", mountPoint, home, false); err == nil {
 		t.Fatal("system directory was accepted as storage target")
 	}
 
@@ -143,7 +165,7 @@ func TestValidateStorageTargetDir(t *testing.T) {
 	if err := os.Symlink(outside, link); err != nil {
 		t.Fatalf("create escape symlink: %v", err)
 	}
-	if err := validateStorageTargetDir(link, mountPoint, home); err == nil {
+	if err := validateStorageTargetDir(link, mountPoint, home, false); err == nil {
 		t.Fatal("symlink target was accepted")
 	}
 }
@@ -174,6 +196,24 @@ func TestSystemHelperMountPoint(t *testing.T) {
 	}
 	if isSystemHelperMountPoint("/Volumes/Data") || isSystemHelperMountPoint("/System/Volumes/Data") {
 		t.Fatal("writable data volumes must remain valid storage targets")
+	}
+}
+
+func TestRecommendedSecondaryTargetDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if got := recommendedSecondaryTargetDir("/System/Volumes/iSCPreboot", false); got != "" {
+		t.Fatalf("helper volume received recommendation %q", got)
+	}
+	if got, want := recommendedSecondaryTargetDir("/System/Volumes/Data", false), filepath.Join(home, "MacNAS-SSD-Pool"); got != want {
+		t.Fatalf("internal data recommendation = %q, want %q", got, want)
+	}
+	if got, want := recommendedSecondaryTargetDir("/Volumes/Data", false), filepath.Join(home, "MacNAS-SSD-Pool"); got != want {
+		t.Fatalf("internal /Volumes/Data recommendation = %q, want %q", got, want)
+	}
+	if got, want := recommendedSecondaryTargetDir("/Volumes/FastSSD", true), "/Volumes/FastSSD/MacNAS-SSD-Pool"; got != want {
+		t.Fatalf("external volume recommendation = %q, want %q", got, want)
 	}
 }
 
