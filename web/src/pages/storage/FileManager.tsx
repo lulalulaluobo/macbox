@@ -1,23 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Folder, Star, Upload, AlertTriangle, X } from 'lucide-react';
+import { ArrowLeft, Star, Upload, AlertTriangle, X } from 'lucide-react';
 import { CloudMount, DiskInfo, FileItem, LocalMount } from '../../types';
 import { api } from '../../api';
 import { TextPreviewState, getFileType } from './filemanager/types';
 import { FileToolbar } from './filemanager/FileToolbar';
-import { FileGridView } from './filemanager/FileGridView';
-import { FileListView } from './filemanager/FileListView';
-import { TrashView } from './filemanager/TrashView';
+import { FileContentView } from './filemanager/FileContentView';
 import { BatchActionBar } from './filemanager/BatchActionBar';
-import { FilePreviewModal } from './filemanager/FilePreviewModal';
-import { FileModals } from './filemanager/FileModals';
-import { FileActionSheet } from './filemanager/FileActionSheet';
-import { DriveDetailModal } from './filemanager/DriveDetailModal';
 import { CloudDriveView } from './filemanager/CloudDriveView';
-import { CloudMountModal } from './filemanager/CloudMountModal';
+import { FileManagerModals } from './filemanager/FileManagerModals';
 import { FileDriveSwitcher } from './filemanager/FileDriveSwitcher';
 import { useStorageDriveOptions } from './filemanager/useStorageDriveOptions';
-import { ArchiveModal } from './filemanager/ArchiveModal';
-import { ConflictPolicy, TransferDestinationModal } from './filemanager/TransferDestinationModal';
+import type { ConflictPolicy } from './filemanager/TransferDestinationModal';
 import { useFileSelection } from './filemanager/useFileSelection';
 import { useFavorites } from './filemanager/useFavorites';
 import { useFileNavigation } from './filemanager/useFileNavigation';
@@ -583,111 +576,66 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           onRefresh={() => loadFiles(currentPath)}
         />}
 
-        {/* File View Container */}
-        <div ref={fileListRef} onPointerDown={handleFileListPointerDown} onClick={(event) => { if (event.target === event.currentTarget) { if (marqueeJustFinishedRef.current) { marqueeJustFinishedRef.current = false; return; } setSelectedPaths(new Set()); } }} className={`relative min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain rounded-[22px] border border-slate-200/80 bg-white p-3 [-webkit-overflow-scrolling:touch] [contain:strict] dark:border-slate-800/80 dark:bg-slate-900/60 sm:p-4 ${marquee ? 'select-none' : ''}`}>
-          {marquee && <div className="pointer-events-none fixed z-[70] border border-sky-500 bg-sky-400/20" style={{ left: Math.min(marquee.startX, marquee.currentX), top: Math.min(marquee.startY, marquee.currentY), width: Math.abs(marquee.currentX - marquee.startX), height: Math.abs(marquee.currentY - marquee.startY) }} />}
-          {viewingTrash ? (
-            <TrashView
-              trashItems={trashItems}
-              trashLoading={trashLoading}
-              trashSelectedIds={trashSelectedIds}
-              onRefreshTrash={loadTrash}
-              onOpenEmptyTrash={() => setShowEmptyTrashModal(true)}
-              onToggleSelectAll={() => {
-                if (trashSelectedIds.size === trashItems.length) {
-                  setTrashSelectedIds(new Set());
-                } else {
-                  setTrashSelectedIds(new Set(trashItems.map((x) => x.id)));
-                }
-              }}
-              onToggleSelect={(id) => {
-                const next = new Set(trashSelectedIds);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                setTrashSelectedIds(next);
-              }}
-              onPromptDeleteTrash={handlePromptDeleteTrash}
-              onRestoreTrash={handleRestoreTrash}
-              onClearSelection={() => setTrashSelectedIds(new Set())}
-            />
-          ) : viewingFavorites ? (
-            favoritesLoading ? (
-              <div className="flex flex-col items-center justify-center space-y-3 py-24 text-slate-400"><div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" /><p className="text-xs">正在读取收藏…</p></div>
-            ) : favoriteItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center space-y-3 py-24 text-center text-slate-400"><Star className="h-12 w-12" /><p className="text-sm font-semibold text-slate-700 dark:text-slate-300">还没有收藏文件夹</p><p className="text-xs">只能在文件夹的三点菜单中添加收藏</p></div>
-            ) : viewMode === 'grid' ? (
-              <FileGridView files={favoriteItems} selectionMode={false} selectedPaths={selectedPaths} onItemClick={handleItemClick} onToggleSelect={toggleSelectItem} onOpenActions={(item, event) => { event.stopPropagation(); setActionItem(item); }} onLongPress={handleLongPress} onDragStart={handleItemDragStart} onDragOver={handleItemDragOver} onDrop={handleItemDrop} dropTargetPath={dropTargetPath} />
-            ) : (
-              <FileListView files={favoriteItems} selectionMode={false} selectedPaths={selectedPaths} onItemClick={handleItemClick} onToggleSelect={toggleSelectItem} onOpenActions={(item, event) => { event.stopPropagation(); setActionItem(item); }} onLongPress={handleLongPress} onDragStart={handleItemDragStart} onDragOver={handleItemDragOver} onDrop={handleItemDrop} dropTargetPath={dropTargetPath} />
-            )
-          ) : loading ? (
-            <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3">
-              <div className="w-8 h-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
-              <p className="text-xs">加载文件列表中...</p>
-            </div>
-          ) : filteredFiles.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-4">
-              <div className="p-4 rounded-2xl bg-slate-100 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500">
-                <Folder className="w-12 h-12 stroke-[1.5]" />
-              </div>
-              <div className="text-center">
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">当前目录为空</p>
-                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">可点击上方上传或新建文件夹</p>
-              </div>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold shadow-md shadow-sky-500/20 transition"
-              >
-                立即上传文件
-              </button>
-            </div>
-          ) : viewMode === 'grid' ? (
-            <FileGridView
-              files={filteredFiles}
-              selectionMode={selectionMode}
-              selectedPaths={selectedPaths}
-              onItemClick={handleItemClick}
-              onToggleSelect={toggleSelectItem}
-              onOpenActions={(item, event) => {
-                event.stopPropagation();
-                setActionItem(item);
-              }}
-              onLongPress={handleLongPress}
-              onDragStart={handleItemDragStart}
-              onDragOver={handleItemDragOver}
-              onDrop={handleItemDrop}
-              dropTargetPath={dropTargetPath}
-            />
-          ) : (
-            <FileListView
-              files={filteredFiles}
-              selectionMode={selectionMode}
-              selectedPaths={selectedPaths}
-              onItemClick={handleItemClick}
-              onToggleSelect={toggleSelectItem}
-              onOpenActions={(item, event) => {
-                event.stopPropagation();
-                setActionItem(item);
-              }}
-              onLongPress={handleLongPress}
-              onDragStart={handleItemDragStart}
-              onDragOver={handleItemDragOver}
-              onDrop={handleItemDrop}
-              dropTargetPath={dropTargetPath}
-            />
-          )}
-          {!viewingTrash && !viewingFavorites && hasMoreFiles && !loading && (
-            <button
-              type="button"
-              disabled={loadingMore}
-              onClick={() => loadFiles(currentPath, true)}
-              className="mx-auto mt-3 flex min-h-10 items-center justify-center rounded-xl bg-slate-100 px-5 text-xs font-semibold text-slate-600 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-300"
-            >
-              {loadingMore ? '正在加载…' : '加载更多'}
-            </button>
-          )}
-        </div>
-
+        <FileContentView
+          fileListRef={fileListRef}
+          onPointerDown={handleFileListPointerDown}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              if (marqueeJustFinishedRef.current) {
+                marqueeJustFinishedRef.current = false;
+                return;
+              }
+              setSelectedPaths(new Set());
+            }
+          }}
+          marquee={marquee}
+          viewingTrash={viewingTrash}
+          viewingFavorites={viewingFavorites}
+          favoritesLoading={favoritesLoading}
+          favoriteItems={favoriteItems}
+          filteredFiles={filteredFiles}
+          loading={loading}
+          loadingMore={loadingMore}
+          hasMoreFiles={hasMoreFiles}
+          viewMode={viewMode}
+          selectionMode={selectionMode}
+          selectedPaths={selectedPaths}
+          dropTargetPath={dropTargetPath}
+          trashItems={trashItems}
+          trashLoading={trashLoading}
+          trashSelectedIds={trashSelectedIds}
+          currentPath={currentPath}
+          onItemClick={handleItemClick}
+          onToggleSelect={toggleSelectItem}
+          onOpenActions={(item, event) => {
+            event.stopPropagation();
+            setActionItem(item);
+          }}
+          onLongPress={handleLongPress}
+          onDragStart={handleItemDragStart}
+          onDragOver={handleItemDragOver}
+          onDrop={handleItemDrop}
+          onLoadMore={() => loadFiles(currentPath, true)}
+          onUploadEmpty={() => fileInputRef.current?.click()}
+          onRefreshTrash={loadTrash}
+          onOpenEmptyTrash={() => setShowEmptyTrashModal(true)}
+          onToggleTrashSelectAll={() => {
+            if (trashSelectedIds.size === trashItems.length) {
+              setTrashSelectedIds(new Set());
+            } else {
+              setTrashSelectedIds(new Set(trashItems.map((item) => item.id)));
+            }
+          }}
+          onToggleTrashSelect={(id) => {
+            const next = new Set(trashSelectedIds);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            setTrashSelectedIds(next);
+          }}
+          onPromptDeleteTrash={handlePromptDeleteTrash}
+          onRestoreTrash={handleRestoreTrash}
+          onClearTrashSelection={() => setTrashSelectedIds(new Set())}
+        />
         {/* Floating Multi-Selection Action Bar */}
         <BatchActionBar
           visible={selectionMode && !viewingTrash}
@@ -703,137 +651,138 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         </>}
       </div>
 
-      <DriveDetailModal
-        drive={detailDrive}
-        onClose={() => setDetailDriveId(null)}
-        onSaveName={handleSaveDriveName}
+      <FileManagerModals
+        driveDetail={{
+          drive: detailDrive,
+          onClose: () => setDetailDriveId(null),
+          onSaveName: handleSaveDriveName,
+        }}
+        actionSheet={{
+          item: actionItem,
+          isFavorite: !!actionItem && favorites.includes(actionItem.path),
+          allowFavorite: Boolean(actionItem?.isDir),
+          onClose: () => setActionItem(null),
+          onToggleFavorite: () => {
+            if (actionItem) toggleFavorite(actionItem.path);
+            setActionItem(null);
+          },
+          onCopy: () => {
+            if (actionItem) openTransfer('copy', [actionItem.path]);
+            setActionItem(null);
+          },
+          onCopyPath: () => {
+            if (actionItem) handleCopyPath(actionItem.path);
+            setActionItem(null);
+          },
+          onCut: () => {
+            if (actionItem) openTransfer('move', [actionItem.path]);
+            setActionItem(null);
+          },
+          onRename: () => {
+            if (actionItem) handleOpenRename(actionItem);
+            setActionItem(null);
+          },
+          onDelete: () => {
+            if (actionItem) handleOpenDelete(actionItem);
+            setActionItem(null);
+          },
+          onArchive: () => {
+            setArchiveItem(actionItem);
+            setActionItem(null);
+          },
+        }}
+        preview={{
+          videoPreview,
+          videoRef,
+          videoMuted,
+          videoVolume,
+          onCloseVideo: () => setVideoPreview(null),
+          onToggleMute: () => {
+            if (videoRef.current) {
+              const next = !videoMuted;
+              videoRef.current.muted = next;
+              setVideoMuted(next);
+              if (!next) videoRef.current.volume = 1.0;
+            }
+          },
+          onVolumeChange: (event) => {
+            const element = event.target as HTMLVideoElement;
+            setVideoVolume(element.volume);
+            setVideoMuted(element.muted);
+          },
+          imagePreview,
+          imageZoom,
+          imageRotate,
+          onCloseImage: () => setImagePreview(null),
+          onZoomIn: () => setImageZoom((previous) => Math.min(3, previous + 0.25)),
+          onZoomOut: () => setImageZoom((previous) => Math.max(0.5, previous - 0.25)),
+          onRotate: () => setImageRotate((previous) => (previous + 90) % 360),
+          audioPreview,
+          onCloseAudio: () => setAudioPreview(null),
+          textPreview,
+          savingText,
+          onCloseText: () => setTextPreview(null),
+          onTextContentChange: (content) => {
+            if (textPreview) setTextPreview({ ...textPreview, content });
+          },
+          onSaveText: handleSaveText,
+        }}
+        operations={{
+          showMkdirModal,
+          newFolderName,
+          onCloseMkdir: () => setShowMkdirModal(false),
+          onNewFolderNameChange: setNewFolderName,
+          onCreateFolder: handleCreateFolder,
+          showRenameModal,
+          renameItem,
+          renameNewName,
+          onCloseRename: () => setShowRenameModal(false),
+          onRenameNewNameChange: setRenameNewName,
+          onRenameConfirm: handleRenameConfirm,
+          showDeleteModal,
+          deleteTarget,
+          selectedCount: selectedPaths.size,
+          deleting,
+          onCloseDelete: () => setShowDeleteModal(false),
+          onPermanentDelete: handlePermanentDeleteConfirm,
+          onMoveToTrash: handleMoveToTrashConfirm,
+          showTrashDeleteModal,
+          trashDeleteTarget,
+          trashSelectedCount: trashSelectedIds.size,
+          deletingTrash,
+          onCloseTrashDelete: () => {
+            setShowTrashDeleteModal(false);
+            setTrashDeleteTarget(null);
+          },
+          onConfirmDeleteTrash: handleConfirmDeleteTrash,
+          showEmptyTrashModal,
+          trashItemsCount: trashItems.length,
+          onCloseEmptyTrash: () => setShowEmptyTrashModal(false),
+          onConfirmEmptyTrash: handleConfirmEmptyTrash,
+        }}
+        cloudMount={showCloudMountModal ? {
+          onClose: () => setShowCloudMountModal(false),
+          onMounted: (mount) => {
+            setCloudMounts((current) => [...current.filter((item) => item.id !== mount.id), mount]);
+            setShowCloudMountModal(false);
+            setActiveCloudMountId(mount.id);
+            setAlertMsg({ type: 'success', text: '夸克云盘已挂载' });
+          },
+        } : undefined}
+        archive={{
+          item: archiveItem,
+          currentPath,
+          onClose: () => setArchiveItem(null),
+          onConfirm: handleArchiveConfirm,
+        }}
+        transfer={transferRequest ? {
+          operation: transferRequest.operation,
+          sourcePaths: transferRequest.paths,
+          initialPath: transferRequest.initialPath,
+          onClose: () => setTransferRequest(null),
+          onConfirm: handleTransferConfirm,
+        } : undefined}
       />
-
-      <FileActionSheet
-        item={actionItem}
-        isFavorite={!!actionItem && favorites.includes(actionItem.path)}
-        allowFavorite={Boolean(actionItem?.isDir)}
-        onClose={() => setActionItem(null)}
-        onToggleFavorite={() => {
-          if (actionItem) toggleFavorite(actionItem.path);
-          setActionItem(null);
-        }}
-        onCopy={() => {
-          if (actionItem) openTransfer('copy', [actionItem.path]);
-          setActionItem(null);
-        }}
-        onCopyPath={() => {
-          if (actionItem) handleCopyPath(actionItem.path);
-          setActionItem(null);
-        }}
-        onCut={() => {
-          if (actionItem) openTransfer('move', [actionItem.path]);
-          setActionItem(null);
-        }}
-        onRename={() => {
-          if (actionItem) handleOpenRename(actionItem);
-          setActionItem(null);
-        }}
-        onDelete={() => {
-          if (actionItem) handleOpenDelete(actionItem);
-          setActionItem(null);
-        }}
-        onArchive={() => {
-          setArchiveItem(actionItem);
-          setActionItem(null);
-        }}
-      />
-
-      {/* Preview Modals */}
-      <FilePreviewModal
-        videoPreview={videoPreview}
-        videoRef={videoRef}
-        videoMuted={videoMuted}
-        videoVolume={videoVolume}
-        onCloseVideo={() => setVideoPreview(null)}
-        onToggleMute={() => {
-          if (videoRef.current) {
-            const next = !videoMuted;
-            videoRef.current.muted = next;
-            setVideoMuted(next);
-            if (!next) videoRef.current.volume = 1.0;
-          }
-        }}
-        onVolumeChange={(e) => {
-          const el = e.target as HTMLVideoElement;
-          setVideoVolume(el.volume);
-          setVideoMuted(el.muted);
-        }}
-        imagePreview={imagePreview}
-        imageZoom={imageZoom}
-        imageRotate={imageRotate}
-        onCloseImage={() => setImagePreview(null)}
-        onZoomIn={() => setImageZoom((prev) => Math.min(3, prev + 0.25))}
-        onZoomOut={() => setImageZoom((prev) => Math.max(0.5, prev - 0.25))}
-        onRotate={() => setImageRotate((prev) => (prev + 90) % 360)}
-        audioPreview={audioPreview}
-        onCloseAudio={() => setAudioPreview(null)}
-        textPreview={textPreview}
-        savingText={savingText}
-        onCloseText={() => setTextPreview(null)}
-        onTextContentChange={(content) => {
-          if (textPreview) {
-            setTextPreview({ ...textPreview, content });
-          }
-        }}
-        onSaveText={handleSaveText}
-      />
-
-      {/* Operation Modals */}
-      <FileModals
-        showMkdirModal={showMkdirModal}
-        newFolderName={newFolderName}
-        onCloseMkdir={() => setShowMkdirModal(false)}
-        onNewFolderNameChange={setNewFolderName}
-        onCreateFolder={handleCreateFolder}
-        showRenameModal={showRenameModal}
-        renameItem={renameItem}
-        renameNewName={renameNewName}
-        onCloseRename={() => setShowRenameModal(false)}
-        onRenameNewNameChange={setRenameNewName}
-        onRenameConfirm={handleRenameConfirm}
-        showDeleteModal={showDeleteModal}
-        deleteTarget={deleteTarget}
-        selectedCount={selectedPaths.size}
-        deleting={deleting}
-        onCloseDelete={() => setShowDeleteModal(false)}
-        onPermanentDelete={handlePermanentDeleteConfirm}
-        onMoveToTrash={handleMoveToTrashConfirm}
-        showTrashDeleteModal={showTrashDeleteModal}
-        trashDeleteTarget={trashDeleteTarget}
-        trashSelectedCount={trashSelectedIds.size}
-        deletingTrash={deletingTrash}
-        onCloseTrashDelete={() => {
-          setShowTrashDeleteModal(false);
-          setTrashDeleteTarget(null);
-        }}
-        onConfirmDeleteTrash={handleConfirmDeleteTrash}
-        showEmptyTrashModal={showEmptyTrashModal}
-        trashItemsCount={trashItems.length}
-        onCloseEmptyTrash={() => setShowEmptyTrashModal(false)}
-        onConfirmEmptyTrash={handleConfirmEmptyTrash}
-      />
-      {showCloudMountModal && <CloudMountModal
-        onClose={() => setShowCloudMountModal(false)}
-        onMounted={(mount) => {
-          setCloudMounts((current) => [...current.filter((item) => item.id !== mount.id), mount]);
-          setShowCloudMountModal(false);
-          setActiveCloudMountId(mount.id);
-          setAlertMsg({ type: 'success', text: '夸克云盘已挂载' });
-        }}
-      />}
-      <ArchiveModal
-        item={archiveItem}
-        currentPath={currentPath}
-        onClose={() => setArchiveItem(null)}
-        onConfirm={handleArchiveConfirm}
-      />
-      {transferRequest && <TransferDestinationModal operation={transferRequest.operation} sourcePaths={transferRequest.paths} initialPath={transferRequest.initialPath} onClose={() => setTransferRequest(null)} onConfirm={handleTransferConfirm} />}
     </div>
   );
 };
