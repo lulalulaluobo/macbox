@@ -333,6 +333,7 @@ npm audit --audit-level=low
 - StorageSettings 的本机目录直通管理器拆分为 `LocalMountSection`；
 - StorageSettings 的物理磁盘与 Lima 托管虚拟磁盘展示拆分为 `StorageDiskSection`；
 - StorageSettings 的 SMB 配置/目录选择、本机直通新增和磁盘绑定弹窗拆分为 `SMBShareModals`、`LocalMountModal`、`StorageBindingModals`；
+- StorageSettings 的本机目录直通扫描、候选目录、启停、读写切换、删除和新增流程拆分为 `useLocalMountSettings`；
 - 应用部署 SSE 流程拆为 `useAppInstallStream`，部署完成后的日志仍由用户手动关闭；
 - 应用部署弹窗的配置表单、SSE 进度日志和完成结果拆为 `AppInstallForm`、`AppInstallProgress`、`AppInstallResult`；
 - API 与类型按领域拆分，并保留 `api.ts`、`types.ts` 兼容出口；

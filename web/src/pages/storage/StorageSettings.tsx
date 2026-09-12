@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   CheckCircle2, AlertCircle, RefreshCw, RotateCw
 } from 'lucide-react';
-import { DiskInfo, ManagedDisk, SambaStatus, LocalMount, LocalMountCandidate, LocalMountHealth, SMBShare, FileItem } from '../../types';
+import { DiskInfo, ManagedDisk, SambaStatus, SMBShare, FileItem } from '../../types';
 import { api } from '../../api';
 import { SMBSharingSection } from './settings/SMBSharingSection';
 import { LocalMountSection } from './settings/LocalMountSection';
@@ -10,6 +10,7 @@ import { StorageDiskSection } from './settings/StorageDiskSection';
 import { SMBShareModals } from './settings/SMBShareModals';
 import { LocalMountModal } from './settings/LocalMountModal';
 import { StorageBindingModals } from './settings/StorageBindingModals';
+import { useLocalMountSettings } from './settings/useLocalMountSettings';
 
 export interface StorageSettingsProps {
   configDirty?: boolean;
@@ -44,20 +45,6 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   const [sharePickerFolders, setSharePickerFolders] = useState<FileItem[]>([]);
   const [sharePickerLoading, setSharePickerLoading] = useState(false);
 
-  // Local Mounts (VirtioFS)
-  const [localMounts, setLocalMounts] = useState<LocalMount[]>([]);
-  const [, setRecommendedMounts] = useState<LocalMount[]>([]);
-  const [mountCandidates, setMountCandidates] = useState<LocalMountCandidate[]>([]);
-  const [mountHealth, setMountHealth] = useState<LocalMountHealth[]>([]);
-  const [showAddMountModal, setShowAddMountModal] = useState(false);
-  const [showMountManager, setShowMountManager] = useState(false);
-  const [newMountPath, setNewMountPath] = useState('');
-  const [newMountName, setNewMountName] = useState('');
-  const [newMountCategory, setNewMountCategory] = useState<'media' | 'downloads' | 'pictures' | 'custom'>('media');
-  const [newMountGuestTarget, setNewMountGuestTarget] = useState('media/MacMedia');
-  const [newMountWritable, setNewMountWritable] = useState(false);
-  const [mountsLoading, setMountsLoading] = useState(false);
-
   // External Disk Bind Modal
   const [showBindModal, setShowBindModal] = useState(false);
   const [bindingDisk, setBindingDisk] = useState<DiskInfo | null>(null);
@@ -77,13 +64,45 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
 
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const {
+    localMounts,
+    mountCandidates,
+    mountHealth,
+    showAddMountModal,
+    showMountManager,
+    newMountPath,
+    newMountName,
+    newMountCategory,
+    newMountGuestTarget,
+    newMountWritable,
+    mountsLoading,
+    loadLocalMounts,
+    setShowAddMountModal,
+    setShowMountManager,
+    setNewMountPath,
+    setNewMountName,
+    setNewMountCategory,
+    setNewMountGuestTarget,
+    setNewMountWritable,
+    openAddMount,
+    selectMountCandidate,
+    handleAddCustomMount,
+    handleDeleteMount,
+    handleToggleMountWritable,
+    handleToggleMount,
+  } = useLocalMountSettings({
+    onAlert: (alert) => setAlertMsg(alert),
+    onRestartRequired: () => setRestartPrompt(true),
+    onRefreshOverview,
+  });
+
   const loadData = async () => {
     setLoading(true);
     try {
-      const [storageRes, sambaRes, mountsRes] = await Promise.all([
+      const [storageRes, sambaRes] = await Promise.all([
         api.getDisks(),
         api.getSambaStatus(),
-        api.getLocalMounts().catch(() => ({ mounts: [], recommended: [], candidates: [], health: [] })),
+        loadLocalMounts(),
       ]);
       setDisks(storageRes.disks || []);
       setManagedDisks(storageRes.managedDisks || []);
@@ -91,10 +110,6 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       setIsExternalActive(storageRes.isExternalActive || false);
       setDataPath(storageRes.dataPath || '');
       setSamba(sambaRes);
-      setLocalMounts(mountsRes.mounts || []);
-      setRecommendedMounts(mountsRes.recommended || []);
-      setMountCandidates(mountsRes.candidates || []);
-      setMountHealth(mountsRes.health || []);
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `加载存储数据失败: ${err.message}` });
     } finally {
@@ -105,18 +120,6 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   useEffect(() => {
     loadData();
   }, []);
-
-  const refreshMountData = async () => {
-    try {
-      const mountsRes = await api.getLocalMounts();
-      setLocalMounts(mountsRes.mounts || []);
-      setRecommendedMounts(mountsRes.recommended || []);
-      setMountCandidates(mountsRes.candidates || []);
-      setMountHealth(mountsRes.health || []);
-    } catch {
-      // Keep the mutation response visible if a follow-up probe is unavailable.
-    }
-  };
 
   const handleOpenBindModal = (disk: DiskInfo) => {
     setBindingDisk(disk);
@@ -222,94 +225,6 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       if (onRefreshOverview) onRefreshOverview();
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `解除挂载失败: ${err.message}` });
-    }
-  };
-
-  const handleToggleMount = async (id: string) => {
-    try {
-      const res = await api.toggleLocalMount(id);
-      setLocalMounts(res.mounts);
-      setRecommendedMounts(res.recommended);
-      void refreshMountData();
-      setRestartPrompt(true);
-      setAlertMsg({ type: 'success', text: res.message });
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `操作失败: ${err.message}` });
-    }
-  };
-
-  const handleToggleMountWritable = async (id: string, writable: boolean) => {
-    try {
-      const res = await api.toggleLocalMountWritable(id, writable);
-      setLocalMounts(res.mounts);
-      setRecommendedMounts(res.recommended);
-      void refreshMountData();
-      setAlertMsg({ type: 'success', text: res.message });
-      onRefreshOverview?.();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `切换权限失败: ${err.message}` });
-    }
-  };
-
-  const handleDeleteMount = async (id: string, name: string) => {
-    if (!confirm(`确定要移除「${name}」的直通挂载配置吗？（您的 Mac 本地原始文件不会受到任何影响）`)) return;
-    try {
-      const res = await api.deleteLocalMount(id);
-      setLocalMounts(res.mounts);
-      setRecommendedMounts(res.recommended);
-      void refreshMountData();
-      setRestartPrompt(true);
-      setAlertMsg({ type: 'success', text: res.message });
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `删除失败: ${err.message}` });
-    }
-  };
-
-  const selectMountCandidate = (candidate: LocalMountCandidate) => {
-    if (!candidate.available || candidate.configured) return;
-    setNewMountPath(candidate.hostPath);
-    setNewMountName(candidate.name);
-    if (candidate.category === 'media' || candidate.category === 'downloads' || candidate.category === 'pictures' || candidate.category === 'custom') {
-      setNewMountCategory(candidate.category);
-      const targetName = candidate.name || '本机直通';
-      setNewMountGuestTarget(candidate.category === 'media' ? `media/${targetName}` : candidate.category === 'downloads' ? `downloads/${targetName}` : candidate.category === 'pictures' ? `photos/${targetName}` : `shared/${targetName}`);
-    }
-  };
-
-  const handleAddCustomMount = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMountPath.trim()) {
-      setAlertMsg({ type: 'error', text: '请先填写一个 Mac 本地文件夹路径。' });
-      return;
-    }
-    setMountsLoading(true);
-    try {
-      let targetSub = newMountGuestTarget.trim().replace(/^\/data\/?/, '').replace(/^\/+/, '');
-      if (!targetSub) {
-        targetSub = newMountCategory === 'media' ? `media/${newMountName.trim() || 'MacMedia'}` : newMountCategory === 'downloads' ? `downloads/${newMountName.trim() || 'MacDownloads'}` : newMountCategory === 'pictures' ? `photos/${newMountName.trim() || 'MacPhotos'}` : `shared/${newMountName.trim() || 'Folder'}`;
-      }
-
-      const res = await api.addLocalMount({
-        name: newMountName.trim() || newMountPath.split('/').pop() || '本地直通',
-        hostPath: newMountPath.trim(),
-        guestTarget: targetSub,
-        category: newMountCategory,
-        writable: newMountWritable,
-        enabled: true,
-      });
-      setLocalMounts(res.mounts);
-      setRecommendedMounts(res.recommended);
-      void refreshMountData();
-      setShowAddMountModal(false);
-      setNewMountPath('');
-      setNewMountName('');
-      setNewMountGuestTarget('media/MacMedia');
-      setRestartPrompt(true);
-      setAlertMsg({ type: 'success', text: `已成功添加本地直通目录，请重启 VM 生效！` });
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `添加直通失败: ${err.message}` });
-    } finally {
-      setMountsLoading(false);
     }
   };
 
@@ -551,7 +466,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
           showManager={showMountManager}
           onOpenManager={() => setShowMountManager(true)}
           onCloseManager={() => setShowMountManager(false)}
-          onOpenAdd={() => { setShowMountManager(false); setNewMountGuestTarget('media/MacMedia'); setShowAddMountModal(true); }}
+          onOpenAdd={openAddMount}
           onDeleteMount={handleDeleteMount}
           onToggleMountWritable={handleToggleMountWritable}
           onToggleMount={handleToggleMount}
