@@ -1,35 +1,39 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal as XTerm } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import '@xterm/xterm/css/xterm.css';
 import {
-  Terminal as TerminalIcon, Folder, FolderPlus, Upload, RefreshCw, ArrowLeft,
-  Download, Trash2, Edit3, Copy, Check, FileText, Film, Image, Music, Archive,
-  Code, HardDrive, Maximize2, Minimize2, CornerDownRight, Star,
-  PanelLeftClose, PanelLeft, X, Save, Crown, User, Eye, EyeOff
+  Folder, RefreshCw, FileText, Film, Image, Music, Archive,
+  Code, HardDrive, Maximize2, Minimize2, Star,
+  PanelLeftClose, PanelLeft, X, Crown, User
 } from 'lucide-react';
 import { api } from '../api';
 import { FileItem, TerminalPrefill } from '../types';
 import { TerminalInputBar } from './terminal/TerminalInputBar';
+import { TerminalFileBrowser } from './terminal/TerminalFileBrowser';
+import type { TerminalShortcut } from './terminal/TerminalFileBrowser';
+import { TerminalFileModals } from './terminal/TerminalFileModals';
+import type { TerminalEditingFile } from './terminal/TerminalFileModals';
+import { useTerminalSession } from './terminal/useTerminalSession';
 
 interface TerminalPageProps {
   prefill?: TerminalPrefill | null;
 }
 
 export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) => {
-  // Terminal State
   const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermInstance = useRef<XTerm | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const sessionIdRef = useRef<string | null>(null);
-  const connectionGenerationRef = useRef(0);
-  const [connected, setConnected] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [sessionClosed, setSessionClosed] = useState(false);
+  const {
+    xtermInstance,
+    fitAddonRef,
+    wsRef,
+    connected,
+    sessionId,
+    sessionClosed,
+    loginUser,
+    switchUser,
+    reconnect,
+    closeSession,
+    sendRaw,
+  } = useTerminalSession({ terminalRef });
   const [fullscreen, setFullscreen] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [loginUser, setLoginUser] = useState<'root' | 'default'>('default');
 
   // File System State
   const [currentPath, setCurrentPath] = useState<string>('/data');
@@ -64,14 +68,14 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const [uploading, setUploading] = useState(false);
 
   // File View / Edit Modal
-  const [editingFile, setEditingFile] = useState<{ path: string; name: string; content: string; readOnly: boolean } | null>(null);
+  const [editingFile, setEditingFile] = useState<TerminalEditingFile | null>(null);
   const [savingFile, setSavingFile] = useState(false);
 
   // Drag & drop upload
   const [isDragging, setIsDragging] = useState(false);
 
   // Quick Shortcuts
-  const rootShortcuts = [
+  const rootShortcuts: TerminalShortcut[] = [
     ...(loginUser === 'root' ? [{ label: 'VM 根目录', path: '/', icon: HardDrive }] : []),
     { label: 'NAS 根目录', path: '/data', icon: Folder },
     { label: 'Docker 目录', path: '/data/appdata', icon: Code },
@@ -81,7 +85,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   // anchored to the NAS data disk by the backend safe-mutation layer.
   const isVMSystemPath = currentPath !== '/data' && !currentPath.startsWith('/data/');
 
-  const favoriteShortcuts = favoritePaths.map((path) => ({
+  const favoriteShortcuts: TerminalShortcut[] = favoritePaths.map((path) => ({
     label: path.split('/').filter(Boolean).pop() || path,
     path,
     icon: Star,
@@ -120,201 +124,17 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
     return `sudo -iu macnasctl -- bash -lc 'exec ${command}'\n`;
   };
 
-  // Initialize Terminal WebSocket
-  const initTerminal = (userToUse?: 'root' | 'default') => {
-    if (!terminalRef.current) return;
-
-    const generation = ++connectionGenerationRef.current;
-    setSessionClosed(false);
-
-    if (xtermInstance.current) {
-      xtermInstance.current.dispose();
-    }
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
-
-    const term = new XTerm({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: '#090d16',
-        foreground: '#e2e8f0',
-        cursor: '#38bdf8',
-        selectionBackground: 'rgba(56, 189, 248, 0.3)',
-        black: '#0f172a',
-        red: '#f43f5e',
-        green: '#10b981',
-        yellow: '#f59e0b',
-        blue: '#3b82f6',
-        magenta: '#d946ef',
-        cyan: '#06b6d4',
-        white: '#f8fafc',
-        brightBlack: '#475569',
-        brightRed: '#fb7185',
-        brightGreen: '#34d399',
-        brightYellow: '#fbbf24',
-        brightBlue: '#60a5fa',
-        brightMagenta: '#e879f9',
-        brightCyan: '#22d3ee',
-        brightWhite: '#ffffff',
-      },
-    });
-
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(terminalRef.current);
-    fitAddon.fit();
-
-    xtermInstance.current = term;
-    fitAddonRef.current = fitAddon;
-
-    const targetUser = userToUse || loginUser;
-
-    // Reuse the same PTY session after a browser refresh. sessionStorage is
-    // scoped to this browser tab, so separate tabs do not type into one PTY.
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsParams = new URLSearchParams({ user: targetUser });
-    const sessionStorageKey = `macnas_terminal_session:${window.location.host}:${targetUser}`;
-    const savedSessionID = window.sessionStorage.getItem(sessionStorageKey);
-    if (savedSessionID) wsParams.set('session', savedSessionID);
-    const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?${wsParams.toString()}`;
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = 'arraybuffer';
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      setConnected(true);
-      const userBadge = targetUser === 'root' ? '\x1b[1;33m[👑 root 超级管理员]\x1b[0;36m' : '\x1b[1;32m[👤 普通用户 (macnas)]\x1b[0;36m';
-      term.write(`\r\n\x1b[36m[MacNAS] 已以 ${userBadge} 身份成功连接到 Linux 虚拟机交互终端！\x1b[0m\r\n\r\n`);
-      // Send initial size
-      const dims = fitAddon.proposeDimensions();
-      if (dims) {
-        ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
-      }
-    };
-
-    ws.onmessage = (event) => {
-      if (typeof event.data === 'string') {
-        try {
-          const control = JSON.parse(event.data) as { type?: string; id?: string; resumed?: boolean };
-          if (control.type === 'session' && control.id) {
-            window.sessionStorage.setItem(sessionStorageKey, control.id);
-            sessionIdRef.current = control.id;
-            setSessionId(control.id);
-            term.write(control.resumed
-              ? '\r\n\x1b[32m[MacNAS] 已恢复之前的终端任务和输出记录。\x1b[0m\r\n'
-              : '\r\n\x1b[36m[MacNAS] 已创建可恢复的终端任务会话。\x1b[0m\r\n');
-            return;
-          }
-        } catch {
-          // PTY output is usually plain text; non-JSON output goes straight to xterm.
-        }
-        term.write(event.data);
-      } else {
-        term.write(new Uint8Array(event.data));
-      }
-    };
-
-    ws.onclose = () => {
-      if (generation !== connectionGenerationRef.current) return;
-      setConnected(false);
-      term.write('\r\n\x1b[33m[MacNAS] 终端连接已断开。\x1b[0m\r\n');
-    };
-
-    ws.onerror = () => {
-      if (generation !== connectionGenerationRef.current) return;
-      setConnected(false);
-      term.write('\r\n\x1b[31m[MacNAS] 终端连接异常。\x1b[0m\r\n');
-    };
-
-    // Forward user keystrokes to WS
-    term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    });
-
-    // Resize handler
-    const handleResize = () => {
-      try {
-        fitAddon.fit();
-        const dims = fitAddon.proposeDimensions();
-        if (dims && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
-        }
-      } catch (e) {
-        // ignore
-      }
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  };
-
   const handleSwitchUser = (newUser: 'root' | 'default') => {
-    setLoginUser(newUser);
     if (newUser !== 'root' && isVMSystemPath) {
       setCurrentPath('/data');
-      if (showSidebar) loadFiles('/data');
+      if (showSidebar) void loadFiles('/data');
     }
-    const oldKey = `macnas_terminal_session:${window.location.host}:${loginUser}`;
-    window.sessionStorage.removeItem(oldKey);
-    sessionIdRef.current = null;
-    setSessionId(null);
-    initTerminal(newUser);
+    switchUser(newUser);
   };
 
-  const handleReconnect = () => {
-    const targetUser = loginUser;
-    const key = `macnas_terminal_session:${window.location.host}:${targetUser}`;
-    window.sessionStorage.removeItem(key);
-    sessionIdRef.current = null;
-    setSessionId(null);
-    initTerminal(targetUser);
-  };
+  const handleReconnect = () => reconnect();
 
-  const handleCloseSession = async () => {
-    const id = sessionIdRef.current;
-    if (id) {
-      try {
-        await api.closeTerminalSession(id);
-      } catch {
-        // The VM may already have been restarted; clearing the local reference
-        // still allows the next reconnect to create a fresh session.
-      }
-    }
-    const key = `macnas_terminal_session:${window.location.host}:${loginUser}`;
-    window.sessionStorage.removeItem(key);
-    sessionIdRef.current = null;
-    setSessionId(null);
-    connectionGenerationRef.current += 1;
-    wsRef.current?.close();
-    wsRef.current = null;
-    setConnected(false);
-    setSessionClosed(true);
-    xtermInstance.current?.write('\r\n\x1b[33m[MacNAS] 当前终端会话已关闭。点击“重连”创建新会话。\x1b[0m\r\n');
-  };
-
-  useEffect(() => {
-    api.getTerminalSettings()
-      .then((settings) => {
-        const u: 'root' | 'default' = settings.defaultLoginUser === 'root' ? 'root' : 'default';
-        setLoginUser(u);
-        initTerminal(u);
-      })
-      .catch(() => {
-        initTerminal('default');
-      });
-
-    return () => {
-      if (wsRef.current) wsRef.current.close();
-      if (xtermInstance.current) xtermInstance.current.dispose();
-    };
-  }, []);
+  const handleCloseSession = () => closeSession();
 
   useEffect(() => {
     try {
@@ -564,284 +384,34 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
       <div className={`flex min-h-0 flex-col gap-4 ${showSidebar ? 'flex-none lg:flex-row lg:flex-1 lg:overflow-hidden' : 'flex-1'}`}>
         {/* Left Side: Integrated File System Explorer (mobile: stacked below; desktop: left sidebar) */}
         {showSidebar && (
-          <div className="order-2 flex min-h-[420px] w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/80 lg:order-1 lg:min-h-0 lg:w-[320px] lg:shrink-0">
-            {/* Header & Quick Shortcuts */}
-            <div className="space-y-3 border-b border-slate-800/80 p-3.5 sm:p-4">
-              <div className="flex min-w-0 items-start justify-between gap-3">
-                <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 ring-1 ring-sky-400/20">
-                    <Folder className="h-4 w-4 text-sky-400" />
-                  </div>
-                  <div className="min-w-0">
-                    <span className="block truncate whitespace-nowrap text-[15px] font-bold text-white">虚拟机文件系统</span>
-                    <span className="mt-0.5 block truncate text-[10px] text-slate-500">VM 文件浏览与目录管理</span>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <button
-                    onClick={() => setShowMkdirModal(true)}
-                    disabled={isVMSystemPath}
-                    aria-label="新建文件夹"
-                    className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 disabled:pointer-events-none disabled:opacity-40"
-                    title="新建文件夹"
-                  >
-                    <FolderPlus className="h-4 w-4" />
-                  </button>
-                  <label
-                    aria-label="上传文件"
-                    className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 ${isVMSystemPath ? 'pointer-events-none opacity-40' : ''}`}
-                    title="上传文件"
-                  >
-                    <Upload className="h-4 w-4" />
-                    <input
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e.target.files)}
-                      disabled={uploading || isVMSystemPath}
-                    />
-                  </label>
-                  <button
-                    onClick={() => loadFiles(currentPath)}
-                    disabled={filesLoading}
-                    aria-label="刷新列表"
-                    className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 disabled:opacity-50"
-                    title="刷新列表"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${filesLoading ? 'animate-spin' : ''}`} />
-                  </button>
-                  <button
-                    onClick={() => setShowHiddenFiles((visible) => !visible)}
-                    aria-pressed={showHiddenFiles}
-                    className={`flex h-9 w-9 items-center justify-center rounded-xl transition ${showHiddenFiles
-                      ? 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/30'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                    title={showHiddenFiles ? '隐藏以 . 开头的文件和文件夹' : '显示隐藏文件和文件夹'}
-                    aria-label={showHiddenFiles ? '隐藏隐藏文件和文件夹' : '显示隐藏文件和文件夹'}
-                  >
-                    {showHiddenFiles ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Quick Path Shortcuts: keep the two stable roots first, then user favorites. */}
-              <div>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">快捷路径</span>
-                  <span className="text-[10px] text-slate-600">{showHiddenFiles ? '含隐藏项' : '隐藏项已隐藏'}</span>
-                </div>
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
-                  {rootShortcuts.map((sc) => (
-                    <button
-                      key={sc.path}
-                      onClick={() => loadFiles(sc.path)}
-                      className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[11px] font-medium transition ${
-                        currentPath === sc.path
-                          ? 'border-sky-500/40 bg-sky-500/20 font-bold text-sky-300'
-                          : 'border-slate-700/60 bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                      }`}
-                      title={sc.path}
-                    >
-                      <sc.icon className="h-3.5 w-3.5" />
-                      <span>{sc.label}</span>
-                    </button>
-                  ))}
-
-                  {favoriteShortcuts.length > 0 && (
-                    <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-700/80" aria-hidden="true" />
-                  )}
-                  {favoriteShortcuts.map((sc) => (
-                    <button
-                      key={sc.path}
-                      onClick={() => loadFiles(sc.path)}
-                      className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-[11px] font-medium transition ${
-                        currentPath === sc.path
-                          ? 'border-sky-500/40 bg-sky-500/20 font-bold text-slate-100'
-                          : 'border-slate-700/60 bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
-                      }`}
-                      title={sc.path}
-                    >
-                      <sc.icon className="h-3.5 w-3.5 fill-amber-300 text-amber-300" />
-                      <span>{sc.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {isVMSystemPath && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-200">
-                  VM 根目录浏览模式：可查看系统文件，上传、新建、编辑和删除仅限 NAS 数据目录。
-                </div>
-              )}
-
-              {/* Breadcrumb Path Bar */}
-              <div className="flex items-center space-x-1 overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-950/60 p-2.5 font-mono text-xs">
-                <button
-                  onClick={handleNavigateUp}
-                  disabled={currentPath === '/'}
-                  className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white disabled:opacity-30 transition shrink-0"
-                  title="返回上一级"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                </button>
-                <div className="flex items-center space-x-1 text-slate-300 truncate">
-                  <span
-                    onClick={() => loginUser === 'root' && loadFiles('/')}
-                    className={`${loginUser === 'root' ? 'cursor-pointer hover:text-sky-400' : 'cursor-default opacity-50'} font-bold`}
-                  >
-                    /
-                  </span>
-                  {currentPath.split('/').filter(Boolean).map((seg, idx, arr) => {
-                    const segPath = '/' + arr.slice(0, idx + 1).join('/');
-                    return (
-                      <React.Fragment key={segPath}>
-                        <span className="text-slate-600">/</span>
-                        <span
-                          onClick={() => loadFiles(segPath)}
-                          className={`cursor-pointer hover:text-sky-400 truncate ${
-                            idx === arr.length - 1 ? 'text-white font-bold' : 'text-slate-400'
-                          }`}
-                        >
-                          {seg}
-                        </span>
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* File List Table / Area */}
-            <div
-              className={`flex-1 overflow-y-auto max-h-[460px] lg:max-h-none p-2 space-y-1 relative ${
-                isDragging ? 'border-2 border-dashed border-sky-500 bg-sky-500/5' : ''
-              }`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setIsDragging(true);
-              }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setIsDragging(false);
-                handleFileUpload(e.dataTransfer.files);
-              }}
-            >
-              {uploading && (
-                <div className="p-3 bg-sky-500/10 border border-sky-500/30 rounded-xl text-center text-xs text-sky-300">
-                  文件上传写入中...
-                </div>
-              )}
-
-              {filesLoading && files.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-500">正在扫描文件系统...</div>
-              ) : visibleFiles.length === 0 ? (
-                <div className="p-8 text-center text-xs text-slate-500">该目录下暂无文件</div>
-              ) : (
-                visibleFiles.map((file) => (
-                  <div
-                    key={file.path}
-                    className="group flex items-center justify-between p-2 rounded-xl hover:bg-slate-800/60 transition text-xs"
-                  >
-                    <div
-                      onClick={() => (file.isDir ? loadFiles(file.path) : handleViewFile(file))}
-                      className="flex items-center space-x-2.5 min-w-0 flex-1 cursor-pointer"
-                    >
-                      {getFileIcon(file)}
-                      <span className={`truncate ${file.isDir ? 'text-slate-200 font-medium group-hover:text-sky-300' : 'text-slate-300'}`}>
-                        {file.name}
-                      </span>
-                    </div>
-
-                    {/* Metadata & Hover Actions */}
-                    <div className="flex items-center space-x-2 text-slate-500 shrink-0">
-                      <span className="text-[11px] font-mono hidden sm:inline">{file.sizeFormatted}</span>
-
-                      {/* Favorite is always available on touch screens; other actions appear on hover. */}
-                      {file.isDir && (
-                        <button
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleToggleFavorite(file.path);
-                          }}
-                          className={`rounded p-1 transition ${favoritePaths.includes(file.path)
-                            ? 'text-amber-300 hover:bg-amber-400/20 hover:text-amber-200'
-                            : 'text-slate-500 hover:bg-amber-400/20 hover:text-amber-300'
-                          }`}
-                          title={favoritePaths.includes(file.path) ? '取消收藏' : '收藏目录'}
-                          aria-label={favoritePaths.includes(file.path) ? `取消收藏 ${file.name}` : `收藏 ${file.name}`}
-                        >
-                          <Star className={`h-3.5 w-3.5 ${favoritePaths.includes(file.path) ? 'fill-amber-300' : ''}`} />
-                        </button>
-                      )}
-
-                      {/* Action buttons */}
-                      <div className="flex items-center space-x-1 opacity-70 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                        {file.isDir ? (
-                          <button
-                            onClick={() => handleOpenInTerminal(file.path)}
-                            className="p-1 rounded hover:bg-sky-500/20 text-slate-400 hover:text-sky-300 transition"
-                            title="在终端中打开 (cd)"
-                          >
-                            <TerminalIcon className="w-3.5 h-3.5" />
-                          </button>
-                        ) : (
-                          <>
-                            {!isVMSystemPath && (
-                              <button
-                                onClick={() => handleViewFile(file)}
-                                className="p-1 rounded hover:bg-sky-500/20 text-slate-400 hover:text-sky-300 transition"
-                                title="查看/编辑文件"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            <a
-                              href={api.getFileDownloadUrl(file.path)}
-                              download={file.name}
-                              className="p-1 rounded hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-300 transition"
-                              title="下载文件"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </a>
-                          </>
-                        )}
-                        <button
-                          onClick={() => handleCopyPath(file.path)}
-                          className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-white transition"
-                          title="复制绝对路径"
-                        >
-                          {copiedPath === file.path ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                        </button>
-                        {!isVMSystemPath && (
-                          <button
-                            onClick={() => handleDelete(file)}
-                            className="p-1 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition"
-                            title="删除"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {/* Bottom Quick Terminal Switcher */}
-            <div className="p-3 border-t border-slate-800/80 bg-slate-950/40 flex items-center justify-between text-[11px] text-slate-400">
-              <span>当前路径: <code className="text-sky-400 font-mono">{currentPath}</code></span>
-              <button
-                onClick={() => handleOpenInTerminal(currentPath)}
-                className="px-2 py-1 rounded bg-slate-800 hover:bg-sky-600 hover:text-white text-slate-300 flex items-center space-x-1 transition font-medium"
-              >
-                <CornerDownRight className="w-3 h-3" />
-                <span>终端切入此目录</span>
-              </button>
-            </div>
-          </div>
+          <TerminalFileBrowser
+            currentPath={currentPath}
+            files={files}
+            visibleFiles={visibleFiles}
+            filesLoading={filesLoading}
+            uploading={uploading}
+            isDragging={isDragging}
+            isVMSystemPath={isVMSystemPath}
+            showHiddenFiles={showHiddenFiles}
+            favoritePaths={favoritePaths}
+            copiedPath={copiedPath}
+            rootShortcuts={rootShortcuts}
+            favoriteShortcuts={favoriteShortcuts}
+            loginUser={loginUser}
+            onOpenMkdir={() => setShowMkdirModal(true)}
+            onUpload={handleFileUpload}
+            onRefresh={() => loadFiles(currentPath)}
+            onToggleHidden={() => setShowHiddenFiles((visible) => !visible)}
+            onNavigate={loadFiles}
+            onNavigateUp={handleNavigateUp}
+            onSetDragging={setIsDragging}
+            onOpenInTerminal={handleOpenInTerminal}
+            onToggleFavorite={handleToggleFavorite}
+            onViewFile={handleViewFile}
+            onDelete={handleDelete}
+            onCopyPath={handleCopyPath}
+            getFileIcon={getFileIcon}
+          />
         )}
 
         {/* Right Side: Interactive Web Terminal */}
@@ -960,110 +530,26 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
           {/* Bottom Text Input & Action Keys Helper Bar */}
           <TerminalInputBar
-            onSendRaw={(data) => {
-              if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                wsRef.current.send(data);
-              }
-            }}
+            onSendRaw={sendRaw}
             disabled={!connected}
             prefill={prefill}
           />
         </div>
       </div>
 
-      {/* Modal: Create Folder */}
-      {showMkdirModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-slate-900 border border-slate-800 p-5 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-white flex items-center space-x-2">
-              <FolderPlus className="w-4 h-4 text-sky-400" />
-              <span>新建文件夹</span>
-            </h3>
-            <p className="text-xs text-slate-400">
-              将在目录 <code className="text-sky-300">{currentPath}</code> 下创建新文件夹：
-            </p>
-            <form onSubmit={handleCreateFolder} className="space-y-4">
-              <input
-                type="text"
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                placeholder="例如: documents 或 backup"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm focus:outline-none focus:border-sky-500"
-                autoFocus
-              />
-              <div className="flex justify-end space-x-2">
-                <button
-                  type="button"
-                  onClick={() => setShowMkdirModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-medium"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={!newFolderName.trim()}
-                  className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold disabled:opacity-50"
-                >
-                  创建
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: View / Edit File */}
-      {editingFile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="w-full max-w-3xl rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4 flex flex-col max-h-[85dvh]">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center space-x-2">
-                {editingFile.readOnly ? <FileText className="w-4 h-4 text-sky-400" /> : <Edit3 className="w-4 h-4 text-sky-400" />}
-                <span className="font-bold text-white text-sm">{editingFile.name}</span>
-                <span className="text-xs text-slate-500 font-mono">({editingFile.path})</span>
-              </div>
-              <button
-                onClick={() => setEditingFile(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <textarea
-              value={editingFile.content}
-              onChange={(e) => setEditingFile({ ...editingFile, content: e.target.value })}
-              readOnly={editingFile.readOnly}
-              className={`flex-1 w-full min-h-[360px] p-4 rounded-xl bg-[#090d16] border border-slate-800 font-mono text-xs text-slate-200 focus:outline-none focus:border-sky-500 resize-none leading-relaxed ${editingFile.readOnly ? 'cursor-default opacity-80' : ''}`}
-              spellCheck={false}
-            />
-
-            <div className="flex items-center justify-between pt-2">
-              <span className="text-xs text-slate-500">
-                {editingFile.readOnly ? 'VM 系统目录仅支持查看；如需修改，请使用 root 终端命令并确认风险' : '支持直接在线修改文件并写回虚拟机文件系统'}
-              </span>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setEditingFile(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-medium"
-                >
-                  取消
-                </button>
-                {!editingFile.readOnly && (
-                  <button
-                    onClick={handleSaveFile}
-                    disabled={savingFile}
-                    className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold flex items-center space-x-1.5 disabled:opacity-50"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>{savingFile ? '保存中...' : '保存更改'}</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <TerminalFileModals
+        showMkdirModal={showMkdirModal}
+        currentPath={currentPath}
+        newFolderName={newFolderName}
+        editingFile={editingFile}
+        savingFile={savingFile}
+        onNewFolderNameChange={setNewFolderName}
+        onCloseMkdir={() => setShowMkdirModal(false)}
+        onCreateFolder={handleCreateFolder}
+        onCloseEditor={() => setEditingFile(null)}
+        onEditContent={(content) => setEditingFile((file) => file ? { ...file, content } : file)}
+        onSaveFile={handleSaveFile}
+      />
     </div>
   );
 };

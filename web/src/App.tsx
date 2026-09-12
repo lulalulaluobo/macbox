@@ -1,18 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './pages/Dashboard';
-import { Storage } from './pages/Storage';
-import { Docker } from './pages/Docker';
-import { Apps } from './pages/Apps';
-import { TerminalPage } from './pages/TerminalPage';
-import { Settings } from './pages/Settings';
-import { StorageSettings } from './pages/storage/StorageSettings';
-import { InitializationWizard } from './pages/InitializationWizard';
 import { LoginPage } from './pages/LoginPage';
 import { SystemOverview, NASUser, TerminalPrefill } from './types';
 import { api } from './api';
 import { useTheme } from './theme';
 import { Key, X, CheckCircle2, AlertCircle } from 'lucide-react';
+
+const Storage = lazy(() => import('./pages/Storage').then(({ Storage }) => ({ default: Storage })));
+const Docker = lazy(() => import('./pages/Docker').then(({ Docker }) => ({ default: Docker })));
+const Apps = lazy(() => import('./pages/Apps').then(({ Apps }) => ({ default: Apps })));
+const TerminalPage = lazy(() => import('./pages/TerminalPage').then(({ TerminalPage }) => ({ default: TerminalPage })));
+const Settings = lazy(() => import('./pages/Settings').then(({ Settings }) => ({ default: Settings })));
+const StorageSettings = lazy(() => import('./pages/storage/StorageSettings').then(({ StorageSettings }) => ({ default: StorageSettings })));
+const InitializationWizard = lazy(() => import('./pages/InitializationWizard').then(({ InitializationWizard }) => ({ default: InitializationWizard })));
 
 export const App: React.FC = () => {
   useTheme();
@@ -241,39 +242,43 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'dashboard' && !overview && (
-          <ConnectionState error={error} onRetry={refreshData} />
-        )}
+        <PageLoadBoundary key={activeTab}>
+          <Suspense fallback={<PageLoadingState />}>
+          {activeTab === 'dashboard' && !overview && (
+            <ConnectionState error={error} onRetry={refreshData} />
+          )}
 
-        {activeTab === 'dashboard' && overview && needsInitialization && (
-          <InitializationWizard overview={overview} onRefresh={refreshData} onOpenStorageSettings={() => setActiveTab('storage_settings')} />
-        )}
+          {activeTab === 'dashboard' && overview && needsInitialization && (
+            <InitializationWizard overview={overview} onRefresh={refreshData} onOpenStorageSettings={() => setActiveTab('storage_settings')} />
+          )}
 
-        {activeTab === 'dashboard' && overview && !needsInitialization && (
-          <Dashboard overview={overview} onRefresh={refreshData} onNavigateTab={navigate} />
-        )}
+          {activeTab === 'dashboard' && overview && !needsInitialization && (
+            <Dashboard overview={overview} onRefresh={refreshData} onNavigateTab={navigate} />
+          )}
 
-        {activeTab === 'storage' && (
-          <Storage />
-        )}
+          {activeTab === 'storage' && (
+            <Storage />
+          )}
 
-        {activeTab === 'docker' && <Docker onOpenTerminalWithLogs={openTerminalWithContainerLogs} primaryIP={overview?.system.primaryIP} />}
+          {activeTab === 'docker' && <Docker onOpenTerminalWithLogs={openTerminalWithContainerLogs} primaryIP={overview?.system.primaryIP} />}
 
-        {activeTab === 'apps' && <Apps />}
+          {activeTab === 'apps' && <Apps />}
 
-        {activeTab === 'terminal' && <TerminalPage prefill={terminalPrefill} />}
+          {activeTab === 'terminal' && <TerminalPage prefill={terminalPrefill} />}
 
-        {activeTab === 'storage_settings' && <StorageSettings mode="storage" configDirty={overview?.configDirty} onRefreshOverview={refreshData} />}
+          {activeTab === 'storage_settings' && <StorageSettings mode="storage" configDirty={overview?.configDirty} onRefreshOverview={refreshData} />}
 
-        {activeTab === 'smb_sharing' && <StorageSettings mode="smb" configDirty={overview?.configDirty} onRefreshOverview={refreshData} />}
+          {activeTab === 'smb_sharing' && <StorageSettings mode="smb" configDirty={overview?.configDirty} onRefreshOverview={refreshData} />}
 
-        {activeTab === 'settings' && (
-          <Settings
-            primaryIP={overview?.system.primaryIP}
-            currentUser={currentUser}
-            onCurrentUserUpdated={(updated) => setCurrentUser(updated)}
-          />
-        )}
+          {activeTab === 'settings' && (
+            <Settings
+              primaryIP={overview?.system.primaryIP}
+              currentUser={currentUser}
+              onCurrentUserUpdated={(updated) => setCurrentUser(updated)}
+            />
+          )}
+          </Suspense>
+        </PageLoadBoundary>
         </main>
       </div>
 
@@ -392,3 +397,47 @@ const ConnectionState: React.FC<ConnectionStateProps> = ({ error, onRetry }) => 
     </section>
   </div>
 );
+
+const PageLoadingState: React.FC = () => (
+  <div className="flex min-h-[calc(100dvh-220px)] items-center justify-center">
+    <div className="flex flex-col items-center gap-3 text-slate-500 dark:text-slate-400">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+      <span className="text-sm">正在加载页面…</span>
+    </div>
+  </div>
+);
+
+interface PageLoadBoundaryState {
+  hasError: boolean;
+}
+
+class PageLoadBoundary extends React.Component<React.PropsWithChildren, PageLoadBoundaryState> {
+  state: PageLoadBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): PageLoadBoundaryState {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-[calc(100dvh-220px)] items-center justify-center px-4">
+          <section className="w-full max-w-lg rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-sm dark:border-rose-900/70 dark:bg-slate-900">
+            <AlertCircle className="mx-auto h-8 w-8 text-rose-500" />
+            <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">页面资源加载失败</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">可能是版本更新后浏览器仍保留旧缓存，请刷新页面后重试。</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-5 rounded-2xl bg-sky-500 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-sky-600"
+            >
+              刷新页面
+            </button>
+          </section>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}

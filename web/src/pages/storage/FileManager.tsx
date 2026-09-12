@@ -17,45 +17,22 @@ import { CloudDriveView } from './filemanager/CloudDriveView';
 import { CloudMountModal } from './filemanager/CloudMountModal';
 import { ArchiveModal } from './filemanager/ArchiveModal';
 import { ConflictPolicy, TransferDestinationModal, TransferOperation } from './filemanager/TransferDestinationModal';
+import { useFileSelection } from './filemanager/useFileSelection';
+import { useFavorites } from './filemanager/useFavorites';
+import { useFileNavigation } from './filemanager/useFileNavigation';
 
 interface FileManagerProps {
   initialPath?: string;
 }
 
 export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' }) => {
-  // Navigation State
-  const [currentPath, setCurrentPath] = useState<string>(initialPath);
-  const [files, setFiles] = useState<FileItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMoreFiles, setHasMoreFiles] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'name' | 'size' | 'mtime'>('name');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() =>
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches ? 'list' : 'grid'
-  );
-
-  // Multi-Selection State
-  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
-  const [selectionMode, setSelectionMode] = useState(false);
   const [actionItem, setActionItem] = useState<FileItem | null>(null);
 
   // Copy/move destination picker
   const [transferRequest, setTransferRequest] = useState<{ operation: TransferOperation; paths: string[]; initialPath: string } | null>(null);
 
-  // Favorites State (Stored in localStorage)
-  const [favorites, setFavorites] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('macnas_file_favorites');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
   const [viewingFavorites, setViewingFavorites] = useState(false);
-  const [favoriteItems, setFavoriteItems] = useState<FileItem[]>([]);
-  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const { favorites, favoriteItems, favoritesLoading, toggleFavorite } = useFavorites({ enabled: viewingFavorites });
 
   // Trash View State
   const [viewingTrash, setViewingTrash] = useState<boolean>(false);
@@ -67,6 +44,29 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   // Notifications
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+
+  const {
+    currentPath,
+    setCurrentPath,
+    files,
+    loading,
+    loadingMore,
+    hasMoreFiles,
+    searchQuery,
+    setSearchQuery,
+    sortBy,
+    setSortBy,
+    sortOrder,
+    setSortOrder,
+    viewMode,
+    setViewMode,
+    discoveredDrivePaths,
+    loadFiles,
+    handleGoUp,
+  } = useFileNavigation({
+    initialPath,
+    onError: (text) => setAlertMsg({ type: 'error', text }),
+  });
 
   // Modals: CRUD
   const [showMkdirModal, setShowMkdirModal] = useState(false);
@@ -121,7 +121,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     try { return localStorage.getItem('macnas_active_cloud_mount') || null; } catch { return null; }
   });
   const [showCloudMountModal, setShowCloudMountModal] = useState(false);
-  const [discoveredDrivePaths, setDiscoveredDrivePaths] = useState<string[]>([]);
   const [diskNames, setDiskNames] = useState<Record<string, string>>(() => {
     try {
       return JSON.parse(localStorage.getItem('macnas_disk_display_names') || '{}');
@@ -130,29 +129,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
   });
 
-  const loadFiles = async (targetPath: string, append = false) => {
-    append ? setLoadingMore(true) : setLoading(true);
-    try {
-      const offset = append ? files.length : 0;
-      const res = await api.listFiles(targetPath, offset);
-      setFiles((current) => append ? [...current, ...(res.items || [])] : (res.items || []));
-      setHasMoreFiles(Boolean(res.hasMore));
-      setCurrentPath(res.path);
-      if (res.path === '/data') {
-        const discovered = (res.items || [])
-          .filter((item) => item.isDir && /^(volume|disk|storage)[-_ ]?\d/i.test(item.name))
-          .map((item) => item.path);
-        if (discovered.length > 0) setDiscoveredDrivePaths(discovered);
-      }
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `读取文件夹失败: ${err.message}` });
-    } finally {
-      append ? setLoadingMore(false) : setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadFiles(currentPath);
     setSelectedPaths(new Set());
     setSelectionMode(false);
     setActionItem(null);
@@ -187,14 +164,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       videoRef.current.play().catch(() => {});
     }
   }, [videoPreview]);
-
-  const handleGoUp = () => {
-    if (currentPath === '/' || currentPath === '/data') return;
-    const parts = currentPath.split('/').filter(Boolean);
-    parts.pop();
-    const parentPath = '/' + parts.join('/');
-    setCurrentPath(parentPath || '/');
-  };
 
   // System folder filter logic
   const isSystemProtected = (name: string) => {
@@ -231,6 +200,16 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
     return sortOrder === 'asc' ? compare : -compare;
   });
+
+  const {
+    selectedPaths,
+    setSelectedPaths,
+    selectionMode,
+    setSelectionMode,
+    toggleSelectItem,
+    handleSelectAll,
+    handleLongPress,
+  } = useFileSelection({ filteredFiles });
 
   // Open / Preview Item
   const handleItemClick = async (item: FileItem) => {
@@ -331,28 +310,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
   };
 
-  // Multi-Selection
-  const toggleSelectItem = (path: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setSelectedPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  };
-
-  const handleSelectAll = () => {
-    if (selectedPaths.size === filteredFiles.length && filteredFiles.length > 0) {
-      setSelectedPaths(new Set());
-    } else {
-      setSelectedPaths(new Set(filteredFiles.map((f) => f.path)));
-    }
-  };
-
   // Copy / move destination picker
   const openTransfer = (operation: TransferOperation, paths: string[], initialPath = currentPath, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -392,61 +349,12 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     link.remove();
   };
 
-  // Favorites
-  const toggleFavorite = (path: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setFavorites((prev) => {
-      const next = prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path];
-      try {
-        localStorage.setItem('macnas_file_favorites', JSON.stringify(next));
-      } catch {}
-      return next;
-    });
-  };
-
-  const loadFavoriteItems = async () => {
-    setFavoritesLoading(true);
-    try {
-      const parentPaths = Array.from(new Set(favorites.map((path) => {
-        const parts = path.split('/').filter(Boolean);
-        parts.pop();
-        return `/${parts.join('/')}` || '/';
-      })));
-      const listings = await Promise.all(parentPaths.map(async (path) => {
-        try { return { ok: true, items: (await api.listFiles(path)).items || [] }; }
-        catch { return { ok: false, items: [] as FileItem[] }; }
-      }));
-      const itemMap = new Map(listings.flatMap((listing) => listing.items).map((item) => [item.path, item]));
-      if (listings.every((listing) => listing.ok)) {
-        const validPaths = favorites.filter((path) => itemMap.get(path)?.isDir === true);
-        if (validPaths.length !== favorites.length) {
-          setFavorites(validPaths);
-          try { localStorage.setItem('macnas_file_favorites', JSON.stringify(validPaths)); } catch {}
-        }
-        setFavoriteItems(validPaths.map((path) => itemMap.get(path)).filter((item): item is FileItem => Boolean(item)));
-        return;
-      }
-      setFavoriteItems(favorites.map((path) => itemMap.get(path)).filter((item): item is FileItem => Boolean(item && item.isDir)));
-    } finally {
-      setFavoritesLoading(false);
-    }
-  };
-
   const openFavorites = () => {
     setViewingTrash(false);
     setSelectionMode(false);
     setSelectedPaths(new Set());
     setViewingFavorites(true);
-    loadFavoriteItems();
   };
-
-  useEffect(() => {
-    if (viewingFavorites) loadFavoriteItems();
-  }, [favorites]);
-
-  useEffect(() => {
-    if (favorites.length > 0) loadFavoriteItems();
-  }, []);
 
   // Trash Handlers
   const loadTrash = async () => {
@@ -623,11 +531,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       await doUploadFiles(Array.from(e.dataTransfer.files));
     }
-  };
-
-  const handleLongPress = (item: FileItem) => {
-    setSelectionMode(true);
-    setSelectedPaths((current) => new Set(current).add(item.path));
   };
 
   const handleItemDragStart = (item: FileItem, event: React.DragEvent<HTMLDivElement>) => {

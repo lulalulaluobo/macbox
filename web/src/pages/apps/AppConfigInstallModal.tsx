@@ -12,8 +12,9 @@ import {
   HardDrive,
   Globe,
 } from 'lucide-react';
-import { AppMetadata, InstallCustomConfig } from '../../types';
+import { AppMetadata } from '../../types';
 import { api } from '../../api';
+import { useAppInstallStream } from './hooks/useAppInstallStream';
 
 interface AppConfigInstallModalProps {
   app: AppMetadata | null;
@@ -36,17 +37,18 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
   const [useYamlMode, setUseYamlMode] = useState(false);
   const [customYaml, setCustomYaml] = useState('');
 
-  // Deploy States
-  const [installStatus, setInstallStatus] = useState<'idle' | 'installing' | 'done' | 'error'>('idle');
-  const [installLogs, setInstallLogs] = useState<string[]>([]);
-  const [installError, setInstallError] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
+  const { installStatus, installLogs, installError, startDeploy } = useAppInstallStream({
+    appId: app?.id,
+    portsMap,
+    volumesMap,
+    envMap,
+    useYamlMode,
+    customYaml,
+  });
 
   useEffect(() => {
     if (!app) return;
-    setInstallStatus('idle');
-    setInstallLogs([]);
-    setInstallError(null);
     setUseYamlMode(false);
 
     const load = async () => {
@@ -108,78 +110,6 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
       onSuccess();
     }
     onClose();
-  };
-
-  const handleStartDeploy = async () => {
-    setInstallStatus('installing');
-    setInstallLogs([`🚀 正在连接 MacNAS 应用引擎并提交定制参数...`]);
-
-    const payload: InstallCustomConfig = {
-      portsMap,
-      volumesMap,
-      envMap,
-      customYaml: useYamlMode ? customYaml : undefined,
-    };
-
-    try {
-      const response = await fetch(`/api/apps/${app.id}/install/custom`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok || !response.body) {
-        throw new Error(response.statusText || '请求失败');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let streamCompleted = false;
-      let streamFailed = false;
-
-      const processStreamLine = (line: string) => {
-        const trimmed = line.trim();
-        if (!trimmed) return;
-
-        if (trimmed.startsWith('data:')) {
-          const dataStr = trimmed.slice(5).trim();
-          if (dataStr) {
-            setInstallLogs(prev => [...prev, dataStr]);
-          }
-        } else if (trimmed === 'event: done') {
-          streamCompleted = true;
-          setInstallStatus('done');
-        } else if (trimmed === 'event: error') {
-          streamFailed = true;
-          setInstallStatus('error');
-          setInstallError('安装过程遇到错误，请查看控制台日志');
-        }
-      };
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          processStreamLine(line);
-        }
-      }
-
-      buffer += decoder.decode();
-      processStreamLine(buffer);
-
-      if (!streamCompleted && !streamFailed) {
-        setInstallError('部署连接已结束，但服务端没有返回完成确认；请保留日志并检查应用状态后重试');
-        setInstallStatus('error');
-      }
-    } catch (err: any) {
-      setInstallError(err.message || '安装网络中断');
-      setInstallStatus('error');
-    }
   };
 
   const currentMeta = configData || app;
@@ -548,7 +478,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                   取消
                 </button>
                 <button
-                  onClick={handleStartDeploy}
+                  onClick={startDeploy}
                   className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 px-4 py-2 text-xs font-bold text-white transition hover:from-sky-500 hover:to-indigo-500 sm:flex-none sm:px-5"
                 >
                   <Download className="w-4 h-4" />
@@ -596,7 +526,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                   关闭
                 </button>
                 <button
-                  onClick={handleStartDeploy}
+                  onClick={startDeploy}
                   className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold transition"
                 >
                   重试安装
