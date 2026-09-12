@@ -82,8 +82,9 @@ func (m *SessionManager) Open(options terminalSessionOptions, requestedID string
 	}
 
 	now := time.Now()
+	m.reapExpired(now)
+
 	m.mu.Lock()
-	m.reapLocked(now)
 	if requestedID != "" {
 		if existing, ok := m.sessions[requestedID]; ok && existing.matches(options) {
 			if !existing.isFinished() {
@@ -97,6 +98,7 @@ func (m *SessionManager) Open(options terminalSessionOptions, requestedID string
 			delete(m.sessions, requestedID)
 			m.mu.Unlock()
 			existing.stop()
+			m.mu.Lock()
 		}
 	}
 	if len(m.sessions) >= maxTerminalSessions {
@@ -171,15 +173,19 @@ func (m *SessionManager) reapLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			m.mu.Lock()
-			stale := m.reapLocked(time.Now())
-			m.mu.Unlock()
-			for _, session := range stale {
-				session.stop()
-			}
+			m.reapExpired(time.Now())
 		case <-m.ctx.Done():
 			return
 		}
+	}
+}
+
+func (m *SessionManager) reapExpired(now time.Time) {
+	m.mu.Lock()
+	stale := m.reapLocked(now)
+	m.mu.Unlock()
+	for _, session := range stale {
+		session.stop()
 	}
 }
 

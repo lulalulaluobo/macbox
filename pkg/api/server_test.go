@@ -117,6 +117,15 @@ func TestWriteErrorSanitizesInternalDetails(t *testing.T) {
 	}
 }
 
+func TestSMBCredentialSyncWarning(t *testing.T) {
+	if got := smbCredentialSyncWarning(nil); got != "" {
+		t.Fatalf("nil sync error produced warning %q", got)
+	}
+	if got := smbCredentialSyncWarning(context.DeadlineExceeded); !strings.Contains(got, "SMB") {
+		t.Fatalf("sync error warning = %q, want actionable SMB warning", got)
+	}
+}
+
 func TestHandlerSetsSecurityHeaders(t *testing.T) {
 	server := &Server{mux: http.NewServeMux()}
 	handler := server.Handler()

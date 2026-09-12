@@ -583,7 +583,6 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 	cpus := cfgSnapshot.VM.CPUs
 	memory := cfgSnapshot.VM.Memory
 	diskSize := cfgSnapshot.VM.DiskSize
-	sambaPassword := cfgSnapshot.Samba.Password
 	sambaPort := cfgSnapshot.Samba.Port
 	listenAddress := cfgSnapshot.ListenAddress
 	forwardedPorts := append([]int(nil), cfgSnapshot.VM.ForwardedPorts...)
@@ -631,7 +630,6 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		Memory           int
 		DiskSize         int
 		DataDiskName     string
-		SambaPassword    string
 		SambaPort        int
 		HostBindAddress  string
 		ForwardedPorts   []int
@@ -643,7 +641,6 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		Memory:           memory,
 		DiskSize:         diskSize,
 		DataDiskName:     dataDiskName,
-		SambaPassword:    sambaPassword,
 		SambaPort:        sambaPort,
 		HostBindAddress:  config.NormalizeListenAddress(listenAddress),
 		ForwardedPorts:   config.NormalizeForwardedPorts(forwardedPorts),

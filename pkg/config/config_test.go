@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -15,9 +16,6 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.Samba.ShareName != "MacNAS" {
 		t.Errorf("expected Samba share name MacNAS, got %s", cfg.Samba.ShareName)
-	}
-	if cfg.Samba.Password != "" {
-		t.Errorf("DefaultConfig must not contain a reusable Samba password")
 	}
 }
 
@@ -38,23 +36,33 @@ func TestConfigDir(t *testing.T) {
 	}
 }
 
-func TestLoadConfigGeneratesSambaSecret(t *testing.T) {
+func TestLoadConfigRemovesLegacyPlaintextSambaPassword(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+
+	dir, err := ConfigDir()
+	if err != nil {
+		t.Fatalf("ConfigDir error: %v", err)
+	}
+	path := dir + "/config.yaml"
+	legacy := "port: 19808\nsamba:\n  shareName: MacNAS\n  port: 4455\n  user: admin\n  password: plaintext-admin-password\n"
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
 
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig error: %v", err)
 	}
-	if len(cfg.Samba.Password) < 32 {
-		t.Fatalf("generated Samba password is too short: %d", len(cfg.Samba.Password))
-	}
-	if cfg.Samba.Password == legacySambaPassword {
-		t.Fatal("LoadConfig generated the legacy Samba password")
+	if cfg.Samba.User != "admin" {
+		t.Fatalf("Samba user = %q, want admin", cfg.Samba.User)
 	}
 
-	path, err := ConfigFilePath()
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("ConfigFilePath error: %v", err)
+		t.Fatalf("read migrated config: %v", err)
+	}
+	if strings.Contains(string(data), "plaintext-admin-password") || strings.Contains(string(data), "password:") {
+		t.Fatalf("legacy plaintext Samba password was not removed: %s", data)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -64,20 +72,14 @@ func TestLoadConfigGeneratesSambaSecret(t *testing.T) {
 		t.Fatalf("config file permissions = %o, want 600", info.Mode().Perm())
 	}
 
-	reloaded, err := LoadConfig()
-	if err != nil {
-		t.Fatalf("reload config error: %v", err)
-	}
-	if reloaded.Samba.Password != cfg.Samba.Password {
-		t.Fatal("reloading config rotated the Samba password unexpectedly")
-	}
 }
 
-func TestEnsureSecretsRejectsWeakExistingSambaPassword(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Samba.Password = "weak"
-	if err := EnsureSecrets(cfg); err == nil {
-		t.Fatal("EnsureSecrets accepted a weak existing Samba password")
+func TestValidateSambaPassword(t *testing.T) {
+	if err := ValidateSambaPassword("weak"); err == nil {
+		t.Fatal("ValidateSambaPassword accepted a weak password")
+	}
+	if err := ValidateSambaPassword("足够安全的密码"); err != nil {
+		t.Fatalf("ValidateSambaPassword rejected a valid password: %v", err)
 	}
 }
 

@@ -5,7 +5,7 @@ import { NASUser } from '../types';
 import { useTheme } from '../theme';
 
 interface LoginPageProps {
-  onLoginSuccess: (user: NASUser) => void;
+	onLoginSuccess: (user: NASUser, warning?: string) => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
@@ -56,7 +56,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         setSetupRequired(false);
       }
       const res = await api.login(username.trim(), password, rememberMe);
-      onLoginSuccess(res.user);
+		onLoginSuccess(res.user, res.warning);
     } catch (err: any) {
       setError(err.message || '登录失败，请检查用户名或密码');
     } finally {

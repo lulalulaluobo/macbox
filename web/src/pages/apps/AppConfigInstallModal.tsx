@@ -173,7 +173,8 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
       processStreamLine(buffer);
 
       if (!streamCompleted && !streamFailed) {
-        setInstallStatus('done');
+        setInstallError('部署连接已结束，但服务端没有返回完成确认；请保留日志并检查应用状态后重试');
+        setInstallStatus('error');
       }
     } catch (err: any) {
       setInstallError(err.message || '安装网络中断');

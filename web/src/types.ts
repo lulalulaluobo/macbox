@@ -502,6 +502,7 @@ export interface NASUser {
 
 export interface AuthResponse {
   user: NASUser;
+  warning?: string;
 }
 
 export interface CreateNASUserRequest {

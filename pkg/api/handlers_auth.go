@@ -13,16 +13,25 @@ import (
 	"github.com/luluen/mac-nas/pkg/config"
 )
 
-func (s *Server) syncInitialAdminSMBCredentials(ctx context.Context, user *auth.User, password string) {
+func (s *Server) syncInitialAdminSMBCredentials(ctx context.Context, user *auth.User, password string) error {
 	if user == nil || user.Role != "admin" || s.authMgr == nil || s.sambaMgr == nil ||
 		!s.authMgr.IsInitialAdmin(user.ID) {
-		return
+		return nil
 	}
 	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := s.sambaMgr.SyncCredentials(syncCtx, user.Username, password); err != nil {
 		log.Printf("[MacNAS Samba] 首位超级管理员凭据同步失败: %v", err)
+		return err
 	}
+	return nil
+}
+
+func smbCredentialSyncWarning(err error) string {
+	if err == nil {
+		return ""
+	}
+	return "SMB 凭据同步失败；Web 账号操作已完成，请确认 VM 正在运行后重新登录再试"
 }
 
 func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, rememberMe bool) {
@@ -81,11 +90,15 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.syncInitialAdminSMBCredentials(r.Context(), user, req.Password)
+	smbWarning := smbCredentialSyncWarning(s.syncInitialAdminSMBCredentials(r.Context(), user, req.Password))
 	s.setSessionCookie(w, r, token, req.RememberMe)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	response := map[string]interface{}{
 		"user": user,
-	})
+	}
+	if smbWarning != "" {
+		response["warning"] = smbWarning
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
@@ -120,11 +133,15 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.syncInitialAdminSMBCredentials(r.Context(), user, req.Password)
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
+	smbWarning := smbCredentialSyncWarning(s.syncInitialAdminSMBCredentials(r.Context(), user, req.Password))
+	response := map[string]interface{}{
 		"status": "ok",
 		"user":   user,
-	})
+	}
+	if smbWarning != "" {
+		response["warning"] = smbWarning
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
@@ -173,12 +190,17 @@ func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.syncInitialAdminSMBCredentials(r.Context(), user, req.NewPassword)
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status":  "ok",
-		"message": "密码修改成功",
-	})
+	smbWarning := smbCredentialSyncWarning(s.syncInitialAdminSMBCredentials(r.Context(), user, req.NewPassword))
+	response := map[string]interface{}{
+		"status":    "ok",
+		"message":   "密码修改成功",
+		"smbSynced": smbWarning == "",
+	}
+	if smbWarning != "" {
+		response["message"] = "管理员密码已修改，但 SMB 凭据同步失败"
+		response["warning"] = smbWarning
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleAuthListUsers(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +261,15 @@ func (s *Server) handleAuthUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isInitialAdmin && req.NewPassword != nil && *req.NewPassword != "" {
-		s.syncInitialAdminSMBCredentials(r.Context(), updatedUser, *req.NewPassword)
+		if err := s.syncInitialAdminSMBCredentials(r.Context(), updatedUser, *req.NewPassword); err != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"status":    "ok",
+				"user":      updatedUser,
+				"smbSynced": false,
+				"warning":   smbCredentialSyncWarning(err),
+			})
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

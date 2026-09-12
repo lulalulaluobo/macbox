@@ -42,9 +42,11 @@ type SambaStatus struct {
 }
 
 type Manager struct {
-	cfg   *config.Config
-	vmMgr *vm.Manager
-	mu    sync.Mutex
+	cfg                *config.Config
+	vmMgr              *vm.Manager
+	mu                 sync.Mutex
+	credentialUser     string
+	credentialPassword string
 }
 
 const (
@@ -613,8 +615,9 @@ func (m *Manager) ToggleService(ctx context.Context, enable bool) error {
 }
 
 // SyncCredentials makes the first Web administrator's credentials the only
-// SMB credentials. The desired values are persisted before touching the VM;
-// if the VM is stopped, EnsurePassword will apply them on the next start.
+// SMB credentials. The password is retained in process memory only; Samba's
+// passdb persists the verifier inside the VM without exposing the plaintext in
+// the host config file.
 func (m *Manager) SyncCredentials(ctx context.Context, username, password string) error {
 	username = strings.TrimSpace(username)
 	if err := config.ValidateSambaUsername(username); err != nil {
@@ -630,20 +633,21 @@ func (m *Manager) SyncCredentials(ctx context.Context, username, password string
 	if err != nil {
 		return fmt.Errorf("读取 SMB 凭据配置失败: %w", err)
 	}
-	if cfgSnapshot.Samba.User == username && cfgSnapshot.Samba.Password == password {
-		return nil
+	if cfgSnapshot.Samba.User != username {
+		if err := config.Update(m.cfg, func(updated *config.Config) error {
+			updated.Samba.User = username
+			return nil
+		}); err != nil {
+			return fmt.Errorf("保存 SMB 用户名失败: %w", err)
+		}
 	}
-	if err := config.Update(m.cfg, func(updated *config.Config) error {
-		updated.Samba.User = username
-		updated.Samba.Password = password
-		return nil
-	}); err != nil {
-		return fmt.Errorf("保存 SMB 凭据失败: %w", err)
-	}
+	m.credentialUser = username
+	m.credentialPassword = password
 
 	vmStat, statusErr := m.vmMgr.GetStatusContext(ctx)
 	if statusErr != nil || vmStat == nil || vmStat.Status != "Running" {
-		// The next VM start applies the persisted credentials and username map.
+		// The next VM start in this process applies the queued credentials. After
+		// a backend restart, the administrator's next login queues them again.
 		return nil
 	}
 	return m.ensurePasswordLocked(ctx)
@@ -656,17 +660,23 @@ func (m *Manager) EnsurePassword(ctx context.Context) error {
 }
 
 func (m *Manager) ensurePasswordLocked(ctx context.Context) error {
-	cfgSnapshot, err := config.Snapshot(m.cfg)
-	if err != nil {
-		return fmt.Errorf("读取 Samba 密码配置失败: %w", err)
+	pwd := m.credentialPassword
+	if pwd == "" {
+		// An existing VM already keeps the Samba verifier in passdb.tdb. We still
+		// refresh shares and the username map, but never invent or persist a second
+		// password that would diverge from the Web administrator account.
+		return m.applyConfigLocked(ctx)
 	}
-	pwd := cfgSnapshot.Samba.Password
 	if err := config.ValidateSambaPassword(pwd); err != nil {
 		return fmt.Errorf("Samba 密码未初始化或不符合安全要求，请先设置至少 8 个字符的密码: %w", err)
 	}
-	user := strings.TrimSpace(cfgSnapshot.Samba.User)
+	user := strings.TrimSpace(m.credentialUser)
 	if user == "" {
-		user = sambaInternalUser
+		cfgSnapshot, err := config.Snapshot(m.cfg)
+		if err != nil {
+			return fmt.Errorf("读取 Samba 用户名配置失败: %w", err)
+		}
+		user = strings.TrimSpace(cfgSnapshot.Samba.User)
 	}
 	if err := config.ValidateSambaUsername(user); err != nil {
 		return fmt.Errorf("Samba 用户名无效: %w", err)

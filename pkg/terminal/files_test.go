@@ -38,6 +38,22 @@ func TestNormalizeRequestedPathAcceptsValidDataPaths(t *testing.T) {
 	}
 }
 
+func TestDirectoryDownloadScriptsAllowAuthorizedVMPathsButRejectRoot(t *testing.T) {
+	for name, script := range map[string]string{
+		"single directory": zipDirectoryStreamScript,
+		"batch":            zipSelectedPathsStreamScript,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if strings.Contains(script, "realpath('/data')") {
+				t.Fatal("download script still hard-codes the NAS data root")
+			}
+			if !strings.Contains(script, "os.path.sep") {
+				t.Fatal("download script must continue protecting the VM root")
+			}
+		})
+	}
+}
+
 func TestNormalizeRequestedPathRejectsMalformedInput(t *testing.T) {
 	invalid := map[string]string{
 		"empty":           "",

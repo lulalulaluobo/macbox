@@ -749,10 +749,9 @@ func streamCommandDownload(w http.ResponseWriter, cmd *exec.Cmd, fileName, conte
 
 const zipDirectoryStreamScript = `import os, stat, sys, zipfile
 
-root = os.path.realpath('/data')
 directory = os.path.realpath(sys.argv[1])
-if os.path.commonpath((root, directory)) != root or directory == root:
-    raise RuntimeError('文件夹路径超出 /data 存储范围')
+if directory == os.path.sep:
+    raise RuntimeError('禁止下载虚拟机根目录')
 if not os.path.isdir(directory) or os.path.islink(directory):
     raise RuntimeError('下载目标不是有效文件夹')
 
@@ -778,16 +777,9 @@ with zipfile.ZipFile(sys.stdout.buffer, 'w', compression=zipfile.ZIP_DEFLATED, a
 
 const zipSelectedPathsStreamScript = `import os, stat, sys, zipfile
 
-root = os.path.realpath('/data')
 sources = [os.path.realpath(value) for value in sys.argv[1:]]
 if not sources or len(sources) > 100:
     raise RuntimeError('批量下载项目数量无效')
-
-def inside(candidate):
-    try:
-        return os.path.commonpath((root, candidate)) == root
-    except ValueError:
-        return False
 
 def add_tree(archive, source, archive_name):
     if os.path.isdir(source) and not os.path.islink(source):
@@ -812,7 +804,7 @@ def add_tree(archive, source, archive_name):
 used = set()
 with zipfile.ZipFile(sys.stdout.buffer, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
     for source in sources:
-        if not inside(source) or source == root or not os.path.lexists(source):
+        if source == os.path.sep or not os.path.lexists(source):
             raise RuntimeError('下载路径无效')
         name = os.path.basename(source.rstrip(os.sep))
         original = name

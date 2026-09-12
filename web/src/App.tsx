@@ -32,7 +32,7 @@ export const App: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changePwdLoading, setChangePwdLoading] = useState(false);
-  const [changePwdMsg, setChangePwdMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+	const [changePwdMsg, setChangePwdMsg] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
 
   // Check auth session on load
   const checkAuth = async () => {
@@ -140,9 +140,9 @@ export const App: React.FC = () => {
     return () => window.clearInterval(retryTimer);
   }, [currentUser, overview]);
 
-  const handleLoginSuccess = (user: NASUser) => {
-    setCurrentUser(user);
-    setError(null);
+	const handleLoginSuccess = (user: NASUser, warning?: string) => {
+		setCurrentUser(user);
+		setError(warning || null);
   };
 
   const handleLogout = async () => {
@@ -172,8 +172,12 @@ export const App: React.FC = () => {
     setChangePwdLoading(true);
     setChangePwdMsg(null);
     try {
-      await api.changePassword(oldPassword, newPassword);
-      setChangePwdMsg({ type: 'success', text: '密码修改成功！下次登录请使用新密码' });
+		const result = await api.changePassword(oldPassword, newPassword);
+		if (result.warning) {
+			setChangePwdMsg({ type: 'warning', text: `${result.message}。${result.warning}` });
+			return;
+		}
+		setChangePwdMsg({ type: 'success', text: '密码修改成功！下次登录请使用新密码' });
       setTimeout(() => {
         setShowChangePwdModal(false);
         setOldPassword('');
@@ -297,11 +301,13 @@ export const App: React.FC = () => {
 
             {changePwdMsg && (
               <div className={`p-3 rounded-xl text-xs flex items-center space-x-2 ${
-                changePwdMsg.type === 'success'
-                  ? 'bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                  : 'bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300'
+				changePwdMsg.type === 'success'
+				  ? 'bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+				  : changePwdMsg.type === 'warning'
+				  ? 'bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300'
+				  : 'bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 text-rose-700 dark:text-rose-300'
               }`}>
-                {changePwdMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+				{changePwdMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
                 <span>{changePwdMsg.text}</span>
               </div>
             )}
