@@ -347,4 +347,4 @@ cd web
 npm run build:verify
 ```
 
-当前主入口约 80 KB raw / 21 KB gzip；终端业务代码约 30 KB raw / 10 KB gzip，xterm 单独为约 334 KB raw / 85 KB gzip；所有 JavaScript chunk 均通过 180 KB gzip 门槛。Settings、StorageSettings 和 FileManager 仍保留部分页面级状态与弹窗编排，后续继续逐块迁移，避免一次性重写造成线上回归。
+当前主入口约 80 KB raw / 21 KB gzip；终端业务代码约 30 KB raw / 10 KB gzip，xterm 单独为约 334 KB raw / 85 KB gzip；所有 JavaScript chunk 均通过 180 KB gzip 门槛。Settings、StorageSettings 和 FileManager 已控制在 600 行左右，仍保留页面级状态与弹窗编排，这是当前清晰的页面边界；后续仅在新功能继续膨胀或出现真实维护痛点时再拆分。
