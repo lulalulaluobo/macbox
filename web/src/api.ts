@@ -434,7 +434,7 @@ export const api = {
       body: JSON.stringify(settings),
     }),
   getTerminalSkills: () => fetchJSON<TerminalSkillsSettings>(`${BASE_URL}/system/terminal/skills`),
-  updateTerminalSkills: (settings: { enabled: boolean; hostPath: string }) =>
+  updateTerminalSkills: (settings: { enabled: boolean; hostPath: string; confirmRisk: boolean }) =>
     fetchJSON<{ status: string; message: string; requiresRestart: boolean; settings: TerminalSkillsSettings }>(`${BASE_URL}/system/terminal/skills`, {
       method: 'POST',
       body: JSON.stringify(settings),

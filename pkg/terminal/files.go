@@ -780,6 +780,203 @@ else:
     raise RuntimeError('不支持的压缩操作')
 `
 
+// External archive tools are run inside a temporary directory and their
+// output is copied into the requested destination only after the extracted
+// tree has been checked. The tool switches also disable symbolic-link
+// extraction where supported. This keeps 7z/RAR subject to the same policy as
+// the built-in ZIP implementation instead of trusting a tool's defaults.
+const archiveExternalExtractScript = `import os, shutil, stat, subprocess, sys, tempfile
+
+tool = sys.argv[1]
+archive = os.path.realpath(sys.argv[2])
+destination = os.path.realpath(sys.argv[3])
+if not os.path.isfile(archive):
+    raise RuntimeError('压缩包不存在')
+if not os.path.isdir(destination):
+    os.makedirs(destination, exist_ok=True)
+if os.path.islink(destination):
+    raise RuntimeError('解压目标不能是符号链接')
+
+temporary = tempfile.mkdtemp(prefix='.macnas-archive-', dir=destination)
+try:
+    if tool in ('unrar', 'rar'):
+        command = [tool, 'x', '-o+', '-ol-', archive, temporary + os.sep]
+    else:
+        command = [tool, 'x', '-y', '-snld', '-o' + temporary, archive]
+    subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    root = os.path.realpath(temporary)
+    def inside_root(candidate):
+        try:
+            return os.path.commonpath((root, os.path.realpath(candidate))) == root
+        except ValueError:
+            return False
+
+    def validate_tree(current):
+        if not inside_root(current):
+            raise RuntimeError('解压结果超出临时目录')
+        for entry in os.scandir(current):
+            info = os.lstat(entry.path)
+            if stat.S_ISLNK(info.st_mode):
+                raise RuntimeError('压缩包包含不安全符号链接')
+            if stat.S_ISDIR(info.st_mode):
+                validate_tree(entry.path)
+            elif not stat.S_ISREG(info.st_mode):
+                raise RuntimeError('压缩包包含不支持的特殊文件')
+
+    def merge_tree(source, target):
+        for entry in os.scandir(source):
+            destination_path = os.path.join(target, entry.name)
+            if os.path.lexists(destination_path) and os.path.islink(destination_path):
+                raise RuntimeError('解压目标包含不安全符号链接')
+            info = os.lstat(entry.path)
+            if stat.S_ISDIR(info.st_mode):
+                if os.path.lexists(destination_path):
+                    if not os.path.isdir(destination_path) or os.path.islink(destination_path):
+                        raise RuntimeError('解压目标存在同名非目录')
+                else:
+                    os.mkdir(destination_path, 0o755)
+                merge_tree(entry.path, destination_path)
+            elif stat.S_ISREG(info.st_mode):
+                if os.path.lexists(destination_path) and os.path.isdir(destination_path):
+                    raise RuntimeError('解压目标存在同名目录')
+                fd = os.open(destination_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+                try:
+                    with os.fdopen(fd, 'wb', closefd=True) as output, open(entry.path, 'rb') as source:
+                        shutil.copyfileobj(source, output)
+                        output.flush()
+                        os.fsync(output.fileno())
+                except Exception:
+                    try: os.close(fd)
+                    except OSError: pass
+                    raise
+            else:
+                raise RuntimeError('压缩包包含不支持的特殊文件')
+
+    validate_tree(temporary)
+    merge_tree(temporary, destination)
+finally:
+    shutil.rmtree(temporary, ignore_errors=True)
+`
+
+const maxArchiveListingBytes = 8 << 20
+
+type boundedArchiveOutput struct {
+	mu        sync.Mutex
+	buffer    bytes.Buffer
+	remaining int
+	exceeded  bool
+}
+
+func (w *boundedArchiveOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.remaining <= 0 {
+		w.exceeded = true
+		return len(p), nil
+	}
+	if len(p) > w.remaining {
+		_, _ = w.buffer.Write(p[:w.remaining])
+		w.remaining = 0
+		w.exceeded = true
+		return len(p), nil
+	}
+	_, _ = w.buffer.Write(p)
+	w.remaining -= len(p)
+	return len(p), nil
+}
+
+func validateArchiveEntryName(raw string) error {
+	name := strings.ReplaceAll(raw, `\`, "/")
+	if name == "" || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return fmt.Errorf("压缩包包含非法文件名")
+	}
+	if strings.HasPrefix(name, "/") || (len(name) >= 2 && name[1] == ':') {
+		return fmt.Errorf("压缩包包含绝对路径")
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == ".." {
+			return fmt.Errorf("压缩包包含父目录跳转")
+		}
+	}
+	return nil
+}
+
+func validateSevenZipListing(output string) error {
+	inEntries := false
+	sawEntry := false
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.TrimSpace(line) == "----------" {
+			inEntries = true
+			continue
+		}
+		if !inEntries || line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, " = ")
+		if !ok {
+			return fmt.Errorf("7z 目录清单格式无效")
+		}
+		switch key {
+		case "Path":
+			sawEntry = true
+			if err := validateArchiveEntryName(value); err != nil {
+				return err
+			}
+		case "Attributes":
+			if strings.Contains(strings.ToLower(value), "l") {
+				return fmt.Errorf("压缩包包含不安全符号链接")
+			}
+		}
+	}
+	if !sawEntry {
+		return fmt.Errorf("7z 目录清单为空或格式无效")
+	}
+	return nil
+}
+
+func validateRarListing(output string) error {
+	sawEntry := false
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if line == "" {
+			continue
+		}
+		sawEntry = true
+		if err := validateArchiveEntryName(line); err != nil {
+			return err
+		}
+	}
+	if !sawEntry {
+		return fmt.Errorf("RAR 目录清单为空或格式无效")
+	}
+	return nil
+}
+
+func validateExternalArchive(ctx context.Context, instanceName, tool, archivePath string) error {
+	var args []string
+	if tool == "7z" || tool == "7zz" {
+		args = []string{tool, "l", "-slt", archivePath}
+	} else {
+		args = []string{tool, "lb", "-idq", archivePath}
+	}
+	cmd := privilegedCommand(ctx, instanceName, args...)
+	output := &boundedArchiveOutput{remaining: maxArchiveListingBytes}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("无法读取压缩包目录清单")
+	}
+	if output.exceeded {
+		return fmt.Errorf("压缩包目录清单过大，已拒绝处理")
+	}
+	if tool == "7z" || tool == "7zz" {
+		return validateSevenZipListing(output.buffer.String())
+	}
+	return validateRarListing(output.buffer.String())
+}
+
 // ArchivePathsContext creates or extracts an archive inside the VM data root.
 // ZIP is built in with Python's standard library; 7z and RAR use native VM
 // tools when available and return an actionable error when they are absent.
@@ -833,6 +1030,17 @@ func ArchivePathsContext(ctx context.Context, instanceName, operation, format, d
 	if err != nil {
 		return err
 	}
+	if operation == "extract" {
+		if err := validateExternalArchive(ctx, instanceName, tool, resolvedSources[0]); err != nil {
+			return fmt.Errorf("%s 解压前安全检查失败: %w", strings.ToUpper(format), err)
+		}
+		cmd := privilegedCommand(ctx, instanceName, "python3", "-c", archiveExternalExtractScript, tool, resolvedSources[0], resolvedDestination)
+		output, runErr := cmd.CombinedOutput()
+		if runErr != nil {
+			return fmt.Errorf("%s 解压失败: %s (%w)", strings.ToUpper(format), strings.TrimSpace(string(output)), runErr)
+		}
+		return nil
+	}
 	args := archiveToolArgs(tool, operation, format, resolvedDestination, resolvedSources)
 	cmd := privilegedCommand(ctx, instanceName, args...)
 	output, runErr := cmd.CombinedOutput()
@@ -855,7 +1063,10 @@ func findArchiveTool(ctx context.Context, instanceName, operation, format string
 	case format == "7z":
 		candidates = []string{"7z", "7zz"}
 	case format == "rar" && operation == "extract":
-		candidates = []string{"unrar", "rar", "7z", "7zz"}
+		// Prefer 7z for RAR extraction because its structured -slt listing
+		// lets us validate entry names and link attributes without parsing a
+		// human-oriented listing.
+		candidates = []string{"7z", "7zz", "unrar", "rar"}
 	case format == "rar":
 		candidates = []string{"rar"}
 	}
@@ -871,9 +1082,9 @@ func findArchiveTool(ctx context.Context, instanceName, operation, format string
 func archiveToolArgs(tool, operation, format, destination string, sources []string) []string {
 	if operation == "extract" {
 		if format == "rar" && tool != "7z" && tool != "7zz" {
-			return []string{tool, "x", "-o+", sources[0], destination + "/"}
+			return []string{tool, "x", "-o+", "-ol-", sources[0], destination + "/"}
 		}
-		return []string{tool, "x", "-y", "-o" + destination, sources[0]}
+		return []string{tool, "x", "-y", "-snld", "-o" + destination, sources[0]}
 	}
 	if format == "7z" {
 		return append([]string{tool, "a", "-y", "-t7z", destination}, sources...)

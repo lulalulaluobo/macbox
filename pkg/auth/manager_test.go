@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+const (
+	testAdminUsername = "admin"
+	testAdminPassword = "correct-horse-battery-staple"
+)
+
 func TestFreshManagerRequiresExplicitSetup(t *testing.T) {
 	mgr, err := NewManager(t.TempDir())
 	if err != nil {
@@ -16,13 +21,13 @@ func TestFreshManagerRequiresExplicitSetup(t *testing.T) {
 	if !mgr.NeedsSetup() {
 		t.Fatal("fresh manager should require setup")
 	}
-	if _, _, err := mgr.Login(InitialAdminUsername, InitialAdminPassword, false); err == nil {
+	if _, _, err := mgr.Login(testAdminUsername, testAdminPassword, false); err == nil {
 		t.Fatal("bootstrap credentials must not work before setup")
 	}
 
 	user, err := mgr.CreateInitialAdmin(CreateUserRequest{
-		Username: InitialAdminUsername,
-		Password: InitialAdminPassword,
+		Username: testAdminUsername,
+		Password: testAdminPassword,
 		Role:     "user",
 	})
 	if err != nil {
@@ -31,7 +36,7 @@ func TestFreshManagerRequiresExplicitSetup(t *testing.T) {
 	if user.Role != "admin" || mgr.NeedsSetup() {
 		t.Fatalf("initial user = %#v, setupRequired = %v", user, mgr.NeedsSetup())
 	}
-	if _, _, err := mgr.Login(InitialAdminUsername, InitialAdminPassword, false); err != nil {
+	if _, _, err := mgr.Login(testAdminUsername, testAdminPassword, false); err != nil {
 		t.Fatalf("bootstrap credentials should login after setup: %v", err)
 	}
 	if _, err := mgr.CreateInitialAdmin(CreateUserRequest{
@@ -42,21 +47,27 @@ func TestFreshManagerRequiresExplicitSetup(t *testing.T) {
 	}
 }
 
-func TestInitialAdminCredentialsAreFixed(t *testing.T) {
-	for _, req := range []CreateUserRequest{
-		{Username: "operator", Password: InitialAdminPassword},
-		{Username: InitialAdminUsername, Password: "another-password"},
-	} {
-		mgr, err := NewManager(t.TempDir())
-		if err != nil {
-			t.Fatalf("NewManager() error = %v", err)
-		}
-		if _, err := mgr.CreateInitialAdmin(req); err == nil {
-			t.Fatalf("CreateInitialAdmin accepted non-fixed credentials: %#v", req)
-		}
-		if !mgr.NeedsSetup() {
-			t.Fatalf("failed setup changed manager state for %#v", req)
-		}
+func TestInitialAdminCredentialsAreChosenDuringSetup(t *testing.T) {
+	mgr, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	if _, err := mgr.CreateInitialAdmin(CreateUserRequest{Username: "operator", Password: "another-strong-password"}); err != nil {
+		t.Fatalf("CreateInitialAdmin should accept a user-chosen strong credential: %v", err)
+	}
+	if _, _, err := mgr.Login("operator", "another-strong-password", false); err != nil {
+		t.Fatalf("chosen initial credential should login: %v", err)
+	}
+
+	weakMgr, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	if _, err := weakMgr.CreateInitialAdmin(CreateUserRequest{Username: "operator", Password: "short"}); err == nil {
+		t.Fatal("CreateInitialAdmin accepted a weak password")
+	}
+	if !weakMgr.NeedsSetup() {
+		t.Fatal("failed setup changed manager state")
 	}
 }
 
@@ -66,8 +77,8 @@ func TestLoginRateLimit(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	if _, err := mgr.CreateInitialAdmin(CreateUserRequest{
-		Username: InitialAdminUsername,
-		Password: InitialAdminPassword,
+		Username: testAdminUsername,
+		Password: testAdminPassword,
 	}); err != nil {
 		t.Fatalf("CreateInitialAdmin() error = %v", err)
 	}
@@ -77,7 +88,7 @@ func TestLoginRateLimit(t *testing.T) {
 			t.Fatal("wrong password should fail")
 		}
 	}
-	if _, _, err := mgr.LoginFrom(InitialAdminUsername, InitialAdminPassword, false, "127.0.0.1"); !errors.Is(err, ErrTooManyLoginAttempts) {
+	if _, _, err := mgr.LoginFrom(testAdminUsername, testAdminPassword, false, "127.0.0.1"); !errors.Is(err, ErrTooManyLoginAttempts) {
 		t.Fatalf("expected rate limit error, got %v", err)
 	}
 }
@@ -114,8 +125,8 @@ func TestNewPasswordsUseBcryptAndPasswordChangeRevokesSessions(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	user, err := mgr.CreateInitialAdmin(CreateUserRequest{
-		Username: InitialAdminUsername,
-		Password: InitialAdminPassword,
+		Username: testAdminUsername,
+		Password: testAdminPassword,
 	})
 	if err != nil {
 		t.Fatalf("CreateInitialAdmin() error = %v", err)
@@ -124,11 +135,11 @@ func TestNewPasswordsUseBcryptAndPasswordChangeRevokesSessions(t *testing.T) {
 	if !strings.HasPrefix(mgr.users[user.ID].PasswordHash, "$2") {
 		t.Fatalf("new password hash = %q, want bcrypt hash", mgr.users[user.ID].PasswordHash)
 	}
-	token, _, err := mgr.Login(InitialAdminUsername, InitialAdminPassword, false)
+	token, _, err := mgr.Login(testAdminUsername, testAdminPassword, false)
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	if err := mgr.ChangePassword(user.ID, InitialAdminPassword, "a-different-password-456"); err != nil {
+	if err := mgr.ChangePassword(user.ID, testAdminPassword, "a-different-password-456"); err != nil {
 		t.Fatalf("ChangePassword() error = %v", err)
 	}
 	if _, err := mgr.ValidateToken(token); err == nil {
@@ -143,8 +154,8 @@ func TestUpdateUserValidationIsAtomic(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	user, err := mgr.CreateInitialAdmin(CreateUserRequest{
-		Username: InitialAdminUsername,
-		Password: InitialAdminPassword,
+		Username: testAdminUsername,
+		Password: testAdminPassword,
 	})
 	if err != nil {
 		t.Fatalf("CreateInitialAdmin() error = %v", err)

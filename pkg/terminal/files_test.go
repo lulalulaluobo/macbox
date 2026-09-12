@@ -154,6 +154,47 @@ func TestNormalizeTrashIDs(t *testing.T) {
 	}
 }
 
+func TestValidateArchiveEntryNameRejectsEscapePaths(t *testing.T) {
+	valid := []string{"project/readme.txt", "中文 文件.txt", "./nested/item.bin"}
+	for _, name := range valid {
+		if err := validateArchiveEntryName(name); err != nil {
+			t.Errorf("valid archive entry %q rejected: %v", name, err)
+		}
+	}
+
+	invalid := []string{"../outside.txt", "nested/../../outside.txt", "/absolute.txt", `C:\\absolute.txt`, "bad\nname.txt"}
+	for _, name := range invalid {
+		if err := validateArchiveEntryName(name); err == nil {
+			t.Errorf("unsafe archive entry %q was accepted", name)
+		}
+	}
+}
+
+func TestValidateExternalArchiveListings(t *testing.T) {
+	listing := ""+
+		"Path = archive.7z\nType = 7z\n----------\n" +
+		"Path = folder/file.txt\nAttributes = A\nSize = 12\n"
+	if err := validateSevenZipListing(listing); err != nil {
+		t.Fatalf("safe 7z listing rejected: %v", err)
+	}
+
+	for _, unsafe := range []string{
+		"Path = archive.7z\n----------\nPath = ../outside\nAttributes = A\n",
+		"Path = archive.7z\n----------\nPath = link\nAttributes = L\n",
+	} {
+		if err := validateSevenZipListing(unsafe); err == nil {
+			t.Fatalf("unsafe 7z listing was accepted: %q", unsafe)
+		}
+	}
+
+	if err := validateRarListing("folder/file.txt\n中文.txt\n"); err != nil {
+		t.Fatalf("safe RAR listing rejected: %v", err)
+	}
+	if err := validateRarListing("../outside\n"); err == nil {
+		t.Fatal("unsafe RAR listing was accepted")
+	}
+}
+
 func TestParseRange(t *testing.T) {
 	const size = int64(1000)
 	cases := []struct {

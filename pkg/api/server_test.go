@@ -122,6 +122,32 @@ func TestHandlerSetsSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestHandlerRejectsUnregisteredAPIHost(t *testing.T) {
+	server := &Server{
+		mux:          http.NewServeMux(),
+		allowedHosts: configuredHosts("nas.example.test"),
+	}
+	handler := server.Handler()
+
+	malicious := httptest.NewRequest(http.MethodGet, "http://rebind.example.test/api/auth/status", nil)
+	malicious.Host = "rebind.example.test"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, malicious)
+	if response.Code != http.StatusMisdirectedRequest {
+		t.Fatalf("unregistered Host status = %d, want %d", response.Code, http.StatusMisdirectedRequest)
+	}
+
+	for _, host := range []string{"192.168.2.123:19808", "localhost:19808", "nas.example.test:19808"} {
+		request := httptest.NewRequest(http.MethodGet, "http://"+host+"/api/auth/status", nil)
+		request.Host = host
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code == http.StatusMisdirectedRequest {
+			t.Errorf("allowed Host %q was rejected", host)
+		}
+	}
+}
+
 func TestStorageOperationLockRejectsConcurrentMutation(t *testing.T) {
 	server := &Server{}
 	first := httptest.NewRecorder()

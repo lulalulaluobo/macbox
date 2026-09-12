@@ -82,14 +82,6 @@ const (
 	maxDisplayNameBytes = 256
 )
 
-// InitialAdminUsername and InitialAdminPassword are the deliberately fixed
-// bootstrap credentials for a fresh local installation. The setup endpoint is
-// loopback-only and can be used only while no console account exists.
-const (
-	InitialAdminUsername = "admin"
-	InitialAdminPassword = "admin123"
-)
-
 func validateAuthUsername(username string) error {
 	if len([]byte(username)) < 3 || len([]byte(username)) > maxUsernameBytes {
 		return errors.New("用户名长度必须在 3 到 128 个字节之间")
@@ -545,7 +537,7 @@ type CreateUserRequest struct {
 func (m *Manager) CreateUser(req CreateUserRequest) (*User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.createUserLocked(req, false)
+	return m.createUserLocked(req)
 }
 
 // CreateInitialAdmin atomically creates the first administrator. It is kept
@@ -557,24 +549,18 @@ func (m *Manager) CreateInitialAdmin(req CreateUserRequest) (*User, error) {
 	if len(m.users) != 0 {
 		return nil, errors.New("管理员初始化已完成")
 	}
-	if req.Username != InitialAdminUsername || req.Password != InitialAdminPassword {
-		return nil, fmt.Errorf("首次初始化仅允许使用固定管理员账号 %s / %s", InitialAdminUsername, InitialAdminPassword)
-	}
 	req.Role = "admin"
-	return m.createUserLocked(req, true)
+	return m.createUserLocked(req)
 }
 
-func (m *Manager) createUserLocked(req CreateUserRequest, allowBootstrapPassword bool) (*User, error) {
+func (m *Manager) createUserLocked(req CreateUserRequest) (*User, error) {
 	username := strings.TrimSpace(req.Username)
 	if err := validateAuthUsername(username); err != nil {
 		return nil, err
 	}
 
-	isBootstrapCredential := allowBootstrapPassword && username == InitialAdminUsername && req.Password == InitialAdminPassword
-	if !isBootstrapCredential {
-		if err := validateAuthPassword(req.Password); err != nil {
-			return nil, err
-		}
+	if err := validateAuthPassword(req.Password); err != nil {
+		return nil, err
 	}
 
 	role := strings.ToLower(strings.TrimSpace(req.Role))

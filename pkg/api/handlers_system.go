@@ -425,8 +425,9 @@ func (s *Server) handleGetTerminalSkills(w http.ResponseWriter, _ *http.Request)
 
 func (s *Server) handleUpdateTerminalSkills(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Enabled  bool   `json:"enabled"`
-		HostPath string `json:"hostPath"`
+		Enabled     bool   `json:"enabled"`
+		HostPath    string `json:"hostPath"`
+		ConfirmRisk bool   `json:"confirmRisk"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "参数解析失败")
@@ -439,6 +440,10 @@ func (s *Server) handleUpdateTerminalSkills(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if req.Enabled {
+		if !req.ConfirmRisk {
+			writeError(w, http.StatusBadRequest, "请确认 Skill 目录可能包含本机敏感文件，映射将以只读方式暴露给 VM/AI CLI")
+			return
+		}
 		if hostPath == "" {
 			writeError(w, http.StatusBadRequest, "请先选择本机 AI Skill 目录")
 			return

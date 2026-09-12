@@ -38,6 +38,7 @@ type Server struct {
 	authInitErr     error
 	projectRoot     string
 	allowedOrigins  map[string]struct{}
+	allowedHosts    map[string]struct{}
 	trustedProxies  []*net.IPNet
 	uploadSlots     chan struct{}
 	mux             *http.ServeMux
@@ -79,6 +80,55 @@ func configuredOrigins(raw string) map[string]struct{} {
 		}
 	}
 	return origins
+}
+
+// configuredHosts contains optional DNS names used by a reverse proxy. IP
+// literals and localhost are accepted by default because they cannot be
+// changed by DNS rebinding. Host names must be explicitly registered so a
+// malicious page cannot turn a rebinding domain into a same-origin request.
+func configuredHosts(raw string) map[string]struct{} {
+	hosts := make(map[string]struct{})
+	for _, host := range strings.Split(raw, ",") {
+		host = normalizeRequestHost(host)
+		if host != "" {
+			hosts[host] = struct{}{}
+		}
+	}
+	return hosts
+}
+
+func normalizeRequestHost(raw string) string {
+	host := strings.ToLower(strings.TrimSpace(raw))
+	if host == "" || strings.ContainsAny(host, "\r\n") {
+		return ""
+	}
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	} else if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	}
+	return strings.TrimSuffix(host, ".")
+}
+
+func (s *Server) hostAllowed(r *http.Request) bool {
+	// Hand-built Server values are used by package-level unit tests. Production
+	// constructors always initialize this map, so a nil map remains a safe
+	// compatibility default for embedded callers that predate Host filtering.
+	if s.allowedHosts == nil {
+		return true
+	}
+	host := normalizeRequestHost(r.Host)
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return !ip.IsUnspecified()
+	}
+	_, ok := s.allowedHosts[host]
+	return ok
 }
 
 func (s *Server) originAllowed(r *http.Request, origin string) bool {
@@ -297,6 +347,7 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 		authInitErr:     authInitErr,
 		projectRoot:     projectRoot,
 		allowedOrigins:  configuredOrigins(os.Getenv("MACNAS_ALLOWED_ORIGINS")),
+		allowedHosts:    configuredHosts(os.Getenv("MACNAS_ALLOWED_HOSTS")),
 		trustedProxies:  configuredProxies(os.Getenv("MACNAS_TRUSTED_PROXIES")),
 		uploadSlots:     make(chan struct{}, 2),
 		mux:             http.NewServeMux(),
@@ -455,6 +506,10 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'")
 		if s.requestIsHTTPS(r) {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") && !s.hostAllowed(r) {
+			writeError(w, http.StatusMisdirectedRequest, "请求 Host 未被允许，请使用 MacNAS 的局域网地址")
+			return
 		}
 		if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
 			if !s.originAllowed(r, origin) {

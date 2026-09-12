@@ -26,8 +26,7 @@ interface InitializationWizardProps {
 
 type WizardStep = 'check' | 'config' | 'start';
 
-const INITIAL_USERNAME = 'admin';
-const INITIAL_PASSWORD = 'admin123';
+const DEFAULT_ADMIN_USERNAME = 'admin';
 
 export const InitializationWizard: React.FC<InitializationWizardProps> = ({ overview, onRefresh, onOpenStorageSettings }) => {
   const [step, setStep] = useState<WizardStep>('check');
@@ -359,8 +358,8 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
                 <StatusCard
                   icon={KeyRound}
                   title="控制台管理员"
-                  value={INITIAL_USERNAME}
-                  detail={`固定初始密码：${INITIAL_PASSWORD}`}
+                  value="首次登录设置"
+                  detail={`请在登录页创建管理员账号和密码（默认建议账号：${DEFAULT_ADMIN_USERNAME}）`}
                   ok
                 />
                 <StatusCard

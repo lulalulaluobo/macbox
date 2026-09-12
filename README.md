@@ -50,7 +50,9 @@ macnas --lan
 http://127.0.0.1:19808
 ```
 
-首次管理员账号固定为 `admin`，初始密码为 `admin123`。首次初始化只允许本机完成；完成后，局域网设备访问终端打印的 `http://<Mac局域网IP>:19808` 即可登录。`macnas --lan` 监听 `0.0.0.0`，若不需要局域网访问，可改用 `macnas --host 127.0.0.1`。
+首次初始化只允许本机完成，登录页会要求现场设置管理员账号和至少 12 个字节的密码，不再提供公开的固定初始密码。完成后，局域网设备访问终端打印的 `http://<Mac局域网IP>:19808` 即可登录。`macnas --lan` 监听 `0.0.0.0`，若不需要局域网访问，可改用 `macnas --host 127.0.0.1`。
+
+为防止恶意网页通过 DNS Rebinding 访问 API，默认只接受 `localhost` 和 IP 地址形式的 Host。若通过反向代理使用自定义域名，请在启动服务前设置逗号分隔的 `MACNAS_ALLOWED_HOSTS`，例如 `MACNAS_ALLOWED_HOSTS=nas.example.com`；这不代表 MacNAS 已提供公网安全访问，公网仍应使用 HTTPS/VPN。
 
 ### Docker 项目的局域网访问
 

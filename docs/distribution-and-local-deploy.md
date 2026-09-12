@@ -77,6 +77,15 @@ cd MacNAS_*_macos_*
 
 首次初始化必须在运行 MacNAS 的 Mac 本机完成。初始化完成后，手机或其他局域网设备访问局域网地址即可。
 
+API 默认只接受 `localhost` 和 IP 地址形式的 Host，以阻断 DNS Rebinding。若使用反向代理自定义域名，启动前显式设置允许的主机名，例如：
+
+```bash
+export MACNAS_ALLOWED_HOSTS=nas.example.com
+macnas --lan
+```
+
+这只是 Host 校验配置，不会为服务启用 HTTPS；当前发行版仍定位为可信局域网使用，远程访问应放在 HTTPS 反向代理或 VPN 后面。
+
 ### 4. Lima 依赖处理
 
 - 已安装 Lima：安装器直接复用。

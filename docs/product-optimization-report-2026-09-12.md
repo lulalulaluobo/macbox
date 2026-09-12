@@ -27,7 +27,7 @@ MacNAS 当前最应该做的不是继续增加应用数量，而是把下面四�
 
 ### 当前最重要的产品债务
 
-1. **代码、文档和发行行为存在漂移**：整改文档称已经消除 `sh -c`，但当前 `pkg/docker/compose.go` 仍通过 `sh -c` 做 Compose 目录扫描；`README.md` 与认证实现对“固定 `admin/admin123`”的描述也需要统一。它们未必都会直接造成漏洞，但会破坏发布审计和用户信任。
+1. **代码、文档和发行行为存在漂移**：整改文档称已经消除 `sh -c`，但当前 `pkg/docker/compose.go` 仍通过 `sh -c` 做 Compose 目录扫描；该历史问题与当前认证文档曾经存在的固定初始凭据描述都需要在发布前统一。它们未必都会直接造成漏洞，但会破坏发布审计和用户信任。
 2. **首次启动仍是“长任务黑盒”**：虽然已有 Job 和阶段 UI，但 VM 创建、启动、SSH、Docker/Samba 就绪之间还没有统一的可观测状态机、超时后的诊断包和恢复策略。
 3. **应用商城的信任边界不清楚**：`pkg/apps/community.go` 会从外部 URL 读取目录；对部分条目还会根据 ID 推断镜像名并拼装 Compose。外部目录不是签名清单，`latest` 也不是可复现版本。
 4. **Compose 的能力大于 MacNAS 的安全策略**：Compose 标准支持 `ports`、`volumes`、`healthcheck`、`cap_add`、`security_opt`、`privileged` 等大量字段。[Docker Compose services 官方文档](https://docs.docker.com/reference/compose-file/services/) 当前 MacNAS 主要验证 YAML、端口和部分文本字段，还没有形成明确的能力分级与危险项确认。
@@ -120,7 +120,7 @@ MacNAS 当前最应该做的不是继续增加应用数量，而是把下面四�
 
 对照上一份后端审查，安全整改不能只看旧文档上的“已完成”，应重新建立自动化发布门槛：
 
-- 重新核对所有代码、脚本、模板、README 的默认账号、初始密码、Samba 密码和 root SSH 描述；用户要求的 `admin/admin123` 只能作为一次性初始化约定，初始化后必须强制改密或至少明确风险。
+- 重新核对所有代码、脚本、模板、README 的默认账号、初始密码、Samba 密码和 root SSH 描述；当前首个管理员密码已改为首次初始化现场设置，发布包不得再出现固定生产密码。
 - 删除或替换 `pkg/docker/compose.go` 中遗留的 `sh -c`；目录扫描应改为固定参数调用或由 VM 内受控脚本完成，并补回归测试。
 - 所有 Compose 模板通过安全规则测试；禁止未声明的宿主路径和隐式高权限。
 - CI 固定 `go test -race ./...`、`go vet ./...`、前端构建、依赖漏洞扫描、模板校验和两种 macOS 架构构建。
@@ -279,4 +279,3 @@ Dockge 的价值在于坚持使用标准 `compose.yaml`、提供堆栈级管理�
 - [Kopia 官方文档](https://kopia.io/docs/)
 - [Syncthing 官方仓库](https://github.com/syncthing/syncthing)
 - [SFTPGo 官方仓库](https://github.com/drakkan/sftpgo)
-

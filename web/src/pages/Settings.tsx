@@ -129,6 +129,7 @@ export const Settings: React.FC<SettingsProps> = ({
   });
   const [skillsEnabled, setSkillsEnabled] = useState(false);
   const [skillsHostPath, setSkillsHostPath] = useState('');
+  const [skillsRiskConfirmed, setSkillsRiskConfirmed] = useState(false);
   const [skillsSaving, setSkillsSaving] = useState(false);
 
   const loadData = async () => {
@@ -151,6 +152,7 @@ export const Settings: React.FC<SettingsProps> = ({
         setTerminalSkills(skillsCfg);
         setSkillsEnabled(skillsCfg.enabled);
         setSkillsHostPath(skillsCfg.hostPath || '');
+        setSkillsRiskConfirmed(skillsCfg.enabled);
       }
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `加载系统设置失败: ${err.message}` });
@@ -490,13 +492,18 @@ export const Settings: React.FC<SettingsProps> = ({
       setAlertMsg({ type: 'error', text: '请先选择或填写本机 AI Skill 目录' });
       return;
     }
+    if (skillsEnabled && !skillsRiskConfirmed) {
+      setAlertMsg({ type: 'error', text: '请先阅读风险提示并勾选确认，再启用 Skill 映射' });
+      return;
+    }
 
     setSkillsSaving(true);
     try {
-      const res = await api.updateTerminalSkills({ enabled: skillsEnabled, hostPath });
+      const res = await api.updateTerminalSkills({ enabled: skillsEnabled, hostPath, confirmRisk: skillsEnabled && skillsRiskConfirmed });
       setTerminalSkills(res.settings);
       setSkillsEnabled(res.settings.enabled);
       setSkillsHostPath(res.settings.hostPath || '');
+      setSkillsRiskConfirmed(res.settings.enabled);
       setAlertMsg({ type: 'success', text: res.message });
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `保存 AI Skill 映射失败: ${err.message}` });
@@ -508,6 +515,7 @@ export const Settings: React.FC<SettingsProps> = ({
   const handleUseSkillsCandidate = (hostPath: string) => {
     setSkillsHostPath(hostPath);
     setSkillsEnabled(true);
+    setSkillsRiskConfirmed(false);
   };
 
   return (
@@ -1326,6 +1334,20 @@ export const Settings: React.FC<SettingsProps> = ({
             </div>
 
             <div className="mt-4 space-y-3">
+              <div className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-[11px] leading-relaxed text-amber-200">
+                <div className="font-bold text-amber-100">安全提示：这是本机目录映射</div>
+                <div className="mt-1">只选择专门存放 Skill 的目录。不要选择用户主目录、.ssh、钥匙串、浏览器资料或任何包含密码、Token、私钥的目录；启用后该目录会以只读方式暴露给 VM 中的 AI CLI。</div>
+                <label className="mt-2 flex cursor-pointer items-start gap-2 font-semibold text-amber-100">
+                  <input
+                    type="checkbox"
+                    checked={skillsRiskConfirmed}
+                    onChange={(event) => setSkillsRiskConfirmed(event.target.checked)}
+                    className="mt-0.5 rounded border-amber-300 bg-transparent text-amber-500 focus:ring-amber-400"
+                  />
+                  <span>我确认所选目录仅包含可供 AI CLI 使用的 Skill 文件</span>
+                </label>
+              </div>
+
               <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
                 <div>
                   <div className="text-xs font-semibold text-slate-200">启用 Skill 映射</div>
@@ -1335,7 +1357,11 @@ export const Settings: React.FC<SettingsProps> = ({
                   type="button"
                   role="switch"
                   aria-checked={skillsEnabled}
-                  onClick={() => setSkillsEnabled((enabled) => !enabled)}
+                  onClick={() => setSkillsEnabled((enabled) => {
+                    const next = !enabled;
+                    if (next) setSkillsRiskConfirmed(false);
+                    return next;
+                  })}
                   className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition ${skillsEnabled ? 'bg-violet-500' : 'bg-slate-700'}`}
                 >
                   <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transition ${skillsEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
@@ -1348,7 +1374,10 @@ export const Settings: React.FC<SettingsProps> = ({
                   <FolderOpen className="h-4 w-4 shrink-0 text-violet-300" />
                   <input
                     value={skillsHostPath}
-                    onChange={(event) => setSkillsHostPath(event.target.value)}
+                    onChange={(event) => {
+                      setSkillsHostPath(event.target.value);
+                      setSkillsRiskConfirmed(false);
+                    }}
                     placeholder="例如：/Users/你的用户名/.agents/skills"
                     className="min-w-0 flex-1 bg-transparent font-mono text-xs text-white outline-none placeholder:text-slate-600"
                     spellCheck={false}
@@ -1406,7 +1435,7 @@ export const Settings: React.FC<SettingsProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveTerminalSkills}
-                  disabled={skillsSaving || (skillsEnabled && !skillsHostPath.trim())}
+                  disabled={skillsSaving || (skillsEnabled && (!skillsHostPath.trim() || !skillsRiskConfirmed))}
                   className="flex items-center gap-1.5 rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {skillsSaving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}

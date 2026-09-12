@@ -37,7 +37,7 @@
 
 ### 4. 默认凭据与网络暴露收口 — ✅ 完成
 
-- 移除默认 `admin/admin123`：改为首次初始化流程（`auth.Manager.NeedsSetup` + `CreateInitialAdmin`），`POST /api/auth/setup` 仅接受 loopback 请求（有测试覆盖）。
+- 移除固定初始密码：改为首次初始化现场设置流程（`auth.Manager.NeedsSetup` + `CreateInitialAdmin`），`POST /api/auth/setup` 仅接受 loopback 请求（有测试覆盖）。
 - CORS 默认同源；跨域必须显式配置 `MACNAS_ALLOWED_ORIGINS`；WebSocket（日志与终端）统一 Origin 校验。
 - 反向代理头默认不可信；仅 `MACNAS_TRUSTED_PROXIES` 中显式声明的 IP/CIDR 可以提供 `X-Forwarded-For` 与 `X-Forwarded-Proto`。初始化 loopback 判断、登录限速 IP、Secure Cookie 与 HSTS 均使用同一可信代理解析结果。
 - 管理端默认监听 `127.0.0.1`（`config.NormalizeListenAddress`），局域网开放需显式配置。
