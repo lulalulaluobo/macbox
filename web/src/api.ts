@@ -1,4 +1,4 @@
-import { SystemOverview, SystemDiagnostics, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, VMPrerequisites, BackgroundJob, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult, NASUser, AuthResponse, CreateNASUserRequest, UpdateNASUserRequest } from './types';
+import { SystemOverview, SystemDiagnostics, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, VMPrerequisites, BackgroundJob, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, NASUser, AuthResponse, CreateNASUserRequest, UpdateNASUserRequest } from './types';
 
 const BASE_URL = '/api';
 
@@ -393,6 +393,12 @@ export const api = {
   getTerminalSettings: () => fetchJSON<TerminalSettings>(`${BASE_URL}/system/terminal/settings`),
   updateTerminalSettings: (settings: TerminalSettings) =>
     fetchJSON<{ status: string; message: string }>(`${BASE_URL}/system/terminal/settings`, {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    }),
+  getTerminalSkills: () => fetchJSON<TerminalSkillsSettings>(`${BASE_URL}/system/terminal/skills`),
+  updateTerminalSkills: (settings: { enabled: boolean; hostPath: string }) =>
+    fetchJSON<{ status: string; message: string; requiresRestart: boolean; settings: TerminalSkillsSettings }>(`${BASE_URL}/system/terminal/skills`, {
       method: 'POST',
       body: JSON.stringify(settings),
     }),

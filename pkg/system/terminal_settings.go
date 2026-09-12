@@ -14,6 +14,15 @@ type TerminalSettings struct {
 	CursorStyle      string `json:"cursorStyle"` // "block" | "underline" | "bar"
 }
 
+type AISkillsCandidate struct {
+	Name        string `json:"name"`
+	HostPath    string `json:"hostPath"`
+	Description string `json:"description"`
+	Available   bool   `json:"available"`
+	SkillCount  int    `json:"skillCount"`
+	Reason      string `json:"reason,omitempty"`
+}
+
 type TerminalSettingsManager struct {
 	filePath string
 	mu       sync.RWMutex
@@ -129,4 +138,55 @@ func (m *TerminalSettingsManager) Update(newSettings TerminalSettings) error {
 		return err
 	}
 	return nil
+}
+
+// DiscoverAISkillsCandidates returns the conventional local skill locations
+// for AI CLIs. The browser may be on another device, so these are discovered
+// by the MacNAS process on the Mac host rather than by a browser directory
+// picker.
+func DiscoverAISkillsCandidates() []AISkillsCandidate {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	definitions := []struct {
+		name        string
+		relative    string
+		description string
+	}{
+		{name: "Agent Skills（推荐）", relative: ".agents/skills", description: "Codex、Claude 等 Agent CLI 的通用 Skill 目录"},
+		{name: "Codex Skills", relative: ".codex/skills", description: "Codex CLI 的技能目录"},
+		{name: "Claude Skills", relative: ".claude/skills", description: "Claude CLI 的技能目录"},
+	}
+	candidates := make([]AISkillsCandidate, 0, len(definitions))
+	seen := make(map[string]struct{}, len(definitions))
+	for _, definition := range definitions {
+		path := filepath.Clean(filepath.Join(home, definition.relative))
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		candidate := AISkillsCandidate{
+			Name:        definition.name,
+			HostPath:    path,
+			Description: definition.description,
+		}
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			candidate.Reason = "目录不存在"
+		} else if !info.IsDir() {
+			candidate.Reason = "路径不是目录"
+		} else {
+			candidate.Available = true
+			if entries, readErr := os.ReadDir(path); readErr == nil {
+				for _, entry := range entries {
+					if entry.IsDir() {
+						candidate.SkillCount++
+					}
+				}
+			}
+		}
+		candidates = append(candidates, candidate)
+	}
+	return candidates
 }

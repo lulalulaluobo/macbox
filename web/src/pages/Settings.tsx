@@ -24,8 +24,9 @@ import {
   Moon,
   Monitor,
   Palette,
+  FolderOpen,
 } from 'lucide-react';
-import { SystemUser, SSHConfig, TerminalSettings, SSHKeyGenerationResult, NASUser } from '../types';
+import { SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, NASUser } from '../types';
 import { api } from '../api';
 import { useTheme } from '../theme';
 
@@ -116,22 +117,41 @@ export const Settings: React.FC<SettingsProps> = ({
     cursorStyle: 'block',
   });
   const [termSaving, setTermSaving] = useState(false);
+  const [terminalSkills, setTerminalSkills] = useState<TerminalSkillsSettings>({
+    enabled: false,
+    hostPath: '',
+    guestPaths: ['/home/macnasctl/.agents/skills', '/root/.agents/skills'],
+    readOnly: true,
+    status: 'disabled',
+    message: '未启用本机 Skill 目录映射',
+    requiresRestart: false,
+    candidates: [],
+  });
+  const [skillsEnabled, setSkillsEnabled] = useState(false);
+  const [skillsHostPath, setSkillsHostPath] = useState('');
+  const [skillsSaving, setSkillsSaving] = useState(false);
 
   const loadData = async () => {
     setUsersLoading(true);
     setSSHLoading(true);
     setNasUsersLoading(true);
     try {
-      const [uList, sCfg, tCfg, nUsers] = await Promise.all([
+      const [uList, sCfg, tCfg, nUsers, skillsCfg] = await Promise.all([
         api.getUsers().catch(() => []),
         api.getSSHConfig().catch(() => null),
         api.getTerminalSettings().catch(() => null),
         api.getNASUsers().catch(() => ({ users: [] })),
+        api.getTerminalSkills().catch(() => null),
       ]);
       setUsers(uList || []);
       if (sCfg) setSSHConfig(sCfg);
       if (tCfg) setTerminalSettings(tCfg);
       if (nUsers && nUsers.users) setNasUsers(nUsers.users);
+      if (skillsCfg) {
+        setTerminalSkills(skillsCfg);
+        setSkillsEnabled(skillsCfg.enabled);
+        setSkillsHostPath(skillsCfg.hostPath || '');
+      }
     } catch (err: any) {
       setAlertMsg({ type: 'error', text: `加载系统设置失败: ${err.message}` });
     } finally {
@@ -462,6 +482,32 @@ export const Settings: React.FC<SettingsProps> = ({
     } finally {
       setTermSaving(false);
     }
+  };
+
+  const handleSaveTerminalSkills = async () => {
+    const hostPath = skillsHostPath.trim();
+    if (skillsEnabled && !hostPath) {
+      setAlertMsg({ type: 'error', text: '请先选择或填写本机 AI Skill 目录' });
+      return;
+    }
+
+    setSkillsSaving(true);
+    try {
+      const res = await api.updateTerminalSkills({ enabled: skillsEnabled, hostPath });
+      setTerminalSkills(res.settings);
+      setSkillsEnabled(res.settings.enabled);
+      setSkillsHostPath(res.settings.hostPath || '');
+      setAlertMsg({ type: 'success', text: res.message });
+    } catch (err: any) {
+      setAlertMsg({ type: 'error', text: `保存 AI Skill 映射失败: ${err.message}` });
+    } finally {
+      setSkillsSaving(false);
+    }
+  };
+
+  const handleUseSkillsCandidate = (hostPath: string) => {
+    setSkillsHostPath(hostPath);
+    setSkillsEnabled(true);
   };
 
   return (
@@ -1250,6 +1296,122 @@ export const Settings: React.FC<SettingsProps> = ({
                 <p className="text-xs text-slate-400 leading-relaxed">
                   默认以当前普通用户登录，防止命令敲错误删系统核心目录，需要执行特权命令时可自行手动输入 sudo。
                 </p>
+              </div>
+            </div>
+          </div>
+
+          {/* AI CLI skills mapping */}
+          <div className="rounded-2xl border border-violet-500/25 bg-violet-500/[0.06] p-4 shadow-lg shadow-violet-500/[0.04] sm:p-5">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-400/30 bg-violet-400/10 text-violet-300">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-bold text-white">AI CLI Skill 目录</h4>
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                    terminalSkills.status === 'ready'
+                      ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+                      : terminalSkills.status === 'missing' || terminalSkills.status === 'invalid'
+                        ? 'border-rose-400/30 bg-rose-400/10 text-rose-300'
+                        : 'border-slate-700 bg-slate-800 text-slate-400'
+                  }`}>
+                    {terminalSkills.status === 'ready' ? '本机目录已就绪' : terminalSkills.status === 'disabled' ? '未启用' : terminalSkills.message}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                  将 Mac 本机的 <code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.agents/skills</code> 以只读方式映射到 VM，终端里的 Codex、Claude 等 AI CLI 可以直接调用。目录不会被 AI CLI 修改。
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200">启用 Skill 映射</div>
+                  <div className="mt-0.5 text-[11px] text-slate-500">下次启动或重启 VM 后挂载到终端</div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={skillsEnabled}
+                  onClick={() => setSkillsEnabled((enabled) => !enabled)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition ${skillsEnabled ? 'bg-violet-500' : 'bg-slate-700'}`}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transition ${skillsEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold text-slate-300">Mac 本机 Skill 目录</span>
+                <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 focus-within:border-violet-400">
+                  <FolderOpen className="h-4 w-4 shrink-0 text-violet-300" />
+                  <input
+                    value={skillsHostPath}
+                    onChange={(event) => setSkillsHostPath(event.target.value)}
+                    placeholder="例如：/Users/你的用户名/.agents/skills"
+                    className="min-w-0 flex-1 bg-transparent font-mono text-xs text-white outline-none placeholder:text-slate-600"
+                    spellCheck={false}
+                  />
+                </div>
+              </label>
+
+              {terminalSkills.candidates.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span>服务器本机扫描到的候选目录</span>
+                    <span>可用目录可直接选用</span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {terminalSkills.candidates.map((candidate) => (
+                      <button
+                        key={candidate.hostPath}
+                        type="button"
+                        disabled={!candidate.available}
+                        onClick={() => handleUseSkillsCandidate(candidate.hostPath)}
+                        className={`min-w-0 rounded-xl border p-2.5 text-left transition ${
+                          candidate.available
+                            ? skillsHostPath === candidate.hostPath
+                              ? 'border-violet-400/60 bg-violet-400/10'
+                              : 'border-slate-800 bg-slate-950/50 hover:border-violet-400/40 hover:bg-violet-400/[0.06]'
+                            : 'cursor-not-allowed border-slate-800/60 bg-slate-950/30 opacity-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-violet-300" />
+                          <span className="truncate">{candidate.name}</span>
+                        </div>
+                        <div className="mt-1 truncate font-mono text-[10px] text-slate-500" title={candidate.hostPath}>{candidate.hostPath}</div>
+                        <div className={`mt-1 text-[10px] ${candidate.available ? 'text-emerald-300' : 'text-slate-600'}`}>
+                          {candidate.available ? `${candidate.skillCount} 个 Skill 目录` : candidate.reason}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3 text-[11px] leading-relaxed text-slate-500 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div>VM 映射位置：<code className="text-slate-300">/home/macnasctl/.agents/skills</code>、<code className="text-slate-300">/root/.agents/skills</code></div>
+                  <div className="mt-1">纯 Web 访问时，浏览器目录选择器只能读取手机/当前设备，不能代表运行 Mac；因此这里由 MacNAS 在服务器本机自动扫描。</div>
+                </div>
+                <span className="shrink-0 text-emerald-300">只读映射</span>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                {terminalSkills.requiresRestart ? (
+                  <span className="text-[11px] font-semibold text-amber-300">配置已保存，请下次启动或重启虚拟机使映射生效</span>
+                ) : <span />}
+                <button
+                  type="button"
+                  onClick={handleSaveTerminalSkills}
+                  disabled={skillsSaving || (skillsEnabled && !skillsHostPath.trim())}
+                  className="flex items-center gap-1.5 rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {skillsSaving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  <span>保存 Skill 映射</span>
+                </button>
               </div>
             </div>
           </div>

@@ -10,9 +10,10 @@ type DockerTab = 'overview' | 'containers' | 'compose' | 'images' | 'networks';
 
 interface DockerProps {
   onOpenTerminalWithLogs?: (payload: { containerName: string; logs: string }) => void;
+  primaryIP?: string;
 }
 
-export const Docker: React.FC<DockerProps> = ({ onOpenTerminalWithLogs }) => {
+export const Docker: React.FC<DockerProps> = ({ onOpenTerminalWithLogs, primaryIP }) => {
   const [activeTab, setActiveTab] = useState<DockerTab>('overview');
 
   const navItems: { id: DockerTab; label: string; icon: React.ReactNode; badge?: string }[] = [
@@ -61,7 +62,7 @@ export const Docker: React.FC<DockerProps> = ({ onOpenTerminalWithLogs }) => {
       {/* Main Workspace Area */}
       <div className="min-h-0 w-full flex-1 overflow-hidden">
         {activeTab === 'overview' && <DockerOverview onNavigateTab={setActiveTab} />}
-        {activeTab === 'containers' && <DockerContainers onOpenTerminalWithLogs={onOpenTerminalWithLogs} />}
+        {activeTab === 'containers' && <DockerContainers onOpenTerminalWithLogs={onOpenTerminalWithLogs} primaryIP={primaryIP} />}
         {activeTab === 'compose' && <DockerCompose />}
         {activeTab === 'images' && <DockerImages />}
         {activeTab === 'networks' && <DockerNetworks />}

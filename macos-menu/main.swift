@@ -8,6 +8,36 @@ import Darwin
 /// MacNAS. It never scans or removes unrelated Lima instances, Docker data,
 /// or host processes.
 final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private enum WebServiceState {
+        case checking
+        case running
+        case stopped
+
+        var label: String {
+            switch self {
+            case .checking: return "检查中"
+            case .running: return "运行中"
+            case .stopped: return "未运行"
+            }
+        }
+
+        var color: NSColor {
+            switch self {
+            case .checking: return .systemOrange
+            case .running: return .systemGreen
+            case .stopped: return .systemOrange
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .checking: return "circle.dotted"
+            case .running: return "checkmark.circle.fill"
+            case .stopped: return "pause.circle.fill"
+            }
+        }
+    }
+
     private let fileManager = FileManager.default
     private let home = FileManager.default.homeDirectoryForCurrentUser.path
     private let defaultPort = 19808
@@ -19,18 +49,13 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var backendLogHandle: FileHandle?
     private var actionInProgress = false
     private var backendRunning = false
+    private var webServiceState: WebServiceState = .checking
     private var port: Int { configuredPort() }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "server.rack", accessibilityDescription: "MacNAS")
-                ?? NSImage(named: NSImage.applicationIconName)
-            button.image?.isTemplate = true
-            button.toolTip = "MacNAS"
-        }
-
         buildMenu()
+        applyStatusVisual(.checking)
         refreshStatus(nil)
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             self?.refreshStatus(nil)
@@ -78,19 +103,45 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func refreshStatus(_ sender: Any?) {
+        // Show an explicit visual transition for the initial check, a manual
+        // refresh, and actions that are currently changing the service state.
+        if sender != nil || actionInProgress || webServiceState == .checking {
+            applyStatusVisual(.checking)
+        }
         checkBackend { [weak self] running in
             guard let self else { return }
             self.backendRunning = running
-            self.statusMenuItem.title = running
-                ? "MacNAS · Web 服务运行中（端口 \(self.port)）"
-                : "MacNAS · Web 服务未运行（端口 \(self.port)）"
-            self.statusItem.button?.toolTip = running ? "MacNAS：运行中" : "MacNAS：未运行"
+            self.applyStatusVisual(running ? .running : .stopped)
         }
+    }
+
+    private func applyStatusVisual(_ state: WebServiceState) {
+        webServiceState = state
+        statusMenuItem.title = "MacNAS · Web 服务\(state.label)（端口 \(port)）"
+        statusMenuItem.image = symbolImage(state.symbolName, color: state.color, size: NSSize(width: 15, height: 15))
+
+        if let button = statusItem.button {
+            button.image = symbolImage("server.rack", color: state.color, size: NSSize(width: 18, height: 18))
+                ?? NSImage(named: NSImage.applicationIconName)
+            button.image?.isTemplate = false
+            button.toolTip = "MacNAS：Web 服务\(state.label)"
+        }
+    }
+
+    private func symbolImage(_ name: String, color: NSColor, size: NSSize) -> NSImage? {
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: "MacNAS")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [color])) else {
+            return nil
+        }
+        image.isTemplate = false
+        image.size = size
+        return image
     }
 
     @objc private func startBackend(_ sender: Any?) {
         guard !actionInProgress else { return }
         actionInProgress = true
+        applyStatusVisual(.checking)
         checkBackend { [weak self] alreadyRunning in
             guard let self else { return }
             if alreadyRunning {
@@ -172,6 +223,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func stopBackendProcess(silent: Bool, completion: (() -> Void)?) {
         guard !actionInProgress || silent else { return }
         actionInProgress = true
+        applyStatusVisual(.checking)
         let pid = ownedBackendPID()
         let launchAgent = launchAgentPath()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

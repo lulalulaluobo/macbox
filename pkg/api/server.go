@@ -10,6 +10,7 @@ import (
 	"github.com/luluen/mac-nas/pkg/docker"
 	"github.com/luluen/mac-nas/pkg/samba"
 	"github.com/luluen/mac-nas/pkg/system"
+	"github.com/luluen/mac-nas/pkg/terminal"
 	"github.com/luluen/mac-nas/pkg/vm"
 	"log"
 	"net"
@@ -32,6 +33,7 @@ type Server struct {
 	userMgr         *system.UserManager
 	sshMgr          *system.SSHManager
 	termSettingsMgr *system.TerminalSettingsManager
+	terminalMgr     *terminal.SessionManager
 	authMgr         *auth.Manager
 	authInitErr     error
 	projectRoot     string
@@ -283,6 +285,7 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 		userMgr:         userMgr,
 		sshMgr:          sshMgr,
 		termSettingsMgr: termSettingsMgr,
+		terminalMgr:     terminal.NewSessionManager(),
 		authMgr:         authMgr,
 		authInitErr:     authInitErr,
 		projectRoot:     projectRoot,
@@ -312,6 +315,9 @@ func (s *Server) Close() {
 		s.backgroundMu.Unlock()
 		if s.serverCancel != nil {
 			s.serverCancel()
+		}
+		if s.terminalMgr != nil {
+			s.terminalMgr.Close()
 		}
 		done := make(chan struct{})
 		go func() {

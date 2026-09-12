@@ -5,7 +5,7 @@ import '@xterm/xterm/css/xterm.css';
 import {
   Terminal as TerminalIcon, Folder, FolderPlus, Upload, RefreshCw, ArrowLeft,
   Download, Trash2, Edit3, Copy, Check, FileText, Film, Image, Music, Archive,
-  Code, Maximize2, Minimize2, CornerDownRight, Play,
+  Code, Maximize2, Minimize2, CornerDownRight, Star,
   PanelLeftClose, PanelLeft, X, Save, Crown, User
 } from 'lucide-react';
 import { api } from '../api';
@@ -33,6 +33,18 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const [filesLoading, setFilesLoading] = useState(false);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [favoritePaths, setFavoritePaths] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('macnas_terminal_favorite_paths') || '[]');
+      if (!Array.isArray(saved)) return [];
+      return Array.from(new Set(saved.filter((value): value is string => (
+        typeof value === 'string' && value.startsWith('/')
+      ))));
+    } catch {
+      return [];
+    }
+  });
 
   // File Modals
   const [showMkdirModal, setShowMkdirModal] = useState(false);
@@ -47,23 +59,16 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const [isDragging, setIsDragging] = useState(false);
 
   // Quick Shortcuts
-  const shortcuts = [
-    { label: 'NAS 根数据', path: '/data', icon: Folder },
-    { label: '影音媒体', path: '/data/media', icon: Film },
-    { label: '下载中心', path: '/data/downloads', icon: Download },
-    { label: 'Docker 数据', path: '/data/appdata', icon: Code },
-    { label: '用户主目录', path: '/home/macnas.linux', icon: Folder },
-    { label: '系统配置', path: '/etc', icon: FileText },
+  const rootShortcuts = [
+    { label: 'NAS 根目录', path: '/data', icon: Folder },
+    { label: 'Docker 目录', path: '/data/appdata', icon: Code },
   ];
 
-  // Quick Command Presets for Terminal
-  const quickCommands = [
-    { label: 'Docker 容器', cmd: 'docker ps\n' },
-    { label: '磁盘空间', cmd: 'df -h /data\n' },
-    { label: '系统负载', cmd: 'top -b -n 1 | head -n 15\n' },
-    { label: 'Samba 状态', cmd: 'systemctl status smbd --no-pager\n' },
-    { label: '系统内核', cmd: 'uname -a\n' },
-  ];
+  const favoriteShortcuts = favoritePaths.map((path) => ({
+    label: path.split('/').filter(Boolean).pop() || path,
+    path,
+    icon: Star,
+  }));
 
   const aiCommands = [
     {
@@ -132,9 +137,13 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
     const targetUser = userToUse || loginUser;
 
-    // WebSocket connection with user param
+    // Reuse the same PTY session after a browser refresh. sessionStorage is
+    // scoped to this browser tab, so separate tabs do not type into one PTY.
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsParams = new URLSearchParams({ user: targetUser });
+    const sessionStorageKey = `macnas_terminal_session:${window.location.host}:${targetUser}`;
+    const savedSessionID = window.sessionStorage.getItem(sessionStorageKey);
+    if (savedSessionID) wsParams.set('session', savedSessionID);
     const wsUrl = `${protocol}//${window.location.host}/api/terminal/ws?${wsParams.toString()}`;
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
@@ -153,6 +162,18 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
     ws.onmessage = (event) => {
       if (typeof event.data === 'string') {
+        try {
+          const control = JSON.parse(event.data) as { type?: string; id?: string; resumed?: boolean };
+          if (control.type === 'session' && control.id) {
+            window.sessionStorage.setItem(sessionStorageKey, control.id);
+            term.write(control.resumed
+              ? '\r\n\x1b[32m[MacNAS] 已恢复之前的终端任务和输出记录。\x1b[0m\r\n'
+              : '\r\n\x1b[36m[MacNAS] 已创建可恢复的终端任务会话。\x1b[0m\r\n');
+            return;
+          }
+        } catch {
+          // PTY output is usually plain text; non-JSON output goes straight to xterm.
+        }
         term.write(event.data);
       } else {
         term.write(new Uint8Array(event.data));
@@ -216,6 +237,14 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
       if (xtermInstance.current) xtermInstance.current.dispose();
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('macnas_terminal_favorite_paths', JSON.stringify(favoritePaths));
+    } catch {
+      // 收藏仅作为快捷入口，浏览器无法写入时不影响文件管理功能。
+    }
+  }, [favoritePaths]);
 
   // Fit terminal when sidebar toggles or fullscreen changes
   useEffect(() => {
@@ -357,6 +386,18 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
     setTimeout(() => setCopiedPath(null), 2000);
   };
 
+  const handleToggleFavorite = (path: string) => {
+    setFavoritePaths((prev) => {
+      const isFavorite = prev.includes(path);
+      const next = isFavorite ? prev.filter((item) => item !== path) : [...prev, path];
+      setAlertMsg({
+        type: 'success',
+        text: isFavorite ? `已取消收藏 ${path}` : `已收藏 ${path}，可从上方快捷目录进入`,
+      });
+      return next;
+    });
+  };
+
   // File Icon Helper
   const getFileIcon = (item: FileItem) => {
     if (item.isDir) {
@@ -438,19 +479,39 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
                 </div>
               </div>
 
-              {/* Quick Path Shortcuts */}
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {shortcuts.map((sc) => (
+              {/* Quick Path Shortcuts: keep the two stable roots first, then user favorites. */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pt-1 pb-0.5 scrollbar-none">
+                {rootShortcuts.map((sc) => (
                   <button
                     key={sc.path}
                     onClick={() => loadFiles(sc.path)}
-                    className={`px-2 py-1 rounded-md text-[11px] font-medium border transition flex items-center space-x-1 ${
+                    className={`flex shrink-0 items-center space-x-1 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
                       currentPath === sc.path
-                        ? 'bg-sky-500/20 text-sky-300 border-sky-500/40 font-bold'
-                        : 'bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-700/60'
+                        ? 'border-sky-500/40 bg-sky-500/20 font-bold text-sky-300'
+                        : 'border-slate-700/60 bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                     }`}
+                    title={sc.path}
                   >
                     <sc.icon className="w-3 h-3" />
+                    <span>{sc.label}</span>
+                  </button>
+                ))}
+
+                {favoriteShortcuts.length > 0 && (
+                  <span className="mx-0.5 h-4 w-px shrink-0 bg-slate-700/80" aria-hidden="true" />
+                )}
+                {favoriteShortcuts.map((sc) => (
+                  <button
+                    key={sc.path}
+                    onClick={() => loadFiles(sc.path)}
+                    className={`flex shrink-0 items-center space-x-1 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+                      currentPath === sc.path
+                        ? 'border-sky-500/40 bg-sky-500/20 font-bold text-slate-100'
+                        : 'border-slate-700/60 bg-slate-800/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+                    }`}
+                    title={sc.path}
+                  >
+                    <sc.icon className="h-3 w-3 fill-amber-300 text-amber-300" />
                     <span>{sc.label}</span>
                   </button>
                 ))}
@@ -539,8 +600,26 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
                     <div className="flex items-center space-x-2 text-slate-500 shrink-0">
                       <span className="text-[11px] font-mono hidden sm:inline">{file.sizeFormatted}</span>
 
+                      {/* Favorite is always available on touch screens; other actions appear on hover. */}
+                      {file.isDir && (
+                        <button
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleToggleFavorite(file.path);
+                          }}
+                          className={`rounded p-1 transition ${favoritePaths.includes(file.path)
+                            ? 'text-amber-300 hover:bg-amber-400/20 hover:text-amber-200'
+                            : 'text-slate-500 hover:bg-amber-400/20 hover:text-amber-300'
+                          }`}
+                          title={favoritePaths.includes(file.path) ? '取消收藏' : '收藏目录'}
+                          aria-label={favoritePaths.includes(file.path) ? `取消收藏 ${file.name}` : `收藏 ${file.name}`}
+                        >
+                          <Star className={`h-3.5 w-3.5 ${favoritePaths.includes(file.path) ? 'fill-amber-300' : ''}`} />
+                        </button>
+                      )}
+
                       {/* Action buttons */}
-                      <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center space-x-1 opacity-70 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                         {file.isDir ? (
                           <button
                             onClick={() => handleOpenInTerminal(file.path)}
@@ -655,18 +734,6 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
             {/* Quick Command Buttons */}
             <div className="flex w-full items-center gap-1.5 overflow-x-auto pb-0.5 sm:w-auto">
-              {quickCommands.map((qc) => (
-                <button
-                  key={qc.label}
-                  onClick={() => sendToTerminal(qc.cmd)}
-                  disabled={!connected}
-                  className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md bg-slate-800/80 px-2 py-1 text-[11px] font-mono text-slate-300 transition hover:bg-slate-700 disabled:opacity-40"
-                >
-                  <Play className="w-2.5 h-2.5 text-sky-400" />
-                  <span>{qc.label}</span>
-                </button>
-              ))}
-
               <span className="shrink-0 px-1 text-[10px] font-bold uppercase tracking-wide text-violet-300" title="以下命令会跳过 AI 工具的安全审批，请仅在可信环境使用">
                 AI 高权限
               </span>

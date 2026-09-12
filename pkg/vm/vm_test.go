@@ -117,6 +117,7 @@ func TestGenerateConfigUsesRaceSafeLocalMountScript(t *testing.T) {
 		t.Fatalf("read rendered yaml error: %v", err)
 	}
 	rendered := string(content)
+	t.Logf("rendered mounts: %s", rendered[strings.Index(rendered, "mountType:"):strings.Index(rendered, "containerd:")])
 	for _, expected := range []string{
 		"mountpoint -q \"$SOURCE_PATH\"",
 		"umount \"$TARGET_DIR\"",
@@ -125,6 +126,39 @@ func TestGenerateConfigUsesRaceSafeLocalMountScript(t *testing.T) {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("rendered VM config is missing race-safe mount step %q", expected)
 		}
+	}
+}
+
+func TestGenerateConfigIncludesAISkillsMapping(t *testing.T) {
+	testHome := t.TempDir()
+	t.Setenv("HOME", testHome)
+	tmplPath := filepath.Join("..", "..", "templates", "vm", "macnas.yaml.tmpl")
+	outputPath := filepath.Join(t.TempDir(), "ai-skills.yaml")
+	skillsPath := filepath.Join(testHome, ".agents", "skills")
+	if err := os.MkdirAll(skillsPath, 0700); err != nil {
+		t.Fatalf("create skills directory: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Terminal.AISkillsEnabled = true
+	cfg.Terminal.AISkillsHostPath = skillsPath
+	if err := NewManager(cfg).GenerateConfigFile(tmplPath, outputPath); err != nil {
+		t.Fatalf("GenerateConfigFile error: %v", err)
+	}
+
+	content, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read rendered yaml error: %v", err)
+	}
+	rendered := string(content)
+	if !strings.Contains(rendered, `mountPoint: "/mnt/macnas-ai-skills"`) {
+		t.Fatal("rendered VM config is missing the AI skills mount point")
+	}
+	if !strings.Contains(rendered, skillsPath) {
+		t.Fatal("rendered VM config is missing the selected AI skills host path")
+	}
+	if !strings.Contains(rendered, "/home/macnasctl/.agents") || !strings.Contains(rendered, "/root/.agents") {
+		t.Fatal("rendered VM config is missing the per-user AI skills directories")
 	}
 }
 

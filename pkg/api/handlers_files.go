@@ -19,7 +19,7 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 			r.URL.RawQuery = q.Encode()
 		}
 	}
-	terminal.HandleTerminalWS(w, r, s.vmMgr.InstanceName(), s.allowedOrigins)
+	terminal.HandleTerminalWS(w, r, s.vmMgr.InstanceName(), s.allowedOrigins, s.terminalMgr)
 }
 
 // File System Handlers

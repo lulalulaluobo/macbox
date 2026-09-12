@@ -130,6 +130,24 @@ func TestNormalizeDataDiskName(t *testing.T) {
 	}
 }
 
+func TestNormalizeAISkillsHostPath(t *testing.T) {
+	if got, err := NormalizeAISkillsHostPath("/Users/example/.agents/skills"); err != nil || got != "/Users/example/.agents/skills" {
+		t.Fatalf("valid AI skills path = %q, %v", got, err)
+	}
+	for _, path := range []string{"", "/", "relative/.agents/skills", "/tmp/skills\n"} {
+		got, err := NormalizeAISkillsHostPath(path)
+		if path == "" {
+			if err != nil || got != "" {
+				t.Fatalf("empty AI skills path = %q, %v; want empty", got, err)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("NormalizeAISkillsHostPath(%q) = %q, want error", path, got)
+		}
+	}
+}
+
 func TestNormalizeListenAddressDefaultsToLoopback(t *testing.T) {
 	for _, input := range []string{"", "localhost", "nas.local", "not-an-ip"} {
 		if got := NormalizeListenAddress(input); got != "127.0.0.1" {

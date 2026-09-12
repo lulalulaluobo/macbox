@@ -133,6 +133,14 @@ export interface ContainerInfo {
   project?: string;
 }
 
+export interface DockerServiceShortcut {
+  id: string;
+  containerName: string;
+  name: string;
+  url: string;
+  icon: string;
+}
+
 export interface TerminalPrefill {
   id: number;
   text: string;
@@ -436,6 +444,26 @@ export interface TerminalSettings {
   defaultLoginUser: 'root' | 'default' | string;
   fontSize: number;
   cursorStyle: 'block' | 'underline' | 'bar';
+}
+
+export interface AISkillsCandidate {
+  name: string;
+  hostPath: string;
+  description: string;
+  available: boolean;
+  skillCount: number;
+  reason?: string;
+}
+
+export interface TerminalSkillsSettings {
+  enabled: boolean;
+  hostPath: string;
+  guestPaths: string[];
+  readOnly: boolean;
+  status: 'disabled' | 'ready' | 'missing' | 'invalid' | string;
+  message: string;
+  requiresRestart: boolean;
+  candidates: AISkillsCandidate[];
 }
 
 export interface NASUser {

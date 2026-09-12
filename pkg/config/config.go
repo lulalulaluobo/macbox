@@ -19,12 +19,18 @@ import (
 )
 
 type Config struct {
-	Port          int           `yaml:"port"`
-	ListenAddress string        `yaml:"listenAddress"`
-	VM            VMConfig      `yaml:"vm"`
-	Storage       StorageConfig `yaml:"storage"`
-	Samba         SambaConfig   `yaml:"samba"`
-	System        SystemConfig  `yaml:"system"`
+	Port          int            `yaml:"port"`
+	ListenAddress string         `yaml:"listenAddress"`
+	VM            VMConfig       `yaml:"vm"`
+	Storage       StorageConfig  `yaml:"storage"`
+	Terminal      TerminalConfig `yaml:"terminal"`
+	Samba         SambaConfig    `yaml:"samba"`
+	System        SystemConfig   `yaml:"system"`
+}
+
+type TerminalConfig struct {
+	AISkillsEnabled  bool   `yaml:"aiSkillsEnabled"`
+	AISkillsHostPath string `yaml:"aiSkillsHostPath"`
 }
 
 type SystemConfig struct {
@@ -181,6 +187,27 @@ func NormalizeVMName(name string) (string, error) {
 		return "", fmt.Errorf("虚拟机名称格式无效")
 	}
 	return name, nil
+}
+
+// NormalizeAISkillsHostPath validates a host directory that will be exposed
+// to the Linux VM through Lima. It deliberately keeps the path absolute and
+// does not resolve symlinks so a removable volume can be reattached later.
+func NormalizeAISkillsHostPath(hostPath string) (string, error) {
+	if strings.IndexFunc(hostPath, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("AI Skill 目录必须是有效的本机绝对路径")
+	}
+	hostPath = strings.TrimSpace(hostPath)
+	if hostPath == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(hostPath) || len(hostPath) > 4096 {
+		return "", fmt.Errorf("AI Skill 目录必须是有效的本机绝对路径")
+	}
+	clean := filepath.Clean(hostPath)
+	if clean == string(filepath.Separator) {
+		return "", fmt.Errorf("不能将本机根目录映射给 AI CLI")
+	}
+	return clean, nil
 }
 
 // NormalizeGuestTarget keeps a local mount target relative to /data. It is
@@ -354,6 +381,14 @@ func LoadConfig() (*Config, error) {
 		return cfg, err
 	}
 	cfg.VM.DataDiskName = dataDiskName
+	aiSkillsPath, err := NormalizeAISkillsHostPath(cfg.Terminal.AISkillsHostPath)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Terminal.AISkillsHostPath = aiSkillsPath
+	if cfg.Terminal.AISkillsEnabled && aiSkillsPath == "" {
+		return cfg, fmt.Errorf("AI Skill 映射已启用但未配置本机目录")
+	}
 	for i := range cfg.Storage.LocalMounts {
 		target, err := NormalizeGuestTarget(cfg.Storage.LocalMounts[i].GuestTarget)
 		if err != nil {

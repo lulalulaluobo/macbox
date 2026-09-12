@@ -69,6 +69,16 @@ agy --dangerously-skip-permissions
 
 请先在 Lima 虚拟机中安装并登录这些 CLI。上述参数会跳过安全审批，AI 可以直接执行当前终端用户允许的命令；MacNAS 不替用户审核 AI 生成的操作。
 
+### 映射本机 AI CLI Skill
+
+在 Web 控制台「设置 → 终端 → AI CLI Skill 目录」中选择 MacNAS 运行主机上的 Skill 目录。系统会自动扫描以下常见位置：
+
+- `~/.agents/skills`（推荐，Agent CLI 通用目录）
+- `~/.codex/skills`
+- `~/.claude/skills`
+
+确认后，目录会通过 Lima 以只读方式映射到 `/home/macnasctl/.agents/skills` 和 `/root/.agents/skills`。这样 Web 终端中以普通用户或 root 启动的 AI CLI 都能发现这些 Skill。纯 Web 场景下浏览器的文件夹选择器只代表当前手机/电脑，不能选择运行 MacNAS 的主机目录，因此界面使用 MacNAS 本机扫描结果和路径输入；已有运行中的 VM 保存后请重启一次。
+
 Docker 容器管理页新增 `AI` 按钮：它会获取对应容器最近 200 行日志，自动切换到 Web 终端并放入输入框。日志不会自动发送，用户可以先启动任一 AI CLI，再检查内容后点击发送；超长日志会保留末尾最多 60,000 个字符。
 
 也可以安装后立即启动：

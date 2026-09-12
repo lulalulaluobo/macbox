@@ -1,22 +1,20 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Box,
   Coffee,
   Cpu,
-  Folder,
-  Grid2X2,
   HardDrive,
   Play,
   Rocket,
   RotateCw,
   Server,
-  Settings,
   Sliders,
   Square,
   X,
 } from 'lucide-react';
-import { SystemOverview } from '../types';
+import { ContainerInfo, DockerServiceShortcut, SystemOverview } from '../types';
 import { api } from '../api';
+import { DockerServiceIcon } from '../components/DockerServiceIcon';
+import { loadDockerServiceShortcuts } from '../utils/dockerServiceShortcuts';
 
 type DashboardTarget = 'storage' | 'docker' | 'apps' | 'settings';
 
@@ -37,6 +35,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
   const [editCPUs, setEditCPUs] = useState(2);
   const [editMemory, setEditMemory] = useState(4);
   const [editDisk, setEditDisk] = useState(20);
+  const [dockerServices, setDockerServices] = useState<ContainerInfo[]>([]);
+  const [serviceShortcuts, setServiceShortcuts] = useState<DockerServiceShortcut[]>(() => loadDockerServiceShortcuts());
 
   const sys = overview?.system;
   const vm = overview?.vm;
@@ -46,6 +46,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
   const serviceInstalled = overview?.service?.installed || false;
   const currentAction = actionLoading || overview?.vmAction || '';
   const isActionBusy = Boolean(currentAction);
+
+  useEffect(() => {
+    let active = true;
+    const loadDockerServices = async () => {
+      try {
+        const containers = await api.getContainers();
+        if (active) setDockerServices(containers || []);
+      } catch {
+        if (active) setDockerServices([]);
+      }
+    };
+    const loadShortcuts = () => setServiceShortcuts(loadDockerServiceShortcuts());
+
+    loadDockerServices();
+    loadShortcuts();
+    const interval = window.setInterval(() => {
+      if (!document.hidden) loadDockerServices();
+    }, 10000);
+    window.addEventListener('storage', loadShortcuts);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener('storage', loadShortcuts);
+    };
+  }, []);
 
   const notify = (text: string) => {
     setMessage(text);
@@ -146,12 +171,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     { label: '存储', value: selectedDisk?.totalSizeString || '--', progress: selectedDisk?.usedPercent || 0, icon: HardDrive, color: 'text-cyan-500', bar: 'from-cyan-400 to-sky-500' },
   ];
 
-  const launches = [
-    { label: '文件', icon: Folder, target: 'storage' as const, tone: 'bg-sky-50 text-sky-500 dark:bg-sky-500/10' },
-    { label: '容器', icon: Box, target: 'docker' as const, tone: 'bg-blue-50 text-blue-500 dark:bg-blue-500/10' },
-    { label: '应用', icon: Grid2X2, target: 'apps' as const, tone: 'bg-violet-50 text-violet-500 dark:bg-violet-500/10' },
-    { label: '设置', icon: Settings, target: 'settings' as const, tone: 'bg-rose-50 text-rose-500 dark:bg-rose-500/10' },
-  ];
+  const serviceEntries = serviceShortcuts.map((shortcut) => ({
+    shortcut,
+    container: dockerServices.find((container) => (
+      container.id === shortcut.id.replace(/^container:/, '') || container.name === shortcut.containerName
+    )),
+  }));
+
+  const openDockerService = (shortcut: DockerServiceShortcut, container?: ContainerInfo) => {
+    if (container?.state !== 'running') {
+      notify(container ? `容器 ${container.name} 当前未运行，请先启动容器` : `未找到容器 ${shortcut.containerName}，请重新配置服务导航`);
+      return;
+    }
+    window.open(shortcut.url, '_blank', 'noopener,noreferrer');
+  };
 
   return (
     <div className="mx-auto flex h-[calc(100dvh-152px)] min-h-[500px] w-full max-w-5xl flex-col gap-3 overflow-hidden sm:h-[calc(100dvh-160px)]">
@@ -188,18 +221,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
       </section>
 
       <section className="rounded-[22px] border border-slate-200/80 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900/75 sm:p-4">
-        <h2 className="px-1 text-xs font-black text-slate-900 dark:text-white">功能</h2>
-        <div className="mt-2 grid grid-cols-4 gap-2">
-          {launches.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button key={item.target} type="button" onClick={() => onNavigateTab(item.target)} className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-slate-50 dark:hover:bg-slate-800/60">
-                <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${item.tone}`}><Icon className="h-5 w-5" /></span>
-                <span className="mt-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">{item.label}</span>
-              </button>
-            );
-          })}
+        <div className="flex items-center justify-between gap-3 px-1">
+          <div>
+            <h2 className="text-xs font-black text-slate-900 dark:text-white">Docker 服务导航</h2>
+          </div>
+          {serviceEntries.length > 0 && <span className="shrink-0 text-[10px] font-semibold text-slate-400">{serviceEntries.length} 个服务</span>}
         </div>
+
+        {serviceEntries.length === 0 ? (
+          <div className="mt-2 flex min-h-20 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 text-center text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-400">
+            暂无主页服务，前往 Docker → 容器，点击容器右侧「+」添加
+          </div>
+        ) : (
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {serviceEntries.map(({ shortcut, container }) => {
+              const isRunning = container?.state === 'running';
+              const serviceContent = (
+                <>
+                  <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${isRunning ? 'bg-sky-50 text-sky-500 dark:bg-sky-500/10 dark:text-sky-300' : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'}`}>
+                    <DockerServiceIcon name={shortcut.icon} className="h-5 w-5" />
+                  </span>
+                  <span className={`mt-1.5 max-w-full truncate text-xs font-bold ${isRunning ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`} title={shortcut.name}>{shortcut.name}</span>
+                  <span className={`mt-0.5 text-[9px] ${isRunning ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>{isRunning ? '运行中 · 点击打开' : '容器未运行'}</span>
+                </>
+              );
+
+              return isRunning ? (
+                <a key={shortcut.id} href={shortcut.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-sky-50 dark:hover:bg-sky-500/10" title={`打开 ${shortcut.name}：${shortcut.url}`}>
+                  {serviceContent}
+                </a>
+              ) : (
+                <button key={shortcut.id} type="button" onClick={() => openDockerService(shortcut, container)} className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-slate-50 dark:hover:bg-slate-800/60" title={`${shortcut.name} 当前不可用`}>
+                  {serviceContent}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <section className="rounded-[22px] border border-slate-200/80 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900/75 sm:p-4">

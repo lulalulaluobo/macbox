@@ -10,6 +10,7 @@ import (
 	"github.com/luluen/mac-nas/pkg/vm"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -360,6 +361,141 @@ func (s *Server) handleUpdateTerminalSettings(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "success",
 		"message": "终端设置已保存",
+	})
+}
+
+type terminalSkillsResponse struct {
+	Enabled         bool                       `json:"enabled"`
+	HostPath        string                     `json:"hostPath"`
+	GuestPaths      []string                   `json:"guestPaths"`
+	ReadOnly        bool                       `json:"readOnly"`
+	Status          string                     `json:"status"`
+	Message         string                     `json:"message"`
+	RequiresRestart bool                       `json:"requiresRestart"`
+	Candidates      []system.AISkillsCandidate `json:"candidates"`
+}
+
+func (s *Server) terminalSkillsState() (terminalSkillsResponse, error) {
+	cfgSnapshot, err := config.Snapshot(s.cfg)
+	if err != nil {
+		return terminalSkillsResponse{}, err
+	}
+	path := cfgSnapshot.Terminal.AISkillsHostPath
+	result := terminalSkillsResponse{
+		Enabled:    cfgSnapshot.Terminal.AISkillsEnabled,
+		HostPath:   path,
+		GuestPaths: []string{"/home/macnasctl/.agents/skills", "/root/.agents/skills"},
+		ReadOnly:   true,
+		Status:     "disabled",
+		Message:    "未启用本机 Skill 目录映射",
+		Candidates: system.DiscoverAISkillsCandidates(),
+	}
+	if !result.Enabled {
+		return result, nil
+	}
+	if path == "" {
+		result.Status = "invalid"
+		result.Message = "已启用，但没有配置本机 Skill 目录"
+		return result, nil
+	}
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		result.Status = "missing"
+		result.Message = "本机目录不存在，请重新挂载磁盘或选择其他 Skill 目录"
+		return result, nil
+	}
+	if !info.IsDir() {
+		result.Status = "invalid"
+		result.Message = "配置路径不是目录，请选择 .agents/skills 文件夹"
+		return result, nil
+	}
+	result.Status = "ready"
+	result.Message = "本机 Skill 目录已就绪，将以只读方式映射到 VM"
+	return result, nil
+}
+
+func (s *Server) handleGetTerminalSkills(w http.ResponseWriter, _ *http.Request) {
+	result, err := s.terminalSkillsState()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取 AI Skill 映射设置失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleUpdateTerminalSkills(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled  bool   `json:"enabled"`
+		HostPath string `json:"hostPath"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析失败")
+		return
+	}
+
+	hostPath, err := config.NormalizeAISkillsHostPath(req.HostPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Enabled {
+		if hostPath == "" {
+			writeError(w, http.StatusBadRequest, "请先选择本机 AI Skill 目录")
+			return
+		}
+		info, statErr := os.Stat(hostPath)
+		if os.IsNotExist(statErr) {
+			writeError(w, http.StatusBadRequest, "本机 Skill 目录不存在，请先创建或重新挂载目录")
+			return
+		}
+		if statErr != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("无法读取本机 Skill 目录: %v", statErr))
+			return
+		}
+		if !info.IsDir() {
+			writeError(w, http.StatusBadRequest, "AI Skill 路径必须是目录")
+			return
+		}
+	}
+
+	previousConfig, err := config.Snapshot(s.cfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取当前终端配置失败")
+		return
+	}
+	if err := config.Update(s.cfg, func(updated *config.Config) error {
+		updated.Terminal.AISkillsEnabled = req.Enabled
+		updated.Terminal.AISkillsHostPath = hostPath
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存 AI Skill 映射设置失败")
+		return
+	}
+	if err := s.regenerateVMConfig(); err != nil {
+		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
+			log.Printf("[MacNAS Terminal] 回滚 AI Skill 映射配置失败: %v", restoreErr)
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("重新生成虚拟机配置失败: %v", err))
+		return
+	}
+
+	s.vmMgr.SetConfigDirty(true)
+	result, err := s.terminalSkillsState()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "读取更新后的 AI Skill 映射设置失败")
+		return
+	}
+	result.RequiresRestart = true
+	message := "AI Skill 目录映射已关闭"
+	if req.Enabled {
+		message = "AI Skill 目录已保存为只读映射，请下次启动或重启虚拟机后在终端中生效"
+	}
+	result.Message = message
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":          "success",
+		"message":         message,
+		"requiresRestart": true,
+		"settings":        result,
 	})
 }
 

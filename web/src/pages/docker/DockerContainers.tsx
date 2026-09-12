@@ -16,18 +16,22 @@ import {
   Layers,
   X,
   Sparkles,
+  Plus,
 } from 'lucide-react';
-import { ContainerInfo } from '../../types';
+import { ContainerInfo, DockerServiceShortcut } from '../../types';
 import { api } from '../../api';
 import { ContainerTerminalModal } from './ContainerTerminalModal';
+import { DockerServiceShortcutModal } from './DockerServiceShortcutModal';
+import { loadDockerServiceShortcuts, upsertDockerServiceShortcut } from '../../utils/dockerServiceShortcuts';
 
 interface DockerContainersProps {
   onOpenTerminalWithLogs?: (payload: { containerName: string; logs: string }) => void;
+  primaryIP?: string;
 }
 
 const MAX_LOGS_FOR_AI = 60_000;
 
-export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTerminalWithLogs }) => {
+export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTerminalWithLogs, primaryIP }) => {
   const [containers, setContainers] = useState<ContainerInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -47,6 +51,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
   // Delete Confirm Modal
   const [deleteModalContainer, setDeleteModalContainer] = useState<ContainerInfo | null>(null);
   const [forceDelete, setForceDelete] = useState(false);
+  const [serviceShortcutContainer, setServiceShortcutContainer] = useState<ContainerInfo | null>(null);
 
   const loadContainers = async () => {
     try {
@@ -162,8 +167,14 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
     return true;
   });
 
-  const hostIP = window.location.hostname;
+  const hostIP = primaryIP || window.location.hostname || 'localhost';
   const readableLogs = logs.replace(/(?:\u001b)?\[[0-9;]*m/g, '');
+
+  const handleSaveServiceShortcut = (shortcut: DockerServiceShortcut) => {
+    upsertDockerServiceShortcut(shortcut);
+    setServiceShortcutContainer(null);
+    setAlertMsg({ type: 'success', text: `已将 ${shortcut.name} 添加到主页服务导航` });
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2.5 overflow-hidden">
@@ -384,6 +395,15 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                   </button>
 
                   <button
+                    onClick={() => setServiceShortcutContainer(container)}
+                    className="flex h-8 w-8 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-600 transition hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20"
+                    title="添加或编辑主页服务导航"
+                    aria-label={`添加 ${container.name} 到主页服务导航`}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+
+                  <button
                     onClick={() => handleSendLogsToTerminal(container.id, container.name || container.id)}
                     disabled={logsLoading}
                     className="flex items-center space-x-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300 dark:hover:bg-violet-500/20"
@@ -536,6 +556,16 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
         <ContainerTerminalModal
           containerName={activeTerminalContainer}
           onClose={() => setActiveTerminalContainer(null)}
+        />
+      )}
+
+      {serviceShortcutContainer && (
+        <DockerServiceShortcutModal
+          container={serviceShortcutContainer}
+          hostIP={hostIP}
+          initialShortcut={loadDockerServiceShortcuts().find((item) => item.id === `container:${serviceShortcutContainer.id}`)}
+          onClose={() => setServiceShortcutContainer(null)}
+          onSaved={handleSaveServiceShortcut}
         />
       )}
     </div>

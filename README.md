@@ -82,6 +82,8 @@ agy --dangerously-skip-permissions
 
 这三个 CLI 必须预先安装在 Lima 虚拟机中，并完成各自登录。按钮会跳过对应工具的安全审批，拥有当前终端用户的权限，只建议管理员在可信环境中使用。Docker 容器管理页的 `AI` 按钮会读取最近 200 行容器日志，切换到 Web 终端并填入输入框；不会自动发送，选择 AI 后仍需由用户点击发送。
 
+在「设置 → 终端」中可以配置 AI CLI Skill 目录。MacNAS 会在运行服务的 Mac 本机扫描 `~/.agents/skills`（推荐）、`~/.codex/skills` 和 `~/.claude/skills`，管理员确认后以只读方式挂载到 VM 的 `/home/macnasctl/.agents/skills` 与 `/root/.agents/skills`。纯 Web 访问时不要使用浏览器目录选择器代替本机路径：手机或浏览器选择到的是当前访问设备，而不是运行 MacNAS 的 Mac。已有运行中的 VM 保存映射后需要重启一次；尚未创建 VM 的安装会在首次启动时自动应用。
+
 ## 完整删除 MacNAS
 
 发行包根目录的 `MacNASMenu.app` 菜单包含“卸载程序（保留实例和数据）”与“彻底卸载（实例、镜像和配置）”。彻底卸载会先进行原生对话框确认，再调用安全卸载流程；不会删除其他 Lima 实例、宿主机无关 Docker 数据或整个 `~/MacNAS` 目录。

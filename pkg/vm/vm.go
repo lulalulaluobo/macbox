@@ -549,6 +549,25 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 	if err != nil {
 		return err
 	}
+	aiSkillsHostPath, err := config.NormalizeAISkillsHostPath(cfgSnapshot.Terminal.AISkillsHostPath)
+	if err != nil {
+		return err
+	}
+	if cfgSnapshot.Terminal.AISkillsEnabled {
+		if aiSkillsHostPath == "" {
+			return fmt.Errorf("AI Skill 映射已启用但未配置本机目录")
+		}
+		info, statErr := os.Stat(aiSkillsHostPath)
+		if os.IsNotExist(statErr) {
+			return fmt.Errorf("本机 AI Skill 目录不存在: %s", aiSkillsHostPath)
+		}
+		if statErr != nil {
+			return fmt.Errorf("检查本机 AI Skill 目录失败: %w", statErr)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("本机 AI Skill 路径不是目录: %s", aiSkillsHostPath)
+		}
+	}
 	for i := range localMounts {
 		target, err := config.NormalizeGuestTarget(localMounts[i].GuestTarget)
 		if err != nil {
@@ -561,25 +580,29 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 	}
 
 	data := struct {
-		CPUs            int
-		Memory          int
-		DiskSize        int
-		DataDiskName    string
-		SambaPassword   string
-		SambaPort       int
-		HostBindAddress string
-		ForwardedPorts  []int
-		LocalMounts     []config.LocalMount
+		CPUs             int
+		Memory           int
+		DiskSize         int
+		DataDiskName     string
+		SambaPassword    string
+		SambaPort        int
+		HostBindAddress  string
+		ForwardedPorts   []int
+		LocalMounts      []config.LocalMount
+		AISkillsEnabled  bool
+		AISkillsHostPath string
 	}{
-		CPUs:            cpus,
-		Memory:          memory,
-		DiskSize:        diskSize,
-		DataDiskName:    dataDiskName,
-		SambaPassword:   sambaPassword,
-		SambaPort:       sambaPort,
-		HostBindAddress: config.NormalizeListenAddress(listenAddress),
-		ForwardedPorts:  config.NormalizeForwardedPorts(forwardedPorts),
-		LocalMounts:     localMounts,
+		CPUs:             cpus,
+		Memory:           memory,
+		DiskSize:         diskSize,
+		DataDiskName:     dataDiskName,
+		SambaPassword:    sambaPassword,
+		SambaPort:        sambaPort,
+		HostBindAddress:  config.NormalizeListenAddress(listenAddress),
+		ForwardedPorts:   config.NormalizeForwardedPorts(forwardedPorts),
+		LocalMounts:      localMounts,
+		AISkillsEnabled:  cfgSnapshot.Terminal.AISkillsEnabled,
+		AISkillsHostPath: aiSkillsHostPath,
 	}
 
 	var buf bytes.Buffer
@@ -631,6 +654,124 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		}
 	}
 
+	return nil
+}
+
+// SyncAISkills creates the conventional per-user skill paths inside the VM.
+// The host directory is mounted read-only by Lima; only symlinks owned by
+// MacNAS are created or removed, so an existing user directory is never
+// overwritten.
+func (m *Manager) SyncAISkills(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfgSnapshot, err := config.Snapshot(m.cfg)
+	if err != nil {
+		return fmt.Errorf("读取 AI Skill 映射配置失败: %w", err)
+	}
+	hostPath, err := config.NormalizeAISkillsHostPath(cfgSnapshot.Terminal.AISkillsHostPath)
+	if err != nil {
+		return err
+	}
+	enabled := cfgSnapshot.Terminal.AISkillsEnabled
+	if enabled {
+		if hostPath == "" {
+			return fmt.Errorf("AI Skill 映射已启用但未配置本机目录")
+		}
+		if info, statErr := os.Stat(hostPath); statErr != nil || !info.IsDir() {
+			if statErr != nil {
+				return fmt.Errorf("本机 AI Skill 目录不可用: %w", statErr)
+			}
+			return fmt.Errorf("本机 AI Skill 路径不是目录: %s", hostPath)
+		}
+	}
+
+	const servicePath = "/etc/systemd/system/macnas-ai-skills.service"
+	const scriptPath = "/usr/local/bin/macnas-ai-skills.sh"
+	var script string
+	if enabled {
+		linkScript := `#!/bin/bash
+set -euo pipefail
+SOURCE_PATH=/mnt/macnas-ai-skills
+for i in $(seq 1 60); do
+  if mountpoint -q "$SOURCE_PATH"; then
+    break
+  fi
+  sleep 1
+done
+if ! mountpoint -q "$SOURCE_PATH" || [ ! -d "$SOURCE_PATH" ]; then
+  echo "[macnas-ai-skills] source directory is not mounted: $SOURCE_PATH" >&2
+  exit 1
+fi
+
+install -d -o macnasctl -g macnasctl -m 0755 /home/macnasctl/.agents
+install -d -m 0755 /root/.agents
+
+ensure_skill_link() {
+  local link_path="$1"
+  if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
+    echo "[macnas-ai-skills] refusing to replace existing directory: $link_path" >&2
+    return 1
+  fi
+  rm -f "$link_path"
+  ln -s "$SOURCE_PATH" "$link_path"
+}
+
+ensure_skill_link /home/macnasctl/.agents/skills
+ensure_skill_link /root/.agents/skills
+`
+		serviceContent := `[Unit]
+Description=MacNAS AI CLI skills mapping
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/macnas-ai-skills.sh
+
+[Install]
+WantedBy=multi-user.target
+`
+		script = fmt.Sprintf(`
+cat <<'SKILL_SCRIPT_EOF' > %s
+%s
+SKILL_SCRIPT_EOF
+chmod 0755 %s
+
+cat <<'SERVICE_EOF' > %s
+[Unit]
+%s
+SERVICE_EOF
+
+systemctl daemon-reload
+systemctl enable macnas-ai-skills.service
+systemctl restart macnas-ai-skills.service
+`, scriptPath, linkScript, scriptPath, servicePath, serviceContent)
+	} else {
+		script = `#!/bin/bash
+set -euo pipefail
+remove_owned_link() {
+  local link_path="$1"
+  if [ -L "$link_path" ] && [ "$(readlink "$link_path")" = "/mnt/macnas-ai-skills" ]; then
+    rm -f "$link_path"
+  fi
+}
+remove_owned_link /home/macnasctl/.agents/skills
+remove_owned_link /root/.agents/skills
+if [ -f /etc/systemd/system/macnas-ai-skills.service ]; then
+  systemctl disable --now macnas-ai-skills.service 2>/dev/null || true
+  rm -f /etc/systemd/system/macnas-ai-skills.service
+  rm -f /usr/local/bin/macnas-ai-skills.sh
+  systemctl daemon-reload
+fi
+`
+	}
+
+	// The command content is fixed and delivered through stdin. hostPath is
+	// intentionally used only for validation; it never enters a shell command.
+	if _, err := m.ExecWithInput(ctx, strings.NewReader(script), "sudo", "bash", "-s"); err != nil {
+		return fmt.Errorf("同步 VM AI Skill 目录失败: %w", err)
+	}
 	return nil
 }
 
@@ -756,6 +897,10 @@ func (m *Manager) StartWithProgress(ctx context.Context, projectRoot string, rep
 				log.Printf("[MacNAS VM] mount sync failed after start: %v", syncErr)
 				err = syncErr
 				m.SetLastError(syncErr.Error())
+			} else if skillsErr := m.SyncAISkills(ctx); skillsErr != nil {
+				log.Printf("[MacNAS VM] AI skills sync failed after start: %v", skillsErr)
+				err = skillsErr
+				m.SetLastError(skillsErr.Error())
 			} else if report != nil {
 				report("verifying-services", 92, "校验 Docker、文件服务和直通目录")
 			}

@@ -118,6 +118,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/system/ssh/keys", s.adminOnly(s.handleClearSSHAuthorizedKeys))
 	s.mux.HandleFunc("GET /api/system/terminal/settings", s.handleGetTerminalSettings)
 	s.mux.HandleFunc("POST /api/system/terminal/settings", s.adminOnly(s.handleUpdateTerminalSettings))
+	s.mux.HandleFunc("GET /api/system/terminal/skills", s.adminOnly(s.handleGetTerminalSkills))
+	s.mux.HandleFunc("POST /api/system/terminal/skills", s.adminOnly(s.handleUpdateTerminalSkills))
 
 	// 9. Web Console Authentication & User Management
 	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)

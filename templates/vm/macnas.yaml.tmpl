@@ -38,7 +38,7 @@ additionalDisks:
 {{end}}
 
 mountType: "virtiofs"
-{{if .LocalMounts}}
+{{if or .LocalMounts .AISkillsEnabled}}
 mounts:
 {{range .LocalMounts}}
 {{if .Enabled}}
@@ -46,6 +46,11 @@ mounts:
   mountPoint: {{yamlQuote (printf "/mnt/macnas-mounts/%s" .ID)}}
   writable: {{.Writable}}
 {{end}}
+{{end}}
+{{if .AISkillsEnabled}}
+- location: {{yamlQuote .AISkillsHostPath}}
+  mountPoint: "/mnt/macnas-ai-skills"
+  writable: false
 {{end}}
 {{end}}
 
@@ -83,6 +88,13 @@ provision:
     mkdir -p /data/media /data/files /data/downloads /data/photos /data/appdata/compose
     chmod 0770 /data || true
     {{end}}
+
+    # Prepare the conventional per-user directory for AI CLI skills. The
+    # read-only host mapping and symlinks are finalized by MacNAS after the VM
+    # becomes reachable, so enabling this later does not require rebuilding
+    # the VM image.
+    install -d -o macnasctl -g macnasctl -m 0755 /home/macnasctl/.agents
+    install -d -m 0755 /root/.agents
 
     # 3. 创建 VirtioFS bind mount 持久化 systemd 服务 (保证 VM 每次启动自动挂载)
     mkdir -p /mnt/macnas-mounts

@@ -253,7 +253,7 @@ export const App: React.FC = () => {
           <Storage />
         )}
 
-        {activeTab === 'docker' && <Docker onOpenTerminalWithLogs={openTerminalWithContainerLogs} />}
+        {activeTab === 'docker' && <Docker onOpenTerminalWithLogs={openTerminalWithContainerLogs} primaryIP={overview?.system.primaryIP} />}
 
         {activeTab === 'apps' && <Apps />}
 
