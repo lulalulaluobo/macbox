@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"gopkg.in/yaml.v3"
@@ -23,6 +24,7 @@ type Config struct {
 	ListenAddress string         `yaml:"listenAddress"`
 	VM            VMConfig       `yaml:"vm"`
 	Storage       StorageConfig  `yaml:"storage"`
+	Cloud         CloudConfig    `yaml:"cloud"`
 	Terminal      TerminalConfig `yaml:"terminal"`
 	Samba         SambaConfig    `yaml:"samba"`
 	System        SystemConfig   `yaml:"system"`
@@ -68,6 +70,25 @@ type StorageConfig struct {
 	LocalMounts    []LocalMount `yaml:"localMounts"`    // VirtioFS direct folder mounts from Mac
 }
 
+// CloudConfig stores remote-drive connections managed by the Web file
+// manager. Credentials are kept in the mode-0600 MacNAS config file and are
+// never serialized through the JSON API.
+type CloudConfig struct {
+	Mounts []CloudMount `yaml:"mounts"`
+}
+
+type CloudMount struct {
+	ID          string    `json:"id" yaml:"id"`
+	Provider    string    `json:"provider" yaml:"provider"`
+	Name        string    `json:"name" yaml:"name"`
+	Cookie      string    `json:"-" yaml:"cookie"`
+	RootFid     string    `json:"rootFid" yaml:"rootFid"`
+	Account     string    `json:"account,omitempty" yaml:"account,omitempty"`
+	Status      string    `json:"status" yaml:"status"`
+	Message     string    `json:"message,omitempty" yaml:"message,omitempty"`
+	LastChecked time.Time `json:"lastChecked,omitempty" yaml:"lastChecked,omitempty"`
+}
+
 type SMBShare struct {
 	ID         string `json:"id" yaml:"id"`
 	Name       string `json:"name" yaml:"name"`
@@ -106,6 +127,7 @@ func DefaultConfig() *Config {
 			MountPoint:   "",
 			DataPath:     "",
 		},
+		Cloud: CloudConfig{Mounts: []CloudMount{}},
 		Samba: SambaConfig{
 			ShareName: "MacNAS",
 			Port:      4455, // default non-conflicting host port on macOS
@@ -150,6 +172,7 @@ const (
 var (
 	dataDiskNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	localMountIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	cloudMountIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	vmNamePattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 )
 
@@ -174,6 +197,30 @@ func NormalizeLocalMountID(id string) (string, error) {
 		return "", fmt.Errorf("本地挂载 ID 格式无效")
 	}
 	return id, nil
+}
+
+func NormalizeCloudMountID(id string) (string, error) {
+	id = strings.TrimSpace(id)
+	if !cloudMountIDPattern.MatchString(id) {
+		return "", fmt.Errorf("云盘挂载 ID 格式无效")
+	}
+	return id, nil
+}
+
+func ValidateCloudMount(mount CloudMount) error {
+	if _, err := NormalizeCloudMountID(mount.ID); err != nil {
+		return err
+	}
+	if mount.Provider != "quark" {
+		return fmt.Errorf("暂不支持云盘类型 %q", mount.Provider)
+	}
+	if strings.TrimSpace(mount.Name) == "" || len(mount.Name) > 128 || strings.IndexFunc(mount.Name, unicode.IsControl) >= 0 {
+		return fmt.Errorf("云盘名称无效")
+	}
+	if strings.TrimSpace(mount.Cookie) == "" || len(mount.Cookie) > 16384 || strings.IndexFunc(mount.Cookie, unicode.IsControl) >= 0 {
+		return fmt.Errorf("夸克登录 Cookie 无效")
+	}
+	return nil
 }
 
 // NormalizeVMName validates the identifier used in ~/.lima and limactl
@@ -397,6 +444,15 @@ func LoadConfig() (*Config, error) {
 		cfg.Storage.LocalMounts[i].GuestTarget = target
 		if err := ValidateLocalMount(cfg.Storage.LocalMounts[i]); err != nil {
 			return cfg, fmt.Errorf("本地挂载 %q 配置无效: %w", cfg.Storage.LocalMounts[i].ID, err)
+		}
+	}
+	for i := range cfg.Cloud.Mounts {
+		mount := &cfg.Cloud.Mounts[i]
+		if mount.RootFid == "" {
+			mount.RootFid = "0"
+		}
+		if err := ValidateCloudMount(*mount); err != nil {
+			return cfg, fmt.Errorf("云盘挂载 %q 配置无效: %w", mount.ID, err)
 		}
 	}
 	if cfg.VM.ForwardedPorts == nil {

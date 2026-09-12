@@ -174,6 +174,34 @@ func (s *Server) handleTerminalFileDownload(w http.ResponseWriter, r *http.Reque
 	terminal.DownloadFile(w, r, s.vmMgr.InstanceName(), targetPath)
 }
 
+func (s *Server) handleTerminalArchive(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Operation   string   `json:"operation"`
+		Format      string   `json:"format"`
+		Destination string   `json:"destination"`
+		SourcePaths []string `json:"sourcePaths"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数解析错误")
+		return
+	}
+	if req.Operation == "" || req.Format == "" || req.Destination == "" || len(req.SourcePaths) == 0 {
+		writeError(w, http.StatusBadRequest, "压缩操作、格式、目标路径和源路径均不能为空")
+		return
+	}
+
+	if err := terminal.ArchivePathsContext(r.Context(), s.vmMgr.InstanceName(), req.Operation, req.Format, req.Destination, req.SourcePaths); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	message := "文件压缩成功"
+	if strings.EqualFold(req.Operation, "extract") {
+		message = "文件解压成功"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": message})
+}
+
 func (s *Server) handleTerminalFileRename(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		OldPath string `json:"oldPath"`

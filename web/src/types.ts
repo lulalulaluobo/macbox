@@ -362,10 +362,33 @@ export interface BackgroundJob {
   status: 'running' | 'succeeded' | 'failed' | 'cancelled' | string;
   stage?: string;
   progress?: number;
+  bytesDone?: number;
+  bytesTotal?: number;
+  speedBytesPerSecond?: number;
+  currentFile?: string;
   message?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CloudMount {
+  id: string;
+  provider: 'quark' | string;
+  name: string;
+  rootFid: string;
+  account?: string;
+  status: string;
+  message?: string;
+  lastChecked?: string;
+}
+
+export interface CloudFile {
+  fid: string;
+  name: string;
+  isDir: boolean;
+  size: number;
+  updatedAt: number;
 }
 
 export interface DiagnosticCheck {

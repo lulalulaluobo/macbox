@@ -95,11 +95,62 @@ func FindHomebrew() (string, bool) {
 	return "", false
 }
 
+// FindLima resolves limactl for both interactive shells and GUI-launched
+// processes. macOS apps started from Finder or the menu bar do not reliably
+// inherit the user's shell PATH, while Homebrew's Apple Silicon installation
+// normally lives outside the system default PATH.
+func FindLima() (string, bool) {
+	if path, err := exec.LookPath("limactl"); err == nil {
+		return path, true
+	}
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		"/opt/homebrew/bin/limactl",
+		"/usr/local/bin/limactl",
+		"/usr/bin/limactl",
+	}
+	if home != "" {
+		candidates = append(candidates,
+			filepath.Join(home, "homebrew", "bin", "limactl"),
+			filepath.Join(home, ".homebrew", "bin", "limactl"),
+		)
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// PrepareLimaEnvironment makes legacy direct exec.Command("limactl", ...)
+// call sites work when MacNAS was launched from Finder. The explicit resolver
+// remains the source of truth for diagnostics; this environment bridge keeps
+// storage and terminal helpers compatible without duplicating path logic.
+func PrepareLimaEnvironment() {
+	path, ok := FindLima()
+	if !ok {
+		return
+	}
+	dir := filepath.Dir(path)
+	current := os.Getenv("PATH")
+	for _, entry := range strings.Split(current, string(os.PathListSeparator)) {
+		if entry == dir {
+			return
+		}
+	}
+	if current == "" {
+		_ = os.Setenv("PATH", dir)
+		return
+	}
+	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+current)
+}
+
 // InstallLima installs Lima through an existing Homebrew installation and
 // verifies that limactl is available afterwards. Homebrew itself is never
 // bootstrapped automatically because doing so executes a remote installer.
 func InstallLima(ctx context.Context) error {
-	if _, err := exec.LookPath("limactl"); err == nil {
+	if _, ok := FindLima(); ok {
 		return nil
 	}
 	brew, ok := FindHomebrew()
@@ -110,13 +161,9 @@ func InstallLima(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("Homebrew 安装 Lima 失败: %s (%w)", strings.TrimSpace(out), err)
 	}
-	if _, err := exec.LookPath("limactl"); err == nil {
+	if _, ok := FindLima(); ok {
+		PrepareLimaEnvironment()
 		return nil
-	}
-	for _, candidate := range []string{"/opt/homebrew/bin/limactl", "/usr/local/bin/limactl"} {
-		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
-			return nil
-		}
 	}
 	return fmt.Errorf("Homebrew 已完成，但未找到 limactl，请重新打开 MacNAS 后重试")
 }
@@ -1297,7 +1344,7 @@ func runVMCommand(ctx context.Context, instanceName string, stdin io.Reader, com
 		ctx = context.Background()
 	}
 	args := append([]string{"shell", instanceName}, command...)
-	cmd := exec.CommandContext(ctx, "limactl", args...)
+	cmd := exec.CommandContext(ctx, limaCommandPath(), args...)
 	cmd.Stdin = stdin
 	var output cappedCommandOutput
 	cmd.Stdout = &output
@@ -1310,12 +1357,26 @@ func runHostCommand(ctx context.Context, name string, args ...string) (string, e
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, resolveCommandPath(name), args...)
 	var output cappedCommandOutput
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	err := cmd.Run()
 	return output.String(), err
+}
+
+func resolveCommandPath(name string) string {
+	if name == "limactl" {
+		return limaCommandPath()
+	}
+	return name
+}
+
+func limaCommandPath() string {
+	if path, ok := FindLima(); ok {
+		return path
+	}
+	return "limactl"
 }
 
 // Exec runs a command inside the Lima VM via limactl shell
@@ -1343,7 +1404,7 @@ func (m *Manager) ExecStream(ctx context.Context, w io.Writer, command ...string
 		ctx = context.Background()
 	}
 	args := append([]string{"shell", m.InstanceName()}, managementCommandArgs(command...)...)
-	cmd := exec.CommandContext(ctx, "limactl", args...)
+	cmd := exec.CommandContext(ctx, limaCommandPath(), args...)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	return cmd.Run()
@@ -1355,7 +1416,7 @@ func (m *Manager) ExecStreamWithInput(ctx context.Context, w io.Writer, stdin io
 		ctx = context.Background()
 	}
 	args := append([]string{"shell", m.InstanceName()}, managementCommandArgs(command...)...)
-	cmd := exec.CommandContext(ctx, "limactl", args...)
+	cmd := exec.CommandContext(ctx, limaCommandPath(), args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = w
 	cmd.Stderr = w

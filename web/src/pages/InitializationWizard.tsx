@@ -243,7 +243,8 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   };
 
   const isStarting = Boolean(jobId) || job?.status === 'running';
-  const isInstallingLima = Boolean(limaInstallJobId) || limaInstallJob?.status === 'running';
+  const isInstallingLima = Boolean(limaInstallJobId) || limaInstallJob?.status === 'running' || limaInstallJob?.status === 'verifying';
+  const limaInstallAwaitingCheck = !isInstallingLima && limaInstallJob?.status === 'succeeded' && !prerequisites?.limaInstalled;
   const isComplete = job?.status === 'succeeded' && sshReady && !error;
   const vmIsRunning = overview?.vm.status === 'Running';
   const elapsedLabel = `${Math.floor(startElapsedSeconds / 60)}分${String(startElapsedSeconds % 60).padStart(2, '0')}秒`;
@@ -344,9 +345,9 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
                 <StatusCard
                   icon={Terminal}
                   title="Lima 虚拟化环境"
-                  value={loading ? '检查中…' : prerequisites?.limaInstalled ? '已安装' : '未找到'}
-                  detail={prerequisites?.version || prerequisites?.limaPath || '需要先安装 limactl'}
-                  ok={Boolean(prerequisites?.limaInstalled)}
+                  value={loading ? '检查中…' : isInstallingLima ? '安装中…' : limaInstallAwaitingCheck ? '安装完成，正在复核' : prerequisites?.limaInstalled ? '已安装' : '未找到'}
+                  detail={isInstallingLima || limaInstallAwaitingCheck ? (limaInstallJob?.message || '正在重新检测 limactl，请稍候…') : prerequisites?.version || prerequisites?.limaPath || '需要先安装 limactl'}
+                  ok={!isInstallingLima && Boolean(prerequisites?.limaInstalled)}
                 />
                 <StatusCard
                   icon={HardDrive}
@@ -371,7 +372,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
                 />
               </div>
 
-              {!loading && prerequisites && !prerequisites.limaInstalled && (
+              {!loading && prerequisites && !prerequisites.limaInstalled && !limaInstallAwaitingCheck && (
                 <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200">
                   <p className="font-black">需要先安装 Lima</p>
                   <p className="leading-6">{prerequisites.message || '请在 Mac 终端安装 Lima，安装完成后返回这里重新检查。'} {prerequisites.installHint}</p>

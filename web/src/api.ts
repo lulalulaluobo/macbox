@@ -1,4 +1,4 @@
-import { SystemOverview, SystemDiagnostics, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, VMPrerequisites, BackgroundJob, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, NASUser, AuthResponse, CreateNASUserRequest, UpdateNASUserRequest } from './types';
+import { SystemOverview, SystemDiagnostics, DiskInfo, ManagedDisk, ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork, AppMetadata, CustomAppInput, SambaStatus, SMBShare, PowerStatus, ServiceStatus, LocalMount, LocalMountsResponse, VMConfigInfo, VMPrerequisites, BackgroundJob, FileItem, TrashItem, SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, NASUser, AuthResponse, CreateNASUserRequest, UpdateNASUserRequest, CloudMount, CloudFile } from './types';
 
 const BASE_URL = '/api';
 
@@ -114,6 +114,34 @@ export const api = {
     requiresRestart: boolean;
   }>(`${BASE_URL}/storage/mounts/${id}`, {
     method: 'DELETE',
+  }),
+
+  // Remote cloud drives
+  beginQuarkQRLogin: () => fetchJSON<{ loginId: string; qrURL: string; imageURL: string; expiresAt: string }>(`${BASE_URL}/storage/cloud-auth/quark/qr`, { method: 'POST' }),
+  pollQuarkQRLogin: (loginId: string) => fetchJSON<{ status: string; account?: string; message?: string }>(`${BASE_URL}/storage/cloud-auth/quark/qr/${encodeURIComponent(loginId)}`),
+  getQuarkQRImageUrl: (loginId: string) => `${BASE_URL}/storage/cloud-auth/quark/qr/${encodeURIComponent(loginId)}/image`,
+  createQuarkMountFromQR: (loginId: string, name: string) => fetchJSON<{ status: string; mount: CloudMount }>(`${BASE_URL}/storage/cloud-mounts/quark/qr/${encodeURIComponent(loginId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  }),
+  getCloudMounts: () => fetchJSON<{ mounts: CloudMount[] }>(`${BASE_URL}/storage/cloud-mounts`),
+  checkCloudMount: (id: string) => fetchJSON<{ status: string; message: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/check`, { method: 'POST' }),
+  deleteCloudMount: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  listCloudFiles: (id: string, fid = '0', offset = 0, limit = 300) => fetchJSON<{ mount: CloudMount; parentFid: string; items: CloudFile[]; hasMore: boolean; nextOffset: number }>(
+    `${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/files?${new URLSearchParams({ fid, offset: String(offset), limit: String(limit) })}`
+  ),
+  createCloudFolder: (id: string, parentFid: string, name: string) => fetchJSON<{ status: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/folders`, {
+    method: 'POST',
+    body: JSON.stringify({ parentFid, name }),
+  }),
+  renameCloudFile: (id: string, fid: string, name: string) => fetchJSON<{ status: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/rename`, {
+    method: 'POST',
+    body: JSON.stringify({ fid, name }),
+  }),
+  deleteCloudFile: (id: string, fid: string) => fetchJSON<{ status: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/files?fid=${encodeURIComponent(fid)}`, { method: 'DELETE' }),
+  downloadCloudFile: (id: string, file: Pick<CloudFile, 'fid' | 'name' | 'isDir' | 'size'>, destination: string) => fetchJSON<{ status: string; jobId: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/download`, {
+    method: 'POST',
+    body: JSON.stringify({ ...file, destination }),
   }),
 
   // Power Management (Caffeinate)
@@ -240,6 +268,8 @@ export const api = {
   }),
   getJobs: () => fetchJSON<{ jobs: BackgroundJob[] }>(`${BASE_URL}/jobs`),
   getJob: (id: string) => fetchJSON<BackgroundJob>(`${BASE_URL}/jobs/${encodeURIComponent(id)}`),
+  cancelJob: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  clearTransferJobs: () => fetchJSON<{ status: string; count: number }>(`${BASE_URL}/jobs/clear?kind=cloud.download`, { method: 'POST' }),
 
   // Web Terminal & File System
   listFiles: (path?: string, offset = 0, limit = 300) => fetchJSON<{ status: string; path: string; items: FileItem[]; hasMore: boolean; nextOffset: number }>(
@@ -282,6 +312,13 @@ export const api = {
     return res.json();
   },
   getFileDownloadUrl: (path: string) => getAuthenticatedFileUrl('download', path),
+  archiveFiles: (sourcePaths: string[], operation: 'compress' | 'extract', format: 'zip' | 'rar' | '7z', destination: string) => fetchJSON<{ status: string; message: string }>(
+    `${BASE_URL}/terminal/files/archive`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ sourcePaths, operation, format, destination }),
+    }
+  ),
   getFileRawUrl: (path: string) => getAuthenticatedFileUrl('raw', path),
   renameFile: (oldPath: string, newPath: string) => fetchJSON<{ status: string; message: string }>(
     `${BASE_URL}/terminal/files/rename`,

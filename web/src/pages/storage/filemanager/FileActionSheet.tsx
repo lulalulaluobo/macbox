@@ -1,5 +1,5 @@
 import React from 'react';
-import { Copy, Download, Edit3, FileText, Folder, Scissors, Star, Trash2, X } from 'lucide-react';
+import { Archive, Copy, Download, Edit3, FileText, Folder, Scissors, Star, Trash2, X } from 'lucide-react';
 import { FileItem } from '../../../types';
 import { api } from '../../../api';
 
@@ -13,6 +13,7 @@ interface FileActionSheetProps {
   onCut: () => void;
   onRename: () => void;
   onDelete: () => void;
+  onArchive: () => void;
 }
 
 export const FileActionSheet: React.FC<FileActionSheetProps> = ({
@@ -25,6 +26,7 @@ export const FileActionSheet: React.FC<FileActionSheetProps> = ({
   onCut,
   onRename,
   onDelete,
+  onArchive,
 }) => {
   if (!item) return null;
 
@@ -68,12 +70,16 @@ export const FileActionSheet: React.FC<FileActionSheetProps> = ({
           <Copy className="h-5 w-5" />
         </button>
 
-        {!item.isDir && (
-          <a href={api.getFileDownloadUrl(item.path)} download onClick={onClose} className="mt-3 flex min-h-12 items-center justify-between rounded-2xl bg-slate-50 px-4 text-sm font-medium text-slate-700 dark:bg-slate-800/70 dark:text-slate-200">
-            <span>下载文件</span>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button type="button" onClick={onArchive} className="flex min-h-12 items-center justify-between rounded-2xl bg-violet-50 px-4 text-sm font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+            <span>{item.isDir || !['zip', 'rar', '7z'].includes(item.ext.toLowerCase()) ? '压缩' : '解压'}</span>
+            <Archive className="h-5 w-5" />
+          </button>
+          <a href={api.getFileDownloadUrl(item.path)} download onClick={onClose} className="flex min-h-12 items-center justify-between rounded-2xl bg-slate-50 px-4 text-sm font-medium text-slate-700 dark:bg-slate-800/70 dark:text-slate-200">
+            <span>{item.isDir ? '下载文件夹（ZIP）' : '下载文件'}</span>
             <Download className="h-5 w-5" />
           </a>
-        )}
+        </div>
       </section>
     </div>
   );

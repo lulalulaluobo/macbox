@@ -54,6 +54,8 @@ type Server struct {
 	dockerOpMu      sync.Mutex
 	dockerOpActive  bool
 	jobs            *jobManager
+	cloudAuthMu     sync.Mutex
+	quarkQR         map[string]*quarkQRSession
 }
 
 type contextKey string
@@ -243,6 +245,11 @@ func NewServerWithPowerManagerChecked(cfg *config.Config, projectRoot string, po
 }
 
 func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.PowerManager) *Server {
+	// The web service may be launched by Finder or a menu-bar helper, whose
+	// environment does not include Homebrew's limactl directory. Prepare the
+	// process environment before storage, terminal, and VM helpers execute
+	// commands by name.
+	vm.PrepareLimaEnvironment()
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	vmMgr := vm.NewManager(cfg)
 	dockerClient := docker.NewClient(vmMgr, projectRoot)
@@ -296,6 +303,7 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 		serverCtx:       serverCtx,
 		serverCancel:    serverCancel,
 		jobs:            newJobManager(jobsPath),
+		quarkQR:         make(map[string]*quarkQRSession),
 	}
 
 	s.registerRoutes()

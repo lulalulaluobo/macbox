@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Folder, HardDrive, MoreHorizontal, Pencil, ShieldCheck, Star, Trash2, Upload, AlertTriangle, X } from 'lucide-react';
-import { DiskInfo, FileItem, LocalMount, TrashItem } from '../../types';
+import { ArrowLeft, Cloud, Folder, HardDrive, MoreHorizontal, Pencil, ShieldCheck, Star, Trash2, Upload, AlertTriangle, X } from 'lucide-react';
+import { CloudMount, DiskInfo, FileItem, LocalMount, TrashItem } from '../../types';
 import { api } from '../../api';
 import { ClipboardState, TextPreviewState, getFileType } from './filemanager/types';
 import { FileToolbar } from './filemanager/FileToolbar';
@@ -13,6 +13,9 @@ import { FileModals } from './filemanager/FileModals';
 import { FileActionSheet } from './filemanager/FileActionSheet';
 import { DriveDetailModal } from './filemanager/DriveDetailModal';
 import type { DriveDetailInfo } from './filemanager/DriveDetailModal';
+import { CloudDriveView } from './filemanager/CloudDriveView';
+import { CloudMountModal } from './filemanager/CloudMountModal';
+import { ArchiveModal } from './filemanager/ArchiveModal';
 
 interface FileManagerProps {
   initialPath?: string;
@@ -75,6 +78,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [archiveItem, setArchiveItem] = useState<FileItem | null>(null);
 
   // Trash Modals & Multi-select
   const [trashSelectedIds, setTrashSelectedIds] = useState<Set<string>>(new Set());
@@ -105,6 +109,11 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   const [localMounts, setLocalMounts] = useState<LocalMount[]>([]);
   const [storageDisks, setStorageDisks] = useState<DiskInfo[]>([]);
+  const [cloudMounts, setCloudMounts] = useState<CloudMount[]>([]);
+  const [activeCloudMountId, setActiveCloudMountId] = useState<string | null>(() => {
+    try { return localStorage.getItem('macnas_active_cloud_mount') || null; } catch { return null; }
+  });
+  const [showCloudMountModal, setShowCloudMountModal] = useState(false);
   const [discoveredDrivePaths, setDiscoveredDrivePaths] = useState<string[]>([]);
   const [diskNames, setDiskNames] = useState<Record<string, string>>(() => {
     try {
@@ -146,12 +155,21 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     Promise.all([
       api.getLocalMounts().catch(() => ({ mounts: [], recommended: [] })),
       api.getDisks().catch(() => ({ disks: [], managedDisks: [], selectedDisk: '' })),
-    ]).then(([mountsResult, disksResult]) => {
+      api.getCloudMounts().catch(() => ({ mounts: [] as CloudMount[] })),
+    ]).then(([mountsResult, disksResult, cloudResult]) => {
       setLocalMounts(mountsResult.mounts || []);
       setStorageDisks(disksResult.disks || []);
+      setCloudMounts(cloudResult.mounts || []);
     });
     loadTrash();
   }, []);
+
+  useEffect(() => {
+    try {
+      if (activeCloudMountId) localStorage.setItem('macnas_active_cloud_mount', activeCloudMountId);
+      else localStorage.removeItem('macnas_active_cloud_mount');
+    } catch {}
+  }, [activeCloudMountId]);
 
   useEffect(() => {
     if (videoPreview && videoRef.current) {
@@ -243,9 +261,24 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         setAlertMsg({ type: 'error', text: `读取文本失败: ${err.message}` });
       }
     } else {
-      // Direct Download for other types
-      window.open(api.getFileDownloadUrl(item.path), '_blank');
+      // Use a same-page download instead of opening a new tab. This keeps the
+      // authenticated response in the browser download flow on mobile.
+      const link = document.createElement('a');
+      link.href = api.getFileDownloadUrl(item.path);
+      link.download = item.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     }
+  };
+
+  const handleArchiveConfirm = async (operation: 'compress' | 'extract', format: 'zip' | 'rar' | '7z', destination: string) => {
+    if (!archiveItem) return;
+    const sourcePath = archiveItem.path;
+    const res = await api.archiveFiles([sourcePath], operation, format, destination);
+    setArchiveItem(null);
+    setAlertMsg({ type: 'success', text: res.message });
+    loadFiles(currentPath);
   };
 
   // Create Folder
@@ -636,6 +669,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const activeDriveId = [...driveOptions]
     .sort((a, b) => b.path.length - a.path.length)
     .find((drive) => currentPath === drive.path || currentPath.startsWith(`${drive.path}/`))?.id;
+  const activeCloudMount = cloudMounts.find((mount) => mount.id === activeCloudMountId) || null;
 
   // 硬盘详情弹窗：铅笔按钮展示容量/映射路径等信息，名称可顺带修改
   const [detailDriveId, setDetailDriveId] = useState<string | null>(null);
@@ -676,13 +710,17 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
             const active = !viewingTrash && !viewingFavorites && activeDriveId === drive.id;
             return (
               <div key={drive.id} className={`flex min-w-[128px] shrink-0 items-center rounded-2xl border px-2 transition sm:min-w-[150px] ${active ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/15' : 'border-transparent bg-slate-50 dark:bg-slate-800/50'}`}>
-                <button type="button" onClick={() => { setViewingTrash(false); setViewingFavorites(false); setCurrentPath(drive.path); }} className="flex min-h-12 min-w-0 flex-1 items-center gap-2 text-left">
+                <button type="button" onClick={() => { setActiveCloudMountId(null); setViewingTrash(false); setViewingFavorites(false); setCurrentPath(drive.path); }} className="flex min-h-12 min-w-0 flex-1 items-center gap-2 text-left">
                   <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-white text-sky-500 dark:bg-slate-800' : 'bg-white text-slate-400 dark:bg-slate-800'}`}><HardDrive className="h-4 w-4" /></span>
                   <span className={`truncate text-xs font-bold ${active ? 'text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200'}`}>{name}</span>
                 </button>
                 <button type="button" onClick={() => openDriveDetail(drive.id)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-sky-500 dark:hover:bg-slate-800" aria-label={`查看${name}详情`}><Pencil className="h-3.5 w-3.5" /></button>
               </div>
             );
+          })}
+          {cloudMounts.map((mount) => {
+            const active = !viewingTrash && !viewingFavorites && activeCloudMountId === mount.id;
+            return <button key={mount.id} type="button" onClick={() => { setActiveCloudMountId(mount.id); setViewingTrash(false); setViewingFavorites(false); }} className={`flex min-h-12 min-w-[150px] shrink-0 items-center gap-2 rounded-2xl border px-3 text-left transition ${active ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/15' : 'border-transparent bg-slate-50 dark:bg-slate-800/50'}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-white text-sky-500 dark:bg-slate-800' : 'bg-white text-slate-400 dark:bg-slate-800'}`}><Cloud className="h-4 w-4" /></span><span className={`truncate text-xs font-bold ${active ? 'text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200'}`}>{mount.name}</span></button>;
           })}
         </div>
 
@@ -691,6 +729,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           <div className="absolute right-0 top-[calc(100%+8px)] z-40 max-h-[min(360px,55dvh)] w-[min(300px,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
             <button type="button" onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); openFavorites(); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-amber-50 hover:text-amber-700 dark:text-slate-200 dark:hover:bg-amber-500/10"><Star className="h-4 w-4 fill-amber-400 text-amber-400" /><span className="flex-1">收藏</span><span className="text-[10px] text-slate-400">{favorites.length}</span></button>
             <button type="button" onClick={() => { setViewingFavorites(false); setViewingTrash(true); loadTrash(); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-rose-50 hover:text-rose-600 dark:text-slate-200 dark:hover:bg-rose-500/10"><Trash2 className="h-4 w-4 text-rose-500" /><span className="flex-1">回收站</span><span className="text-[10px] text-slate-400">{trashItems.length}</span></button>
+            <button type="button" onClick={() => setShowCloudMountModal(true)} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 dark:text-slate-200 dark:hover:bg-sky-500/10"><Cloud className="h-4 w-4 text-sky-500" /><span className="flex-1">挂载云盘</span><span className="text-[10px] text-slate-400">夸克</span></button>
             {localMounts.filter((mount) => mount.enabled && !secondaryOptions.some((drive) => drive.path === `/data/${mount.guestTarget}`)).map((mount) => <button key={mount.id} type="button" onClick={() => { setViewingTrash(false); setViewingFavorites(false); setCurrentPath(`/data/${mount.guestTarget}`); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"><HardDrive className="h-4 w-4 text-cyan-500" /><span className="truncate">{mount.name}</span></button>)}
             <button type="button" onClick={() => setHideSystemFiles(!hideSystemFiles)} className="mt-1 flex min-h-11 w-full items-center gap-3 border-t border-slate-100 px-3 pt-1 text-left text-xs text-slate-700 dark:border-slate-800 dark:text-slate-200"><ShieldCheck className={`h-4 w-4 ${hideSystemFiles ? 'text-emerald-500' : 'text-amber-500'}`} /><span className="flex-1">系统目录</span><span className="text-[10px] text-slate-400">{hideSystemFiles ? '隐藏' : '显示'}</span></button>
           </div>
@@ -722,6 +761,14 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           </div>
         )}
 
+        {activeCloudMount ? <CloudDriveView
+          mount={activeCloudMount}
+          onBack={() => setActiveCloudMountId(null)}
+          onRemoved={() => {
+            setCloudMounts((current) => current.filter((mount) => mount.id !== activeCloudMount.id));
+            setActiveCloudMountId(null);
+          }}
+        /> : <>
         {/* Action Toolbar */}
         {viewingFavorites ? (
           <section className="flex min-h-14 shrink-0 items-center gap-3 rounded-[22px] border border-slate-200/80 bg-white px-3 dark:border-slate-800 dark:bg-slate-900/80">
@@ -867,6 +914,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
             setShowDeleteModal(true);
           }}
         />
+        </>}
       </div>
 
       <DriveDetailModal
@@ -901,6 +949,10 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         }}
         onDelete={() => {
           if (actionItem) handleOpenDelete(actionItem);
+          setActionItem(null);
+        }}
+        onArchive={() => {
+          setArchiveItem(actionItem);
           setActionItem(null);
         }}
       />
@@ -978,6 +1030,21 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         trashItemsCount={trashItems.length}
         onCloseEmptyTrash={() => setShowEmptyTrashModal(false)}
         onConfirmEmptyTrash={handleConfirmEmptyTrash}
+      />
+      {showCloudMountModal && <CloudMountModal
+        onClose={() => setShowCloudMountModal(false)}
+        onMounted={(mount) => {
+          setCloudMounts((current) => [...current.filter((item) => item.id !== mount.id), mount]);
+          setShowCloudMountModal(false);
+          setActiveCloudMountId(mount.id);
+          setAlertMsg({ type: 'success', text: '夸克云盘已挂载' });
+        }}
+      />}
+      <ArchiveModal
+        item={archiveItem}
+        currentPath={currentPath}
+        onClose={() => setArchiveItem(null)}
+        onConfirm={handleArchiveConfirm}
       />
     </div>
   );

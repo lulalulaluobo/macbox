@@ -208,7 +208,7 @@ export const FileModals: React.FC<FileModalsProps> = ({
                 disabled={deleting}
                 className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition disabled:opacity-50"
               >
-                彻底抹除
+                彻底删除（不可恢复）
               </button>
               <button
                 type="button"

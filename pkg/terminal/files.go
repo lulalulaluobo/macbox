@@ -180,7 +180,7 @@ print(json.dumps({"items": items[offset:offset + limit], "hasMore": offset + lim
 	return items, pageResult.HasMore, nil
 }
 
-const safeReadScript = `import os, shutil, sys
+const safeReadScript = `import json, os, shutil, stat, sys
 raw = sys.argv[1]
 mode = sys.argv[2]
 root = os.path.realpath('/data')
@@ -199,6 +199,8 @@ try:
         info = os.fstat(fd)
         if mode == 'stat':
             print(info.st_size)
+        elif mode == 'info':
+            print(json.dumps({'size': info.st_size, 'isDir': stat.S_ISDIR(info.st_mode)}))
         else:
             start = int(sys.argv[3])
             length = int(sys.argv[4])
@@ -220,7 +222,7 @@ finally:
 `
 
 func safeReadCommand(ctx context.Context, instanceName, filePath, mode string, start, length int64) *exec.Cmd {
-	return managementCommand(ctx, instanceName, "python3", "-c", safeReadScript,
+	return privilegedCommand(ctx, instanceName, "python3", "-c", safeReadScript,
 		filePath, mode, strconv.FormatInt(start, 10), strconv.FormatInt(length, 10))
 }
 
@@ -264,6 +266,25 @@ func WriteFileContext(ctx context.Context, instanceName, filePath, content strin
 
 	err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "write", "path": filePath}, strings.NewReader(content))
 	if err != nil {
+		return fmt.Errorf("写入文件失败: %w", err)
+	}
+	return nil
+}
+
+// WriteStreamContext writes a potentially large stream atomically inside the
+// VM. The caller owns the reader and may wrap it to report transfer progress.
+func WriteStreamContext(ctx context.Context, instanceName, filePath string, input io.Reader) error {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	if input == nil {
+		return fmt.Errorf("写入内容不能为空")
+	}
+	resolved, err := resolveAllowedPathContext(ctx, instanceName, filePath)
+	if err != nil {
+		return err
+	}
+	if err := runSafeMutation(ctx, instanceName, map[string]string{"operation": "write", "path": resolved}, input); err != nil {
 		return fmt.Errorf("写入文件失败: %w", err)
 	}
 	return nil
@@ -451,7 +472,7 @@ func runSafeMutation(ctx context.Context, instanceName string, request map[strin
 		return err
 	}
 	encoded := base64.StdEncoding.EncodeToString(payload)
-	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "python3", "-c", safeMutationScript, encoded)
+	cmd := privilegedCommand(ctx, instanceName, "python3", "-c", safeMutationScript, encoded)
 	cmd.Stdin = input
 	var output bytes.Buffer
 	cmd.Stdout = &output
@@ -516,7 +537,8 @@ func resolveAllowedPathContext(ctx context.Context, instanceName, requested stri
 	return canonical, nil
 }
 
-// DeletePath deletes file or folder inside VM safely and stages to Mac ~/.Trash
+// DeletePath deletes a file or folder directly inside the VM. The caller uses
+// MoveToTrash when a recoverable deletion is desired.
 func DeletePath(instanceName, targetPath string) error {
 	return DeletePathContext(context.Background(), instanceName, targetPath)
 }
@@ -533,22 +555,6 @@ func DeletePathContext(ctx context.Context, instanceName, targetPath string) err
 
 	if isSystemProtectedDir(targetPath) {
 		return fmt.Errorf("禁止删除系统保护目录: %s", targetPath)
-	}
-
-	// Stage to host ~/.Trash before deleting from VM as an extra safety net
-	baseName := path.Base(targetPath)
-	stagingDir := filepath.Join(os.TempDir(), "macnas-trash-staging")
-	if err := os.MkdirAll(stagingDir, 0700); err != nil {
-		return fmt.Errorf("准备回收站暂存目录失败: %w", err)
-	}
-	stagedPath := filepath.Join(stagingDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), baseName))
-
-	copyCmd := exec.CommandContext(ctx, "limactl", "copy", "-r", fmt.Sprintf("%s:%s", instanceName, targetPath), stagedPath)
-	if err := copyCmd.Run(); err != nil {
-		return fmt.Errorf("删除前备份到回收站失败: %w", err)
-	}
-	if err := MoveFileOrDirToMacTrashContext(ctx, stagedPath, baseName); err != nil {
-		return fmt.Errorf("移动回收站备份失败: %w", err)
 	}
 
 	err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "delete", "path": targetPath}, nil)
@@ -576,7 +582,39 @@ func DownloadFile(w http.ResponseWriter, r *http.Request, instanceName, filePath
 	}
 	fileName := path.Base(filePath)
 
+	// Preflight the file before committing the HTTP response. Without a known
+	// length, a VM-side read failure after headers were sent can look like a
+	// successful zero-byte download in mobile browsers.
+	infoCmd := safeReadCommand(r.Context(), instanceName, filePath, "info", 0, 0)
+	infoOut, err := infoCmd.Output()
+	if err != nil {
+		log.Printf("[MacNAS Files] read download metadata failed: %v", err)
+		http.Error(w, "无法读取文件", http.StatusInternalServerError)
+		return
+	}
+	var fileInfo struct {
+		Size  int64 `json:"size"`
+		IsDir bool  `json:"isDir"`
+	}
+	if err := json.Unmarshal(infoOut, &fileInfo); err != nil || fileInfo.Size < 0 {
+		log.Printf("[MacNAS Files] invalid download metadata for %s: %q", filePath, strings.TrimSpace(string(infoOut)))
+		http.Error(w, "无法获取文件大小", http.StatusInternalServerError)
+		return
+	}
+	if fileInfo.IsDir {
+		cmd := privilegedCommand(r.Context(), instanceName, "python3", "-c", zipDirectoryStreamScript, filePath)
+		streamCommandDownload(w, cmd, fileName+".zip", "application/zip", -1)
+		return
+	}
+
 	cmd := safeReadCommand(r.Context(), instanceName, filePath, "read", 0, -1)
+	streamCommandDownload(w, cmd, fileName, "application/octet-stream", fileInfo.Size)
+}
+
+// streamCommandDownload streams command output only after the first chunk has
+// been read. This prevents clients from saving a successful-looking empty
+// file when a VM-side command failed before producing data.
+func streamCommandDownload(w http.ResponseWriter, cmd *exec.Cmd, fileName, contentType string, fileSize int64) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Printf("[MacNAS Files] create download stream failed: %v", err)
@@ -589,18 +627,258 @@ func DownloadFile(w http.ResponseWriter, r *http.Request, instanceName, filePath
 		http.Error(w, "下载文件失败", http.StatusInternalServerError)
 		return
 	}
+	waited := false
 	defer func() {
-		if waitErr := cmd.Wait(); waitErr != nil {
-			log.Printf("[MacNAS Files] download command failed: %v", waitErr)
+		if !waited {
+			if waitErr := cmd.Wait(); waitErr != nil {
+				log.Printf("[MacNAS Files] download command failed: %v", waitErr)
+			}
 		}
 	}()
 
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename*=UTF-8''%s", url.PathEscape(fileName)))
-	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Type", contentType)
+	if fileSize >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
+	}
+
+	if fileSize == 0 {
+		return
+	}
+
+	// Read a first chunk before writing headers. If the VM command cannot read
+	// the file, return an HTTP error instead of creating an empty download.
+	first := make([]byte, 32*1024)
+	n, readErr := stdout.Read(first)
+	for n == 0 && readErr == nil {
+		n, readErr = stdout.Read(first)
+	}
+	if n == 0 {
+		waitErr := cmd.Wait()
+		waited = true
+		if waitErr != nil {
+			log.Printf("[MacNAS Files] download preflight failed: %v", waitErr)
+		} else {
+			log.Printf("[MacNAS Files] download preflight returned no data for %s", fileName)
+		}
+		http.Error(w, "读取文件内容失败", http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := w.Write(first[:n]); err != nil {
+		log.Printf("[MacNAS Files] write download preflight failed: %v", err)
+		return
+	}
 
 	if _, err := io.Copy(w, stdout); err != nil {
 		log.Printf("[MacNAS Files] stream download failed: %v", err)
 	}
+}
+
+const zipDirectoryStreamScript = `import os, stat, sys, zipfile
+
+root = os.path.realpath('/data')
+directory = os.path.realpath(sys.argv[1])
+if os.path.commonpath((root, directory)) != root or directory == root:
+    raise RuntimeError('文件夹路径超出 /data 存储范围')
+if not os.path.isdir(directory) or os.path.islink(directory):
+    raise RuntimeError('下载目标不是有效文件夹')
+
+archive_name = os.path.basename(directory.rstrip(os.sep))
+with zipfile.ZipFile(sys.stdout.buffer, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+    for current, directories, files in os.walk(directory, topdown=True, followlinks=False):
+        directories[:] = sorted(name for name in directories if not os.path.islink(os.path.join(current, name)))
+        files = sorted(files)
+        relative = os.path.relpath(current, directory)
+        prefix = archive_name if relative == '.' else archive_name + '/' + relative.replace(os.sep, '/')
+        if not directories and not files:
+            archive.writestr(prefix.rstrip('/') + '/', b'')
+        for name in files:
+            source = os.path.join(current, name)
+            try:
+                info = os.lstat(source)
+            except OSError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            archive.write(source, prefix + '/' + name)
+`
+
+const archiveZipScript = `import os, shutil, stat, sys, zipfile
+
+operation = sys.argv[1]
+destination = os.path.realpath(sys.argv[2])
+sources = [os.path.realpath(value) for value in sys.argv[3:]]
+root = os.path.realpath('/data')
+
+def inside(base, candidate):
+    try:
+        return os.path.commonpath((base, candidate)) == base
+    except ValueError:
+        return False
+
+if not inside(root, destination) or destination == root:
+    raise RuntimeError('目标路径超出 /data 存储范围')
+if not sources:
+    raise RuntimeError('未指定源文件')
+for source in sources:
+    if not inside(root, source) or source == root or not os.path.lexists(source):
+        raise RuntimeError('源文件路径无效')
+
+if operation == 'compress':
+    if os.path.lexists(destination):
+        raise RuntimeError('目标压缩包已存在，请换一个名称')
+    if any(destination == source or inside(source, destination) for source in sources if os.path.isdir(source)):
+        raise RuntimeError('压缩包不能创建在待压缩文件夹内部')
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+        for source in sources:
+            base = os.path.basename(source.rstrip(os.sep))
+            if os.path.isdir(source) and not os.path.islink(source):
+                for current, directories, files in os.walk(source, topdown=True, followlinks=False):
+                    directories[:] = sorted(name for name in directories if not os.path.islink(os.path.join(current, name)))
+                    files = sorted(files)
+                    relative = os.path.relpath(current, source)
+                    prefix = base if relative == '.' else base + '/' + relative.replace(os.sep, '/')
+                    if not directories and not files:
+                        archive.writestr(prefix.rstrip('/') + '/', b'')
+                    for name in files:
+                        source_file = os.path.join(current, name)
+                        try:
+                            info = os.lstat(source_file)
+                        except OSError:
+                            continue
+                        if stat.S_ISREG(info.st_mode):
+                            archive.write(source_file, prefix + '/' + name)
+            else:
+                info = os.lstat(source)
+                if not stat.S_ISREG(info.st_mode):
+                    raise RuntimeError('不支持压缩符号链接或特殊文件')
+                archive.write(source, base)
+elif operation == 'extract':
+    if len(sources) != 1 or not os.path.isfile(sources[0]):
+        raise RuntimeError('解压需要一个有效的 ZIP 文件')
+    os.makedirs(destination, exist_ok=True)
+    with zipfile.ZipFile(sources[0], 'r') as archive:
+        for entry in archive.infolist():
+            name = entry.filename.replace('\\', '/')
+            if not name or name.startswith('/') or name == '..' or name.startswith('../') or '/../' in name:
+                raise RuntimeError('压缩包包含不安全路径')
+            target = os.path.realpath(os.path.join(destination, name))
+            if not inside(destination, target):
+                raise RuntimeError('压缩包路径超出目标目录')
+            mode = (entry.external_attr >> 16) & 0o170000
+            if stat.S_ISLNK(mode):
+                raise RuntimeError('压缩包包含不安全符号链接')
+            if entry.is_dir() or name.endswith('/'):
+                os.makedirs(target, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with archive.open(entry, 'r') as source, open(target, 'wb') as output:
+                shutil.copyfileobj(source, output)
+else:
+    raise RuntimeError('不支持的压缩操作')
+`
+
+// ArchivePathsContext creates or extracts an archive inside the VM data root.
+// ZIP is built in with Python's standard library; 7z and RAR use native VM
+// tools when available and return an actionable error when they are absent.
+func ArchivePathsContext(ctx context.Context, instanceName, operation, format, destination string, sourcePaths []string) error {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	operation = strings.ToLower(strings.TrimSpace(operation))
+	format = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(format), "."))
+	if operation != "compress" && operation != "extract" {
+		return fmt.Errorf("不支持的压缩操作")
+	}
+	if format != "zip" && format != "7z" && format != "rar" {
+		return fmt.Errorf("不支持的压缩格式: %s", format)
+	}
+	if len(sourcePaths) == 0 || len(sourcePaths) > 100 {
+		return fmt.Errorf("源文件数量必须在 1 到 100 个之间")
+	}
+	if operation == "extract" && len(sourcePaths) != 1 {
+		return fmt.Errorf("一次只能解压一个压缩包")
+	}
+
+	resolvedDestination, err := resolveAllowedPathContext(ctx, instanceName, destination)
+	if err != nil {
+		return fmt.Errorf("目标路径无效: %w", err)
+	}
+	resolvedSources := make([]string, 0, len(sourcePaths))
+	for _, source := range sourcePaths {
+		resolved, resolveErr := resolveAllowedPathContext(ctx, instanceName, source)
+		if resolveErr != nil {
+			return fmt.Errorf("源路径无效: %w", resolveErr)
+		}
+		if path.Clean(resolved) == "/data" {
+			return fmt.Errorf("禁止处理存储根目录")
+		}
+		resolvedSources = append(resolvedSources, resolved)
+	}
+
+	if format == "zip" {
+		args := []string{"python3", "-c", archiveZipScript, operation, resolvedDestination}
+		args = append(args, resolvedSources...)
+		cmd := privilegedCommand(ctx, instanceName, args...)
+		output, runErr := cmd.CombinedOutput()
+		if runErr != nil {
+			return fmt.Errorf("ZIP %s失败: %s (%w)", archiveOperationLabel(operation), strings.TrimSpace(string(output)), runErr)
+		}
+		return nil
+	}
+
+	tool, err := findArchiveTool(ctx, instanceName, operation, format)
+	if err != nil {
+		return err
+	}
+	args := archiveToolArgs(tool, operation, format, resolvedDestination, resolvedSources)
+	cmd := privilegedCommand(ctx, instanceName, args...)
+	output, runErr := cmd.CombinedOutput()
+	if runErr != nil {
+		return fmt.Errorf("%s %s失败: %s (%w)", strings.ToUpper(format), archiveOperationLabel(operation), strings.TrimSpace(string(output)), runErr)
+	}
+	return nil
+}
+
+func archiveOperationLabel(operation string) string {
+	if operation == "extract" {
+		return "解压"
+	}
+	return "压缩"
+}
+
+func findArchiveTool(ctx context.Context, instanceName, operation, format string) (string, error) {
+	candidates := []string{}
+	switch {
+	case format == "7z":
+		candidates = []string{"7z", "7zz"}
+	case format == "rar" && operation == "extract":
+		candidates = []string{"unrar", "rar", "7z", "7zz"}
+	case format == "rar":
+		candidates = []string{"rar"}
+	}
+	for _, candidate := range candidates {
+		cmd := managementCommand(ctx, instanceName, "sh", "-lc", "command -v -- \"$1\"", "macnas-archive-tool", candidate)
+		if output, err := cmd.Output(); err == nil && strings.TrimSpace(string(output)) != "" {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("虚拟机未安装 %s 工具，当前可直接使用 ZIP；请在虚拟机中安装 7zip/unrar 后重试", strings.ToUpper(format))
+}
+
+func archiveToolArgs(tool, operation, format, destination string, sources []string) []string {
+	if operation == "extract" {
+		if format == "rar" && tool != "7z" && tool != "7zz" {
+			return []string{tool, "x", "-o+", sources[0], destination + "/"}
+		}
+		return []string{tool, "x", "-y", "-o" + destination, sources[0]}
+	}
+	if format == "7z" {
+		return append([]string{tool, "a", "-y", "-t7z", destination}, sources...)
+	}
+	return append([]string{tool, "a", "-r", destination}, sources...)
 }
 
 // UploadFile saves a multipart uploaded file into target directory inside the VM
@@ -1227,8 +1505,20 @@ func deleteAndSendToMacTrash(instanceName string, item TrashItem) error {
 }
 
 func deleteAndSendToMacTrashContext(ctx context.Context, instanceName string, item TrashItem) error {
-	trashPath, err := resolveAllowedPathContext(ctx, instanceName, item.TrashPath)
-	if err != nil || !strings.HasPrefix(trashPath, "/data/.trash/") {
+	// TrashItem stores the public /data path, while the resolver returns the
+	// VM's canonical path (for example /mnt/lima-macnas-data/.trash/...).
+	// Validate both forms so the canonical-path security check does not reject
+	// every legitimate item and a symlink cannot escape the trash directory.
+	requestedTrashPath, err := normalizeRequestedPath(item.TrashPath)
+	if err != nil || !strings.HasPrefix(requestedTrashPath, "/data/.trash/") {
+		return fmt.Errorf("回收站项目路径无效")
+	}
+	trashPath, err := resolveAllowedPathContext(ctx, instanceName, requestedTrashPath)
+	if err != nil {
+		return fmt.Errorf("回收站项目路径无效")
+	}
+	trashRoot, err := resolveAllowedPathContext(ctx, instanceName, "/data/.trash")
+	if err != nil || trashPath == trashRoot || !strings.HasPrefix(trashPath, trashRoot+"/") {
 		return fmt.Errorf("回收站项目路径无效")
 	}
 	stagingDir := filepath.Join(os.TempDir(), "macnas-trash-staging")

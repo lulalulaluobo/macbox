@@ -22,7 +22,7 @@ import { ContainerInfo, DockerServiceShortcut } from '../../types';
 import { api } from '../../api';
 import { ContainerTerminalModal } from './ContainerTerminalModal';
 import { DockerServiceShortcutModal } from './DockerServiceShortcutModal';
-import { loadDockerServiceShortcuts, upsertDockerServiceShortcut } from '../../utils/dockerServiceShortcuts';
+import { loadDockerServiceShortcuts, removeDockerServiceShortcut, upsertDockerServiceShortcut } from '../../utils/dockerServiceShortcuts';
 
 interface DockerContainersProps {
   onOpenTerminalWithLogs?: (payload: { containerName: string; logs: string }) => void;
@@ -94,6 +94,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
     setActionLoading(`delete-${id}`);
     try {
       await api.removeContainer(id, forceDelete);
+      removeDockerServiceShortcut(id, deleteModalContainer.name);
       setDeleteModalContainer(null);
       setAlertMsg({ type: 'success', text: `容器 ${deleteModalContainer.name} 已成功删除` });
       await loadContainers();

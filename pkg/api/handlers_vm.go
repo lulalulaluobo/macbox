@@ -18,13 +18,13 @@ import (
 
 // VM Handlers
 func (s *Server) handleVMPrerequisites(w http.ResponseWriter, r *http.Request) {
-	path, err := exec.LookPath("limactl")
+	path, limaInstalled := vm.FindLima()
 	result := map[string]interface{}{
-		"limaInstalled": err == nil,
-		"ready":         err == nil,
+		"limaInstalled": limaInstalled,
+		"ready":         limaInstalled,
 		"storageReady":  true,
 	}
-	if err != nil {
+	if !limaInstalled {
 		result["message"] = "未找到 limactl，请先安装 Lima。安装后点击重新检查。"
 		if runtime.GOOS == "darwin" {
 			if brewPath, brewInstalled := vm.FindHomebrew(); brewInstalled {

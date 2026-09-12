@@ -14,7 +14,7 @@ import {
 import { ContainerInfo, DockerServiceShortcut, SystemOverview } from '../types';
 import { api } from '../api';
 import { DockerServiceIcon } from '../components/DockerServiceIcon';
-import { loadDockerServiceShortcuts } from '../utils/dockerServiceShortcuts';
+import { DOCKER_SERVICE_SHORTCUTS_CHANGED_EVENT, loadDockerServiceShortcuts, saveDockerServiceShortcuts } from '../utils/dockerServiceShortcuts';
 
 type DashboardTarget = 'storage' | 'docker' | 'apps' | 'settings';
 
@@ -37,6 +37,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
   const [editDisk, setEditDisk] = useState(20);
   const [dockerServices, setDockerServices] = useState<ContainerInfo[]>([]);
   const [serviceShortcuts, setServiceShortcuts] = useState<DockerServiceShortcut[]>(() => loadDockerServiceShortcuts());
+  const [dockerListLoaded, setDockerListLoaded] = useState(false);
 
   const sys = overview?.system;
   const vm = overview?.vm;
@@ -52,25 +53,57 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     const loadDockerServices = async () => {
       try {
         const containers = await api.getContainers();
-        if (active) setDockerServices(containers || []);
+        if (active) {
+          setDockerServices(containers || []);
+          setDockerListLoaded(true);
+        }
       } catch {
-        if (active) setDockerServices([]);
+        // A transient Docker/API error must not delete the user's shortcuts.
       }
     };
-    const loadShortcuts = () => setServiceShortcuts(loadDockerServiceShortcuts());
-
     loadDockerServices();
-    loadShortcuts();
     const interval = window.setInterval(() => {
       if (!document.hidden) loadDockerServices();
     }, 10000);
-    window.addEventListener('storage', loadShortcuts);
     return () => {
       active = false;
       window.clearInterval(interval);
-      window.removeEventListener('storage', loadShortcuts);
     };
   }, []);
+
+  // Service shortcuts are browser-local settings. Reconcile them with the
+  // authoritative Docker list so deleting a container also removes its home
+  // page entry, while a temporary API failure cannot wipe valid shortcuts.
+  useEffect(() => {
+    if (!dockerListLoaded) return;
+    const stored = loadDockerServiceShortcuts();
+    const valid = stored.filter((shortcut) => dockerServices.some((container) => (
+      container.id === shortcut.id.replace(/^container:/, '') || container.name === shortcut.containerName
+    )));
+    setServiceShortcuts(valid);
+    if (valid.length !== stored.length) saveDockerServiceShortcuts(valid);
+  }, [dockerListLoaded, dockerServices]);
+
+  useEffect(() => {
+    const loadShortcuts = () => {
+      const shortcuts = loadDockerServiceShortcuts();
+      if (!dockerListLoaded) {
+        setServiceShortcuts(shortcuts);
+        return;
+      }
+      const valid = shortcuts.filter((shortcut) => dockerServices.some((container) => (
+        container.id === shortcut.id.replace(/^container:/, '') || container.name === shortcut.containerName
+      )));
+      setServiceShortcuts(valid);
+      if (valid.length !== shortcuts.length) saveDockerServiceShortcuts(valid);
+    };
+    window.addEventListener('storage', loadShortcuts);
+    window.addEventListener(DOCKER_SERVICE_SHORTCUTS_CHANGED_EVENT, loadShortcuts);
+    return () => {
+      window.removeEventListener('storage', loadShortcuts);
+      window.removeEventListener(DOCKER_SERVICE_SHORTCUTS_CHANGED_EVENT, loadShortcuts);
+    };
+  }, [dockerListLoaded, dockerServices]);
 
   const notify = (text: string) => {
     setMessage(text);

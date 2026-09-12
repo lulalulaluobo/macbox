@@ -16,16 +16,20 @@ import (
 )
 
 type backgroundJob struct {
-	ID        string             `json:"id"`
-	Kind      string             `json:"kind"`
-	Status    string             `json:"status"`
-	Stage     string             `json:"stage,omitempty"`
-	Progress  int                `json:"progress,omitempty"`
-	Message   string             `json:"message,omitempty"`
-	Error     string             `json:"error,omitempty"`
-	CreatedAt time.Time          `json:"createdAt"`
-	UpdatedAt time.Time          `json:"updatedAt"`
-	cancel    context.CancelFunc `json:"-"`
+	ID                  string             `json:"id"`
+	Kind                string             `json:"kind"`
+	Status              string             `json:"status"`
+	Stage               string             `json:"stage,omitempty"`
+	Progress            int                `json:"progress,omitempty"`
+	BytesDone           int64              `json:"bytesDone,omitempty"`
+	BytesTotal          int64              `json:"bytesTotal,omitempty"`
+	SpeedBytesPerSecond int64              `json:"speedBytesPerSecond,omitempty"`
+	CurrentFile         string             `json:"currentFile,omitempty"`
+	Message             string             `json:"message,omitempty"`
+	Error               string             `json:"error,omitempty"`
+	CreatedAt           time.Time          `json:"createdAt"`
+	UpdatedAt           time.Time          `json:"updatedAt"`
+	cancel              context.CancelFunc `json:"-"`
 }
 
 type jobManager struct {
@@ -170,6 +174,38 @@ func (m *jobManager) update(id, stage string, progress int, message string) {
 	m.saveLocked()
 }
 
+func (m *jobManager) updateTransfer(id, stage string, progress int, message, currentFile string, done, total, speed int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	job := m.jobs[id]
+	if job == nil || job.Status != "running" {
+		return
+	}
+	if stage != "" {
+		job.Stage = stage
+	}
+	if progress >= 0 {
+		job.Progress = clampProgress(progress)
+	}
+	if message != "" {
+		job.Message = message
+	}
+	if currentFile != "" {
+		job.CurrentFile = currentFile
+	}
+	if done >= 0 {
+		job.BytesDone = done
+	}
+	if total >= 0 {
+		job.BytesTotal = total
+	}
+	if speed >= 0 {
+		job.SpeedBytesPerSecond = speed
+	}
+	job.UpdatedAt = time.Now().UTC()
+	m.saveLocked()
+}
+
 func (m *jobManager) finish(id string, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -212,6 +248,28 @@ func (m *jobManager) cancelJob(id string) bool {
 	}
 	m.saveLocked()
 	return true
+}
+
+// clearFinished removes only historical records. Running jobs are deliberately
+// kept so a cleanup click can never interrupt an active transfer.
+func (m *jobManager) clearFinished(kind string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	removed := 0
+	for id, job := range m.jobs {
+		if job == nil || job.Status == "running" {
+			continue
+		}
+		if kind != "" && job.Kind != kind {
+			continue
+		}
+		delete(m.jobs, id)
+		removed++
+	}
+	if removed > 0 {
+		m.saveLocked()
+	}
+	return removed
 }
 
 func (m *jobManager) snapshot(id string) (*backgroundJob, bool) {
@@ -258,4 +316,19 @@ func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
+func (s *Server) handleJobsClear(w http.ResponseWriter, r *http.Request) {
+	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+	if kind == "" {
+		kind = "cloud.download"
+	}
+	if kind != "cloud.download" {
+		writeError(w, http.StatusBadRequest, "不支持清理此类任务")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "cleared",
+		"count":  s.jobs.clearFinished(kind),
+	})
 }

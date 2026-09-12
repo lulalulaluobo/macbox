@@ -33,6 +33,15 @@ func managementCommand(ctx context.Context, instanceName string, command ...stri
 	return exec.CommandContext(ctx, "limactl", args...)
 }
 
+// privilegedCommand runs a data-plane command as VM root. File operations are
+// deliberately path-anchored in their scripts, but existing NAS data can be
+// root-owned (for example files imported by Docker or older releases), so
+// read/archive streams must not fail solely because macnasctl cannot read it.
+func privilegedCommand(ctx context.Context, instanceName string, command ...string) *exec.Cmd {
+	args := append([]string{"shell", instanceName, "sudo"}, command...)
+	return exec.CommandContext(ctx, "limactl", args...)
+}
+
 func terminalCommand(ctx context.Context, instanceName, loginUser, container string) *exec.Cmd {
 	var cmd *exec.Cmd
 	if container != "" {

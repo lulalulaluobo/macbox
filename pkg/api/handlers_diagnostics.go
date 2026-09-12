@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/luluen/mac-nas/pkg/vm"
 )
 
 type diagnosticCheck struct {
@@ -38,8 +39,8 @@ func (s *Server) handleSystemDiagnostics(w http.ResponseWriter, r *http.Request)
 		checks = append(checks, check)
 	}
 
-	limaPath, limaErr := exec.LookPath("limactl")
-	if limaErr != nil {
+	limaPath, limaInstalled := vm.FindLima()
+	if !limaInstalled {
 		add(diagnosticCheck{
 			ID: "lima", Title: "Lima 环境", Status: "fail",
 			Message: "未找到 limactl", Repair: "请先安装 Lima，然后返回重新检查",

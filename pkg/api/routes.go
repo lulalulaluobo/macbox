@@ -21,6 +21,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/jobs", s.adminOnly(s.handleJobsList))
 	s.mux.HandleFunc("GET /api/jobs/{id}", s.adminOnly(s.handleJobGet))
 	s.mux.HandleFunc("POST /api/jobs/{id}/cancel", s.adminOnly(s.handleJobCancel))
+	s.mux.HandleFunc("POST /api/jobs/clear", s.adminOnly(s.handleJobsClear))
 
 	// 3. Storage
 	s.mux.HandleFunc("GET /api/storage/disks", s.handleStorageDisks)
@@ -33,6 +34,20 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/storage/mounts/{id}/toggle", s.adminOnly(s.handleStorageMountsToggle))
 	s.mux.HandleFunc("POST /api/storage/mounts/{id}/writable", s.adminOnly(s.handleStorageMountsWritable))
 	s.mux.HandleFunc("DELETE /api/storage/mounts/{id}", s.adminOnly(s.handleStorageMountsDelete))
+	// Remote cloud drives. Login is a short-lived web QR flow; credentials are
+	// only accepted by the server after the provider confirms the session.
+	s.mux.HandleFunc("POST /api/storage/cloud-auth/quark/qr", s.adminOnly(s.handleQuarkQRBegin))
+	s.mux.HandleFunc("GET /api/storage/cloud-auth/quark/qr/{id}", s.handleQuarkQRPoll)
+	s.mux.HandleFunc("GET /api/storage/cloud-auth/quark/qr/{id}/image", s.handleQuarkQRImage)
+	s.mux.HandleFunc("POST /api/storage/cloud-mounts/quark/qr/{id}", s.adminOnly(s.handleQuarkMountFromQR))
+	s.mux.HandleFunc("GET /api/storage/cloud-mounts", s.handleCloudMountsList)
+	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/check", s.adminOnly(s.handleCloudMountCheck))
+	s.mux.HandleFunc("DELETE /api/storage/cloud-mounts/{id}", s.adminOnly(s.handleCloudMountDelete))
+	s.mux.HandleFunc("GET /api/storage/cloud-mounts/{id}/files", s.handleCloudFilesList)
+	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/folders", s.adminOnly(s.handleCloudFolderCreate))
+	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/rename", s.adminOnly(s.handleCloudFileRename))
+	s.mux.HandleFunc("DELETE /api/storage/cloud-mounts/{id}/files", s.adminOnly(s.handleCloudFileDelete))
+	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/download", s.adminOnly(s.handleCloudDownload))
 
 	// 4. Docker Overview & Containers
 	s.mux.HandleFunc("GET /api/docker/overview", s.handleDockerOverview)
@@ -93,6 +108,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/terminal/files/rename", s.adminOnly(s.handleTerminalFileRename))
 	s.mux.HandleFunc("DELETE /api/terminal/files", s.adminOnly(s.handleTerminalFileDelete))
 	s.mux.HandleFunc("GET /api/terminal/files/download", s.handleTerminalFileDownload)
+	s.mux.HandleFunc("POST /api/terminal/files/archive", s.adminOnly(s.handleTerminalArchive))
 	s.mux.HandleFunc("GET /api/terminal/files/raw", s.handleTerminalFileRaw)
 	s.mux.HandleFunc("POST /api/terminal/files/copy", s.adminOnly(s.handleTerminalFilesCopy))
 	s.mux.HandleFunc("POST /api/terminal/files/move", s.adminOnly(s.handleTerminalFilesMove))
