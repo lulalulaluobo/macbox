@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Star, Upload, AlertTriangle, X } from 'lucide-react';
+import { ArrowLeft, Star, Upload } from 'lucide-react';
 import { CloudMount, DiskInfo, FileItem, LocalMount } from '../../types';
 import { api } from '../../api';
 import { FileToolbar } from './filemanager/FileToolbar';
@@ -19,6 +19,7 @@ import { useTrash } from './filemanager/useTrash';
 import { useFilePreviews } from './filemanager/useFilePreviews';
 import { useFileMarquee } from './filemanager/useFileMarquee';
 import { useFileActions } from './filemanager/useFileActions';
+import { FileManagerAlerts } from './filemanager/FileManagerAlerts';
 
 interface FileManagerProps {
   initialPath?: string;
@@ -401,28 +402,11 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
       {/* Main Content Area */}
       <div className="flex min-h-0 flex-1 flex-col gap-2.5">
-        {/* Alert Banner */}
-        {alertMsg && (
-          <div className={`fixed left-1/2 top-20 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center justify-between gap-3 rounded-full border bg-white/95 px-4 py-2.5 text-xs shadow-xl backdrop-blur dark:bg-slate-900/95 ${
-            alertMsg.type === 'success'
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-              : alertMsg.type === 'warning'
-              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-              : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-          }`}>
-            <span>{alertMsg.text}</span>
-            <button onClick={() => setAlertMsg(null)} className="p-1 hover:text-white">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {!hideSystemFiles && (
-          <div className="fixed left-1/2 top-20 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-amber-300 bg-white/95 px-4 py-2.5 text-xs text-amber-700 shadow-xl backdrop-blur dark:bg-slate-900/95 dark:text-amber-300">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>您已开启系统保护目录显示。请注意：<strong className="underline">appdata</strong> 包含各 Docker 容器的 SQLite 数据库与持久化卷，误删可能导致容器损坏！</span>
-          </div>
-        )}
+        <FileManagerAlerts
+          alertMsg={alertMsg}
+          hideSystemFiles={hideSystemFiles}
+          onDismiss={() => setAlertMsg(null)}
+        />
 
         {activeCloudMount ? <CloudDriveView
           mount={activeCloudMount}
