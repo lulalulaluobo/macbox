@@ -2,19 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Download,
-  CheckCircle2,
-  AlertCircle,
   RefreshCw,
-  Folder,
   Sliders,
-  FileCode,
   ExternalLink,
-  HardDrive,
-  Globe,
 } from 'lucide-react';
 import { AppMetadata } from '../../types';
 import { api } from '../../api';
 import { useAppInstallStream } from './hooks/useAppInstallStream';
+import { AppInstallForm } from './AppInstallForm';
+import { AppInstallProgress } from './AppInstallProgress';
+import { AppInstallResult } from './AppInstallResult';
 
 interface AppConfigInstallModalProps {
   app: AppMetadata | null;
@@ -155,305 +152,23 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
               <span>正在读取配置模板...</span>
             </div>
           ) : installStatus === 'idle' ? (
-            <div className="space-y-3 sm:space-y-5">
-              {/* App Description Banner */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 dark:border-slate-800/80 dark:bg-slate-950/50 dark:text-slate-300 sm:p-4">
-                {currentMeta.description}
-              </div>
-
-              {/* Toggle Advanced YAML Mode */}
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-800/40">
-                <div className="flex min-w-0 items-center gap-2 text-slate-700 dark:text-slate-300">
-                  <FileCode className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
-                  <span className="font-semibold">YAML 高级模式</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setUseYamlMode(!useYamlMode)}
-                  className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-                    useYamlMode
-                      ? 'bg-indigo-600 text-white shadow-md'
-                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  {useYamlMode ? '返回表单' : '打开编辑器'}
-                </button>
-              </div>
-
-              {useYamlMode ? (
-                /* Advanced Mode: Direct YAML Editor */
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold text-slate-300">
-                    docker-compose.yaml 源码微调
-                  </label>
-                  <textarea
-                    value={customYaml}
-                    onChange={e => setCustomYaml(e.target.value)}
-                    spellCheck={false}
-                    className="h-[55dvh] w-full resize-none rounded-2xl border border-slate-800 bg-[#06090e] p-4 font-mono text-xs leading-relaxed text-emerald-400/90 focus:border-indigo-500 focus:outline-none sm:h-80"
-                  />
-                </div>
-              ) : (
-                /* Guided Form Mode */
-                <div className="space-y-3 sm:space-y-5">
-                  {/* 1. Ports Configuration */}
-                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60 sm:p-5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 dark:text-white">
-                        <Globe className="w-4 h-4 text-sky-500 dark:text-sky-400" />
-                        <span>网络端口</span>
-                      </div>
-                      <span className="hidden text-[11px] text-slate-500 dark:text-slate-400 sm:inline">
-                        宿主机 ➔ 容器内部
-                      </span>
-                    </div>
-
-                    <div className="space-y-2.5">
-                      {currentMeta.ports && currentMeta.ports.length > 0 ? (
-                        currentMeta.ports.map(p => {
-                          const cPortStr = p.containerPort.toString();
-                          const currentVal = portsMap[cPortStr] ?? p.hostPort;
-                          return (
-                            <div
-                              key={cPortStr}
-                              className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800/80 text-xs shadow-xs"
-                            >
-                              <div>
-                                <span className="font-semibold text-slate-800 dark:text-slate-200">
-                                  {p.description || `端口 ${p.containerPort}`}
-                                </span>
-                                <span className="text-[11px] text-slate-500 font-mono block">
-                                  容器端口: {p.containerPort}/{p.protocol}
-                                </span>
-                              </div>
-
-                              <div className="flex items-center space-x-2">
-                                <span className="text-xs text-slate-500 dark:text-slate-400">宿主机端口:</span>
-                                <input
-                                  type="number"
-                                  min={1024}
-                                  max={65535}
-                                  value={currentVal}
-                                  onChange={e =>
-                                    setPortsMap({
-                                      ...portsMap,
-                                      [cPortStr]: parseInt(e.target.value) || p.hostPort,
-                                    })
-                                  }
-                                  className="w-24 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-center text-xs focus:outline-none focus:border-sky-500"
-                                />
-                              </div>
-                            </div>
-                          );
-                        })
-                      ) : currentMeta.port > 0 ? (
-                        <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-xs shadow-xs">
-                          <span className="text-slate-800 dark:text-slate-200">WebUI 主服务访问端口:</span>
-                          <input
-                            type="number"
-                            min={1024}
-                            max={65535}
-                            value={portsMap[currentMeta.port.toString()] ?? currentMeta.port}
-                            onChange={e =>
-                              setPortsMap({
-                                ...portsMap,
-                                [currentMeta.port.toString()]:
-                                  parseInt(e.target.value) || currentMeta.port,
-                              })
-                            }
-                            className="w-24 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-center text-xs focus:outline-none focus:border-sky-500"
-                          />
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-500">该应用无外部公开端口映射</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 2. Volumes / Storage Directory Configuration */}
-                  <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60 sm:p-5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 dark:text-white">
-                        <HardDrive className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
-                        <span>存储路径</span>
-                      </div>
-                      <span className="hidden text-[11px] text-slate-500 dark:text-slate-400 sm:inline">
-                        支持物理外接硬盘路径
-                      </span>
-                    </div>
-
-                    <div className="space-y-3">
-                      {currentMeta.volumes && currentMeta.volumes.length > 0 ? (
-                        currentMeta.volumes.map((v, idx) => {
-                          const currentHost = volumesMap[v.container] ?? v.host;
-                          return (
-                            <div
-                              key={idx}
-                              className="p-3.5 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800/80 space-y-2 text-xs shadow-xs"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="font-semibold text-slate-800 dark:text-slate-200">
-                                  {v.description || `挂载点 ${idx + 1}`}
-                                </span>
-                                <span className="text-[11px] text-slate-500 font-mono">
-                                  容器内: {v.container}
-                                </span>
-                              </div>
-
-                              <div className="flex items-center space-x-2">
-                                <input
-                                  type="text"
-                                  value={currentHost}
-                                  onChange={e =>
-                                    setVolumesMap({
-                                      ...volumesMap,
-                                      [v.container]: e.target.value,
-                                    })
-                                  }
-                                  className="flex-1 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
-                                  placeholder="/data/appdata/..."
-                                />
-                              </div>
-
-                              {/* Quick Presets for External Hard Drive */}
-                              {(v.container === '/media' ||
-                                v.container === '/music' ||
-                                v.container === '/downloads' ||
-                                v.container === '/data') && (
-                                <div className="flex flex-wrap items-center gap-2 pt-1">
-                                  <span className="text-[11px] text-slate-500">快捷预设:</span>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setVolumesMap({
-                                        ...volumesMap,
-                                        [v.container]: `/data/mnt/disk4${v.container}`,
-                                      })
-                                    }
-                                    className="text-[11px] px-2 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 dark:text-indigo-300 dark:border-indigo-500/20 transition font-mono"
-                                  >
-                                    使用 2TB 硬盘
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setVolumesMap({
-                                        ...volumesMap,
-                                        [v.container]: v.host,
-                                      })
-                                    }
-                                    className="text-[11px] px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400 transition font-mono border border-slate-200 dark:border-slate-700"
-                                  >
-                                    恢复默认
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <p className="text-xs text-slate-500">该应用无挂载持久卷</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 3. Environment Variables */}
-                  {currentMeta.env && currentMeta.env.length > 0 && (
-                    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60 sm:p-5">
-                      <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 dark:text-white">
-                        <Folder className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
-                        <span>环境变量</span>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {currentMeta.env.map(e => {
-                          const currentVal = envMap[e.key] ?? e.value;
-                          return (
-                            <div
-                              key={e.key}
-                              className="p-3 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800/80 space-y-1.5 text-xs shadow-xs"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="font-mono font-bold text-slate-800 dark:text-slate-300">{e.key}</span>
-                                <span className="text-[10px] text-slate-500">{e.description}</span>
-                              </div>
-                              <input
-                                type="text"
-                                value={currentVal}
-                                onChange={ev =>
-                                  setEnvMap({
-                                    ...envMap,
-                                    [e.key]: ev.target.value,
-                                  })
-                                }
-                                className="w-full px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:border-emerald-500"
-                              />
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+            <AppInstallForm
+              meta={currentMeta}
+              portsMap={portsMap}
+              volumesMap={volumesMap}
+              envMap={envMap}
+              useYamlMode={useYamlMode}
+              customYaml={customYaml}
+              onPortsMapChange={setPortsMap}
+              onVolumesMapChange={setVolumesMap}
+              onEnvMapChange={setEnvMap}
+              onYamlModeChange={setUseYamlMode}
+              onCustomYamlChange={setCustomYaml}
+            />
           ) : (
-            /* Live Terminal Progress Mode */
             <div className="space-y-4">
-              {installStatus === 'installing' && (
-                <div className="p-4 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-300 text-xs flex items-center justify-between">
-                  <div className="flex items-center space-x-2.5">
-                    <RefreshCw className="w-4 h-4 animate-spin text-sky-400" />
-                    <span className="font-semibold">
-                      正在拉取 Docker 镜像并部署启动，请观察实时控制台...
-                    </span>
-                  </div>
-                  <span className="font-mono text-[11px] opacity-75">SSE 实时流</span>
-                </div>
-              )}
-
-              {installStatus === 'done' && (
-                <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs space-y-2 shadow-lg">
-                  <div className="flex items-center space-x-2 font-bold text-sm">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                    <span>应用已成功部署并上线！</span>
-                  </div>
-                  <p className="text-xs text-emerald-200/90">
-                    Web 访问地址:{' '}
-                    <a
-                      href={webAccessUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-mono text-white underline font-bold ml-1"
-                    >
-                      {webAccessUrl}
-                    </a>
-                  </p>
-                  <p className="text-[11px] text-emerald-200/75">
-                    部署日志已保留。请先查看或复制初始化信息，确认完成后再手动关闭窗口。
-                  </p>
-                </div>
-              )}
-
-              {installStatus === 'error' && (
-                <div className="p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs space-y-1">
-                  <div className="flex items-center space-x-2 font-bold text-sm">
-                    <AlertCircle className="w-5 h-5 text-rose-400" />
-                    <span>部署遇到异常:</span>
-                  </div>
-                  <p className="font-mono">{installError}</p>
-                </div>
-              )}
-
-              {/* Terminal View */}
-              <div className="bg-[#070a10] rounded-2xl p-4 border border-slate-800 font-mono text-xs text-emerald-400/90 h-80 overflow-y-auto space-y-1 shadow-inner select-text leading-relaxed">
-                {installLogs.map((line, idx) => (
-                  <div key={idx} className="whitespace-pre-wrap break-all">
-                    {line}
-                  </div>
-                ))}
-                <div ref={logsEndRef} />
-              </div>
+              {installStatus === 'done' && <AppInstallResult webAccessUrl={webAccessUrl} />}
+              <AppInstallProgress status={installStatus} logs={installLogs} error={installError} logsEndRef={logsEndRef} />
             </div>
           )}
         </div>
