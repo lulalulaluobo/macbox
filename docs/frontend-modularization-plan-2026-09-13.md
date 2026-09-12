@@ -315,6 +315,7 @@ npm audit --audit-level=low
 
 - 一级页面懒加载、统一加载占位和 chunk 失败恢复入口；
 - Terminal 会话生命周期、文件浏览器和文件弹窗拆分；
+- Terminal 顶部工具栏、xterm 视口和自适应布局拆分为独立组件/hook；
 - FileManager 的导航、选择和收藏 hook 拆分；
 - FileManager 的本地文件上传/拖拽上传和回收站流程拆分为独立 hook；
 - FileManager 的新建、重命名、复制/移动和删除流程拆分为 `useFileOperations`；

@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Folder, RefreshCw, FileText, Film, Image, Music, Archive,
-  Code, HardDrive, Maximize2, Minimize2, Star,
-  PanelLeftClose, PanelLeft, X, Crown, User
+  Folder, FileText, Film, Image, Music, Archive,
+  Code, HardDrive, Star,
 } from 'lucide-react';
 import { api } from '../api';
 import { FileItem, TerminalPrefill } from '../types';
@@ -11,7 +10,10 @@ import { TerminalFileBrowser } from './terminal/TerminalFileBrowser';
 import type { TerminalShortcut } from './terminal/TerminalFileBrowser';
 import { TerminalFileModals } from './terminal/TerminalFileModals';
 import type { TerminalEditingFile } from './terminal/TerminalFileModals';
+import { TerminalToolbar } from './terminal/TerminalToolbar';
+import { TerminalViewport } from './terminal/TerminalViewport';
 import { useTerminalSession } from './terminal/useTerminalSession';
+import { useTerminalLayout } from './terminal/useTerminalLayout';
 
 interface TerminalPageProps {
   prefill?: TerminalPrefill | null;
@@ -152,47 +154,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
     }
   }, [showHiddenFiles]);
 
-  // Fit terminal when sidebar toggles or fullscreen changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (fitAddonRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        try {
-          fitAddonRef.current.fit();
-          const dims = fitAddonRef.current.proposeDimensions();
-          if (dims) {
-            wsRef.current.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
-          }
-        } catch (e) {
-          // ignore
-        }
-      }
-    }, 150);
-    return () => clearTimeout(timer);
-  }, [showSidebar, fullscreen]);
-
-  // The input/shortcut bar changes height when the viewport or multiline mode
-  // changes. Keep xterm fitted to the remaining grid row so its last line is
-  // never painted underneath the helper bar.
-  useEffect(() => {
-    const element = terminalRef.current;
-    if (!element || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        if (!fitAddonRef.current || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-        try {
-          fitAddonRef.current.fit();
-          const dims = fitAddonRef.current.proposeDimensions();
-          if (dims) {
-            wsRef.current.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
-          }
-        } catch {
-          // The terminal may be disposing while the layout observer fires.
-        }
-      });
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
+  useTerminalLayout({ terminalRef, fitAddonRef, wsRef, layoutKey: `${showSidebar}:${fullscreen}` });
 
   // Load File List
   const loadFiles = async (targetPath: string) => {
@@ -416,117 +378,28 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
         {/* Right Side: Interactive Web Terminal */}
         <div className={`terminal-dark-preserve order-1 grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'min-h-[520px] flex-none lg:order-2 lg:min-h-0 lg:w-auto lg:flex-1' : 'min-h-0 flex-1'}`}>
-          {/* Terminal Top Toolbar */}
-          <div className="flex flex-col gap-2.5 border-b border-slate-800/80 bg-[#0d121f] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-3.5">
-            <div className="flex min-w-0 items-center gap-2">
-              <button
-                onClick={() => {
-                  const next = !showSidebar;
-                  setShowSidebar(next);
-                  if (next && files.length === 0) loadFiles(currentPath);
-                }}
-                className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 text-[11px] font-semibold text-slate-200 transition hover:bg-slate-700"
-                title={showSidebar ? '收起文件系统' : '展开文件系统'}
-              >
-                {showSidebar ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
-                <span>{showSidebar ? '收起文件' : '文件系统'}</span>
-              </button>
-
-              <div className="flex min-w-0 items-center gap-1.5">
-                <span className={`w-2.5 h-2.5 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-                <span className="truncate text-xs font-bold text-white">终端</span>
-                <span className="shrink-0 text-[11px] text-slate-400">{connected ? '已连接' : '未连接'}</span>
-              </div>
-
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={handleReconnect}
-                  className="flex min-h-8 items-center gap-1 rounded-lg bg-slate-800 px-2 text-[11px] font-semibold text-slate-200 transition hover:bg-sky-600"
-                  title="清除旧会话并重新连接虚拟机终端"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">{sessionClosed ? '重开' : '重连'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleCloseSession()}
-                  disabled={!connected && !sessionId}
-                  className="flex min-h-8 items-center gap-1 rounded-lg bg-slate-800 px-2 text-[11px] font-semibold text-rose-300 transition hover:bg-rose-900/60 disabled:opacity-40"
-                  title="关闭当前终端会话"
-                >
-                  <X className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">关闭</span>
-                </button>
-              </div>
-
-              {/* Login Identity Badge & Fast Switcher */}
-              <div className="ml-auto flex shrink-0 items-center rounded-lg border border-slate-700/80 bg-slate-800/80 p-0.5 text-xs sm:ml-0">
-                <button
-                  onClick={() => handleSwitchUser(loginUser === 'root' ? 'default' : 'root')}
-                  className={`flex items-center space-x-1 px-2 py-0.5 rounded-md text-[11px] font-medium transition ${
-                    loginUser === 'root'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30'
-                      : 'bg-sky-500/20 text-sky-300 border border-sky-500/40 hover:bg-sky-500/30'
-                  }`}
-                  title="点击即切换当前终端身份并重新连入"
-                >
-                  {loginUser === 'root' ? (
-                    <>
-                      <Crown className="w-3 h-3 text-amber-400" />
-                      <span>root</span>
-                    </>
-                  ) : (
-                    <>
-                      <User className="w-3 h-3 text-sky-400" />
-                      <span>用户</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Command Buttons */}
-            <div className="flex w-full items-center gap-1.5 overflow-x-auto pb-0.5 sm:w-auto">
-              <span className="shrink-0 px-1 text-[10px] font-bold uppercase tracking-wide text-violet-300" title="以下命令会跳过 AI 工具的安全审批，请仅在可信环境使用">
-                AI 高权限
-              </span>
-              {aiCommands.map((ai) => (
-                <button
-                  key={ai.label}
-                  onClick={() => sendToTerminal(aiCommandForUser(ai.command, loginUser))}
-                  disabled={!connected}
-                  className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-violet-500/30 bg-violet-500/15 px-2 py-1 text-[11px] font-semibold text-violet-200 transition hover:bg-violet-500/25 disabled:opacity-40"
-                  title={ai.title}
-                >
-                  <Code className="h-2.5 w-2.5 text-violet-300" />
-                  <span>{ai.label}</span>
-                </button>
-              ))}
-
-              <button
-                onClick={() => xtermInstance.current?.clear()}
-                className="shrink-0 whitespace-nowrap rounded-md bg-slate-800 px-2 py-1 text-[11px] text-slate-300 transition hover:bg-slate-700"
-                title="清屏"
-              >
-                清屏
-              </button>
-
-              <button
-                onClick={() => setFullscreen(!fullscreen)}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                title={fullscreen ? '退出全屏' : '全屏终端'}
-              >
-                {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Terminal Canvas Container */}
-          <div
-            ref={terminalRef}
-            className="h-full min-h-0 min-w-0 overflow-hidden bg-[#090d16] p-3 font-mono"
+          <TerminalToolbar
+            showSidebar={showSidebar}
+            connected={connected}
+            sessionClosed={sessionClosed}
+            sessionId={sessionId}
+            loginUser={loginUser}
+            fullscreen={fullscreen}
+            commands={aiCommands}
+            onToggleSidebar={() => {
+              const next = !showSidebar;
+              setShowSidebar(next);
+              if (next && files.length === 0) void loadFiles(currentPath);
+            }}
+            onReconnect={handleReconnect}
+            onCloseSession={handleCloseSession}
+            onSwitchUser={() => handleSwitchUser(loginUser === 'root' ? 'default' : 'root')}
+            onSendCommand={(command) => sendToTerminal(aiCommandForUser(command, loginUser))}
+            onClear={() => xtermInstance.current?.clear()}
+            onToggleFullscreen={() => setFullscreen((current) => !current)}
           />
+
+          <TerminalViewport terminalRef={terminalRef} />
 
           {/* Bottom Text Input & Action Keys Helper Bar */}
           <TerminalInputBar
