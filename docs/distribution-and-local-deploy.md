@@ -18,7 +18,7 @@
 将下面的提示词发送给运行在目标 Mac 上、并且具有本地终端权限的 Codex CLI、WorkBuddy 或其他 Agent：
 
 ```text
-请在当前这台 macOS 上部署 MacNAS：自动识别 Apple Silicon 或 Intel，从 MacNAS GitHub 的最新 Release 下载并校验对应压缩包，优先启动发行包中的 MacNASMenu.app，检测并在需要时通过 Homebrew 安装或复用 Lima，完成安装并启动 Web 服务，最后打开本机 Web 页面并返回局域网访问地址；不要使用开发机绝对路径，不要删除用户数据，遇到系统授权或破坏性操作时先向我确认。
+请在当前这台 macOS 上部署 MacNAS：访问 https://github.com/lulalulaluobo/macnas/releases/latest，自动识别 Apple Silicon 或 Intel，下载并校验对应压缩包，将下载、解压和校验文件放在用户目录 ~/macnas，优先启动发行包中的 MacNASMenu.app，检测并在需要时通过 Homebrew 安装或复用 Lima，完成安装并启动 Web 服务，最后打开本机 Web 页面并返回局域网访问地址；不要使用开发机绝对路径，不要删除用户数据，遇到系统授权或破坏性操作时先向我确认。
 ```
 
 本地 Agent 必须实际运行在安装 MacNAS 的那台 Mac 上。手机端聊天或没有本机终端权限的云端 Agent 不能代替部署。Agent 完成后应返回实际安装目录、服务地址、Lima 状态和失败日志。
@@ -117,10 +117,10 @@ brew install lima
 
 ### 1. 获取源码和开发依赖
 
-请先在 MacNAS GitHub 仓库页面复制实际的 HTTPS 地址，再执行：
+MacNAS 源码仓库地址为 `https://github.com/lulalulaluobo/macnas`，执行：
 
 ```bash
-git clone <MacNAS GitHub 仓库 HTTPS 地址>
+git clone https://github.com/lulalulaluobo/macnas.git
 cd mac-nas
 ```
 
