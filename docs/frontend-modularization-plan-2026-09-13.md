@@ -326,6 +326,7 @@ npm audit --audit-level=low
 - FileManager 的提示横幅和系统目录警告拆分为 `FileManagerAlerts`；
 - Settings 的终端默认身份与 AI CLI Skill 映射区拆分为独立 section；
 - Settings 的 NAS 用户、Linux 系统用户、Root 密码和主题外观区拆分为独立 section；
+- Settings 的 NAS 控制台用户加载、表单和增删改流程拆分为 `useNASUserSettings`；
 - Settings 的 Root SSH 密钥生成/导入弹窗拆分为 `SSHKeyModals`，复制状态改为弹窗内部状态；
 - SMB 共享区拆分为独立展示模块；
 - StorageSettings 的本机目录直通管理器拆分为 `LocalMountSection`；

@@ -15,6 +15,7 @@ import { SystemUsersSection } from './settings/SystemUsersSection';
 import { RootPasswordSection } from './settings/RootPasswordSection';
 import { AppearanceSettingsSection } from './settings/AppearanceSettingsSection';
 import { SSHKeyModals } from './settings/SSHKeyModals';
+import { useNASUserSettings } from './settings/useNASUserSettings';
 
 interface SettingsProps {
   primaryIP?: string;
@@ -31,26 +32,44 @@ export const Settings: React.FC<SettingsProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>('nas_users');
   const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 0. NAS Users state (Web Console Authentication)
-  const [nasUsers, setNasUsers] = useState<NASUser[]>([]);
-  const [nasUsersLoading, setNasUsersLoading] = useState(false);
-  const [showAddNASModal, setShowAddNASModal] = useState(false);
-  const [newNASUsername, setNewNASUsername] = useState('');
-  const [newNASDisplayName, setNewNASDisplayName] = useState('');
-  const [newNASPassword, setNewNASPassword] = useState('');
-  const [newNASConfirmPassword, setNewNASConfirmPassword] = useState('');
-  const [newNASRole, setNewNASRole] = useState<'admin' | 'user'>('user');
-
-  // Edit / Promote NAS User
-  const [editingNASUser, setEditingNASUser] = useState<NASUser | null>(null);
-  const [editDisplayName, setEditDisplayName] = useState('');
-  const [editRole, setEditRole] = useState<'admin' | 'user'>('user');
-  const [editEnabled, setEditEnabled] = useState(true);
-  const [editNewPassword, setEditNewPassword] = useState('');
-
-  // Delete NAS User
-  const [deletingNASUser, setDeletingNASUser] = useState<NASUser | null>(null);
-  const [nasActionLoading, setNasActionLoading] = useState(false);
+  const {
+    nasUsers,
+    nasUsersLoading,
+    showAddNASModal,
+    newNASUsername,
+    newNASDisplayName,
+    newNASPassword,
+    newNASConfirmPassword,
+    newNASRole,
+    editingNASUser,
+    editDisplayName,
+    editRole,
+    editEnabled,
+    editNewPassword,
+    deletingNASUser,
+    nasActionLoading,
+    loadNASUsers,
+    setShowAddNASModal,
+    setNewNASUsername,
+    setNewNASDisplayName,
+    setNewNASPassword,
+    setNewNASConfirmPassword,
+    setNewNASRole,
+    setEditingNASUser,
+    setEditDisplayName,
+    setEditRole,
+    setEditEnabled,
+    setEditNewPassword,
+    setDeletingNASUser,
+    handleCreateNASUser,
+    handleOpenEditNASUser,
+    handleUpdateNASUser,
+    handleDeleteNASUser,
+  } = useNASUserSettings({
+    currentUser,
+    onCurrentUserUpdated,
+    onAlert: (alert) => setAlertMsg(alert),
+  });
 
   // 1. Users state
   const [users, setUsers] = useState<SystemUser[]>([]);
@@ -123,19 +142,17 @@ export const Settings: React.FC<SettingsProps> = ({
   const loadData = async () => {
     setUsersLoading(true);
     setSSHLoading(true);
-    setNasUsersLoading(true);
     try {
-      const [uList, sCfg, tCfg, nUsers, skillsCfg] = await Promise.all([
+      const [uList, sCfg, tCfg, skillsCfg] = await Promise.all([
         api.getUsers().catch(() => []),
         api.getSSHConfig().catch(() => null),
         api.getTerminalSettings().catch(() => null),
-        api.getNASUsers().catch(() => ({ users: [] })),
         api.getTerminalSkills().catch(() => null),
+        loadNASUsers(),
       ]);
       setUsers(uList || []);
       if (sCfg) setSSHConfig(sCfg);
       if (tCfg) setTerminalSettings(tCfg);
-      if (nUsers && nUsers.users) setNasUsers(nUsers.users);
       if (skillsCfg) {
         setTerminalSkills(skillsCfg);
         setSkillsEnabled(skillsCfg.enabled);
@@ -147,114 +164,6 @@ export const Settings: React.FC<SettingsProps> = ({
     } finally {
       setUsersLoading(false);
       setSSHLoading(false);
-      setNasUsersLoading(false);
-    }
-  };
-
-  const loadNASUsers = async () => {
-    setNasUsersLoading(true);
-    try {
-      const res = await api.getNASUsers();
-      setNasUsers(res.users || []);
-    } catch (err: any) {
-      // ignore
-    } finally {
-      setNasUsersLoading(false);
-    }
-  };
-
-  const handleCreateNASUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newNASUsername.trim() || !newNASPassword) {
-      setAlertMsg({ type: 'error', text: '请填写用户名和登录密码' });
-      return;
-    }
-	if (Array.from(newNASPassword).length < 8) {
-	  setAlertMsg({ type: 'error', text: '密码长度至少需要 8 个字符' });
-      return;
-    }
-    if (newNASPassword !== newNASConfirmPassword) {
-      setAlertMsg({ type: 'error', text: '两次输入的新密码不一致' });
-      return;
-    }
-
-    setNasActionLoading(true);
-    try {
-      await api.createNASUser({
-        username: newNASUsername.trim(),
-        displayName: newNASDisplayName.trim() || undefined,
-        password: newNASPassword,
-        role: newNASRole,
-      });
-      setAlertMsg({ type: 'success', text: `NAS 控制台用户 [${newNASUsername}] 创建成功！` });
-      setShowAddNASModal(false);
-      setNewNASUsername('');
-      setNewNASDisplayName('');
-      setNewNASPassword('');
-      setNewNASConfirmPassword('');
-      setNewNASRole('user');
-      await loadNASUsers();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `创建用户失败: ${err.message}` });
-    } finally {
-      setNasActionLoading(false);
-    }
-  };
-
-  const handleOpenEditNASUser = (u: NASUser) => {
-    setEditingNASUser(u);
-    setEditDisplayName(u.displayName || u.username);
-    setEditRole(u.role);
-    setEditEnabled(u.enabled);
-    setEditNewPassword('');
-  };
-
-  const handleUpdateNASUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingNASUser) return;
-
-    setNasActionLoading(true);
-    try {
-      const payload: any = {
-        displayName: editDisplayName.trim() || undefined,
-        role: editRole,
-        enabled: editEnabled,
-      };
-      if (editNewPassword.trim()) {
-		if (Array.from(editNewPassword.trim()).length < 8) {
-		  setAlertMsg({ type: 'error', text: '重置密码长度至少需要 8 个字符' });
-          setNasActionLoading(false);
-          return;
-        }
-        payload.newPassword = editNewPassword.trim();
-      }
-
-      const res = await api.updateNASUser(editingNASUser.id, payload);
-      setAlertMsg({ type: 'success', text: `用户 [${editingNASUser.username}] 配置已成功更新！` });
-      if (currentUser && currentUser.id === editingNASUser.id && onCurrentUserUpdated) {
-        onCurrentUserUpdated(res.user);
-      }
-      setEditingNASUser(null);
-      await loadNASUsers();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `更新用户失败: ${err.message}` });
-    } finally {
-      setNasActionLoading(false);
-    }
-  };
-
-  const handleDeleteNASUser = async () => {
-    if (!deletingNASUser) return;
-    setNasActionLoading(true);
-    try {
-      await api.deleteNASUser(deletingNASUser.id);
-      setAlertMsg({ type: 'success', text: `控制台用户 [${deletingNASUser.username}] 已成功删除！` });
-      setDeletingNASUser(null);
-      await loadNASUsers();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `删除用户失败: ${err.message}` });
-    } finally {
-      setNasActionLoading(false);
     }
   };
 
