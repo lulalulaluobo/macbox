@@ -8,11 +8,9 @@ interface LoginPageProps {
   onLoginSuccess: (user: NASUser) => void;
 }
 
-const DEFAULT_ADMIN_USERNAME = 'admin';
-
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const { isDark, toggleTheme } = useTheme();
-  const [username, setUsername] = useState(DEFAULT_ADMIN_USERNAME);
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
@@ -26,7 +24,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       .then((res) => {
         setSetupRequired(res.setupRequired);
         if (res.setupRequired) {
-          setUsername(DEFAULT_ADMIN_USERNAME);
+          setUsername('');
           setPassword('');
           setConfirmPassword('');
         }
@@ -41,8 +39,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setError('请输入用户名和登录密码');
       return;
     }
-    if (setupMode && new TextEncoder().encode(password).length < 12) {
-      setError('管理员密码至少需要 12 个字节，请设置更强的密码');
+    if (setupMode && Array.from(password).length < 8) {
+      setError('管理员密码至少需要 8 个字符，请设置更难猜的密码');
       return;
     }
     if (setupMode && password !== confirmPassword) {
@@ -121,7 +119,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
           {setupRequired && (
             <div className="mb-6 rounded-xl border border-sky-200 bg-sky-50 p-3.5 text-xs text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-              首次使用请现场创建管理员账号和密码。密码至少 12 个字节，初始化只允许在运行 MacNAS 的 Mac 本机完成。
+              首次使用请现场创建管理员账号和密码。密码至少 8 个字符且不能使用常见弱密码，初始化只允许在运行 MacNAS 的 Mac 本机完成。
             </div>
           )}
 

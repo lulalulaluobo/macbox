@@ -22,7 +22,7 @@
 修复证据：
 
 - `pkg/auth/manager.go` 的 `CreateInitialAdmin` 现在复用正常密码校验，不再存在固定初始密码常量；
-- `web/src/pages/LoginPage.tsx` 让用户现场填写账号、密码和确认密码，并在前端提示至少 12 字节；
+- `web/src/pages/LoginPage.tsx` 让用户现场填写用户名、密码和确认密码，并在前端提示至少 8 个字符；
 - bcrypt 密码哈希、首次初始化仅限 loopback 和“只能创建第一个管理员”的约束保持不变；
 - README、CLI 安装文档和手测清单已删除固定生产密码描述。
 
@@ -96,7 +96,7 @@
 
 - API 默认要求认证，首次管理员创建仅允许本机请求；
 - 高危写操作及 root Web 终端使用 `adminOnly`；
-- 密码采用 bcrypt，普通密码至少 12 字节；
+- 密码采用 bcrypt，Web 控制台密码至少 8 个字符并拒绝常见弱密码；
 - 登录失败按账号和 IP 退避，密码/角色/禁用变更会撤销会话；
 - 会话使用随机 256-bit Token、HttpOnly、SameSite=Strict Cookie；
 - CORS 默认同源，WebSocket 对 Origin 做相同校验；

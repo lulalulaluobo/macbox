@@ -159,7 +159,20 @@ func (sm *ServiceManager) Install(port int) error {
 	}
 
 	logPath := filepath.Join(macnasDir, "macnas.log")
-	errLogPath := filepath.Join(macnasDir, "macnas.err.log")
+	// All supported launch paths use one canonical service log. Keeping stdout
+	// and stderr together makes the menu-bar "打开日志" action useful no
+	// matter whether the service was started by LaunchAgent, the menu helper,
+	// or the command-line controller.
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create service log: %w", err)
+	}
+	if err := logFile.Close(); err != nil {
+		return fmt.Errorf("failed to close service log: %w", err)
+	}
+	if err := os.Chmod(logPath, 0600); err != nil {
+		return fmt.Errorf("failed to secure service log: %w", err)
+	}
 
 	tmpl, err := template.New("plist").Parse(plistTemplate)
 	if err != nil {
@@ -173,7 +186,7 @@ func (sm *ServiceManager) Install(port int) error {
 		"Port":       fmt.Sprintf("%d", port),
 		"Host":       config.NormalizeListenAddress(sm.cfg.ListenAddress),
 		"LogPath":    logPath,
-		"ErrLogPath": errLogPath,
+		"ErrLogPath": logPath,
 		"WorkingDir": sm.projectRoot,
 	}
 

@@ -11,7 +11,7 @@ INSTALL_SCRIPT="${SCRIPT_DIR}/install.sh"
 UNINSTALL_SCRIPT="${SCRIPT_DIR}/uninstall.sh"
 STATE_DIR="${HOME}/.macnas"
 PID_FILE="${STATE_DIR}/macnas.command.pid"
-LOG_FILE="${STATE_DIR}/macnas.command.log"
+LOG_FILE="${STATE_DIR}/macnas.log"
 PLIST_PATH="${HOME}/Library/LaunchAgents/com.macnas.server.plist"
 PORT="${MACNAS_PORT:-19808}"
 HOST="${MACNAS_HOST:-0.0.0.0}"
@@ -132,7 +132,8 @@ start_service() {
 
   umask 077
   mkdir -p "$STATE_DIR"
-  : > "$LOG_FILE"
+  touch "$LOG_FILE"
+  printf '\n[%s] [MacNAS Controller] 启动 Web 服务\n' "$(date '+%Y-%m-%d %H:%M:%S%z')" >>"$LOG_FILE"
   nohup "$BIN_PATH" --host "$HOST" --port "$PORT" >>"$LOG_FILE" 2>&1 < /dev/null &
   pid=$!
   printf '%s\n' "$pid" > "$PID_FILE"

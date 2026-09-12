@@ -618,16 +618,17 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     path: toGuestPath(disk.secondaryTarget),
   }));
   const secondaryMountOptions = localMounts
-    .filter((mount) => mount.enabled && !mount.guestTarget.includes('/') && (mount.guestTarget.toLowerCase().includes('volume') || mount.name.includes('存储空间') || mount.name.includes('硬盘')))
+    .filter((mount) => mount.enabled && mount.category === 'volume2')
     .map((mount) => ({ id: `mount-${mount.id}`, path: `/data/${mount.guestTarget}` }))
     .filter((mount) => !secondaryDiskOptions.some((disk) => disk.path === mount.path));
-  const localMountOptions = localMounts
-    .filter((mount) => mount.enabled && mount.category !== 'volume2')
-    .map((mount) => ({ id: `mount-${mount.id}`, path: toGuestPath(mount.guestTarget) }));
   const discoveredOptions = discoveredDrivePaths
     .map((path) => ({ id: `folder-${path}`, path }))
     .filter((drive) => !secondaryDiskOptions.some((disk) => disk.path === drive.path) && !secondaryMountOptions.some((mount) => mount.path === drive.path));
-  const secondaryOptions = [...secondaryDiskOptions, ...secondaryMountOptions, ...localMountOptions, ...discoveredOptions]
+  // Ordinary host-folder passthroughs are directories inside the owning NAS
+  // volume, not additional disks. Keep only the dedicated secondary volume
+  // and discovered storage roots in the drive switcher; the regular mapped
+  // folder remains visible at its configured /data path.
+  const secondaryOptions = [...secondaryDiskOptions, ...secondaryMountOptions, ...discoveredOptions]
     .filter((drive, index, all) => all.findIndex((candidate) => candidate.path === drive.path) === index);
   const driveOptions = [
     {

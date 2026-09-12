@@ -170,7 +170,7 @@ print_next_steps() {
   log "安装完成。"
   printf '\n下一步：\n'
   printf '  1. 在 Finder 中双击 MacNASMenu.app，顶部栏会出现 MacNAS 图标。\n'
-  printf '  2. 从顶部栏选择“启动后端服务”，再打开网页端完成首次初始化（首次登录时现场设置管理员账号和至少 12 字节的密码）：\n'
+  printf '  2. 从顶部栏选择“启动后端服务”，再打开网页端完成首次初始化（首次登录时现场设置管理员用户名和至少 8 个字符的强密码）：\n'
   printf '     http://127.0.0.1:%s\n' "$PORT"
   if [[ -n "$lan_ip" ]]; then
     printf '  3. 初始化完成后，局域网其他设备访问：\n     http://%s:%s\n' "$lan_ip" "$PORT"

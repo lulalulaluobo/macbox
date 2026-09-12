@@ -62,7 +62,7 @@ export const FileSidebar: React.FC<FileSidebarProps> = ({
               <span className="flex-1">回收站</span><span className="text-[10px] text-slate-400">{trashCount} 项</span>
             </button>
 
-            {enabledMounts.length > 0 && <p className="px-3 pb-1 pt-3 text-[9px] font-black uppercase tracking-wider text-slate-400">本机目录</p>}
+            {enabledMounts.length > 0 && <p className="px-3 pb-1 pt-3 text-[9px] font-black uppercase tracking-wider text-slate-400">本机目录直通</p>}
             {enabledMounts.map((mount) => {
               const path = `/data/${mount.guestTarget}`;
               return (

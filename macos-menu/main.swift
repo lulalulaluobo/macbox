@@ -288,7 +288,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             do {
                 let stateURL = self.fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".macnas", isDirectory: true)
                 try self.fileManager.createDirectory(at: stateURL, withIntermediateDirectories: true)
-                let logURL = stateURL.appendingPathComponent("macnas.menu.log")
+                let logURL = stateURL.appendingPathComponent("macnas.log")
                 if !self.fileManager.fileExists(atPath: logURL.path) {
                     self.fileManager.createFile(atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
                 }
@@ -296,6 +296,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     throw NSError(domain: "MacNASMenu", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法打开菜单栏日志文件"])
                 }
                 try logHandle.seekToEnd()
+                logHandle.write(Data("\n[MacNAS Menu] 启动 Web 服务\n".utf8))
 
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: binary)
@@ -519,7 +520,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func logPath() -> String {
-        home + "/.macnas/macnas.menu.log"
+        home + "/.macnas/macnas.log"
     }
 
     private func writePID(_ pid: Int32) {

@@ -181,8 +181,8 @@ export const Settings: React.FC<SettingsProps> = ({
       setAlertMsg({ type: 'error', text: '请填写用户名和登录密码' });
       return;
     }
-	if (newNASPassword.length < 12) {
-	  setAlertMsg({ type: 'error', text: '密码长度至少需要 12 个字符' });
+	if (Array.from(newNASPassword).length < 8) {
+	  setAlertMsg({ type: 'error', text: '密码长度至少需要 8 个字符' });
       return;
     }
     if (newNASPassword !== newNASConfirmPassword) {
@@ -233,8 +233,8 @@ export const Settings: React.FC<SettingsProps> = ({
         enabled: editEnabled,
       };
       if (editNewPassword.trim()) {
-		if (editNewPassword.trim().length < 12) {
-		  setAlertMsg({ type: 'error', text: '重置密码长度至少需要 12 个字符' });
+		if (Array.from(editNewPassword.trim()).length < 8) {
+		  setAlertMsg({ type: 'error', text: '重置密码长度至少需要 8 个字符' });
           setNasActionLoading(false);
           return;
         }
@@ -1976,7 +1976,7 @@ export const Settings: React.FC<SettingsProps> = ({
                   type="password"
                   value={newNASPassword}
                   onChange={(e) => setNewNASPassword(e.target.value)}
-				  placeholder="至少 12 位密码"
+				  placeholder="至少 8 位密码"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
                   required
                 />

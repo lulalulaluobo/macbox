@@ -160,8 +160,8 @@ export const App: React.FC = () => {
       setChangePwdMsg({ type: 'error', text: '请填写所有密码输入框' });
       return;
     }
-	if (newPassword.length < 12) {
-	  setChangePwdMsg({ type: 'error', text: '新密码长度至少需要 12 个字符' });
+	if (Array.from(newPassword).length < 8) {
+	  setChangePwdMsg({ type: 'error', text: '新密码长度至少需要 8 个字符' });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -325,7 +325,7 @@ export const App: React.FC = () => {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-				  placeholder="请输入至少 12 位新密码"
+                  placeholder="请输入至少 8 位新密码"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
                   required
                 />

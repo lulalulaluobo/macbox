@@ -131,7 +131,7 @@ fn main() {
                     if let Some(child) = child.take() {
                         let _ = child.kill();
                     }
-                    return Err("MacNAS 后端启动超时，请查看 ~/.macnas/macnas.err.log".into());
+                    return Err("MacNAS 后端启动超时，请查看 ~/.macnas/macnas.log".into());
                 }
             }
 

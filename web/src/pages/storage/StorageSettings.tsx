@@ -809,7 +809,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
           className="flex min-h-16 w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 text-left dark:border-slate-800 dark:bg-slate-900"
         >
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"><FolderSync className="h-5 w-5" /></span>
-          <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-900 dark:text-white">本机目录</span><span className="mt-0.5 block text-[11px] text-slate-500">{localMounts.length} 个目录已直通</span></span>
+          <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-900 dark:text-white">本机目录直通</span><span className="mt-0.5 block text-[11px] text-slate-500">{localMounts.length} 个 Mac 目录已映射到 NAS</span></span>
           <span className="text-xs font-semibold text-sky-600 dark:text-sky-400">管理</span>
         </button>
       )}
@@ -819,7 +819,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
           <section className="flex h-[100dvh] w-full flex-col bg-white dark:bg-slate-950 sm:h-auto sm:max-h-[82dvh] sm:max-w-xl sm:rounded-3xl sm:border sm:border-slate-200 sm:dark:border-slate-800">
             <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-slate-100 px-4 dark:border-slate-800">
               <button type="button" onClick={() => setShowMountManager(false)} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" aria-label="关闭"><X className="h-5 w-5" /></button>
-              <div className="min-w-0 flex-1"><h3 className="text-base font-bold text-slate-900 dark:text-white">本机目录</h3><p className="text-[11px] text-slate-500">管理直通到 NAS 的 Mac 文件夹</p></div>
+              <div className="min-w-0 flex-1"><h3 className="text-base font-bold text-slate-900 dark:text-white">本机目录直通</h3><p className="text-[11px] text-slate-500">将 Mac 文件夹映射到 NAS，不复制或删除原目录</p></div>
               <button type="button" onClick={() => { setShowMountManager(false); setShowAddMountModal(true); }} className="flex min-h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-bold text-white"><Plus className="h-4 w-4" />添加</button>
             </header>
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
@@ -838,8 +838,26 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                     <button type="button" onClick={() => handleDeleteMount(m.id, m.name)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="移除目录"><Trash2 className="h-4 w-4" /></button>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => handleToggleMountWritable(m.id, !m.writable)} className="min-h-10 rounded-xl bg-slate-100 px-2 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">{m.writable ? '允许读写' : '只读保护'}</button>
-                    <button type="button" onClick={() => handleToggleMount(m.id)} className={`min-h-10 rounded-xl px-2 text-xs font-semibold ${m.enabled ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'}`}>{m.enabled ? '已启用' : '已停用'}</button>
+                    <div
+                      className={`flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold ${m.writable ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200'}`}
+                      role="status"
+                      aria-label={`当前访问权限：${m.writable ? '可读写' : '只读'}`}
+                    >
+                      {m.writable ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                      <span>当前：{m.writable ? '可读写' : '只读'}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleMountWritable(m.id, !m.writable)}
+                      className="min-h-10 rounded-xl bg-slate-100 px-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      title={m.writable ? '切换为只读保护' : '开启读写权限'}
+                    >
+                      {m.writable ? '切换为只读' : '切换为可读写'}
+                    </button>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="min-w-0 truncate" title={`/data/${m.guestTarget}`}>NAS 目录：<code className="font-mono">/data/{m.guestTarget}</code></span>
+                    <button type="button" onClick={() => handleToggleMount(m.id)} className={`shrink-0 rounded-lg px-2 py-1 font-semibold ${m.enabled ? 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`} title={m.enabled ? '停用本机目录直通' : '启用本机目录直通'}>{m.enabled ? '已启用 · 停用' : '已停用 · 启用'}</button>
                   </div>
                 </article>
               ))}
@@ -961,7 +979,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-				  placeholder="请输入至少 12 位新密码"
+				  placeholder="请输入至少 8 位新密码"
                   required
                   className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm focus:outline-none focus:border-sky-500 transition"
                 />

@@ -71,6 +71,26 @@ func TestInitialAdminCredentialsAreChosenDuringSetup(t *testing.T) {
 	}
 }
 
+func TestAuthPasswordUsesEightCharacterStrongMinimum(t *testing.T) {
+	validMgr, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	if _, err := validMgr.CreateInitialAdmin(CreateUserRequest{Username: "operator", Password: "Abcdefg1"}); err != nil {
+		t.Fatalf("eight-character mixed password should be accepted: %v", err)
+	}
+
+	for _, password := range []string{"abcdefgh", "12345678", "aaaaaaaa"} {
+		mgr, err := NewManager(t.TempDir())
+		if err != nil {
+			t.Fatalf("NewManager() error = %v", err)
+		}
+		if _, err := mgr.CreateInitialAdmin(CreateUserRequest{Username: "operator", Password: password}); err == nil {
+			t.Fatalf("weak password %q was accepted", password)
+		}
+	}
+}
+
 func TestLoginRateLimit(t *testing.T) {
 	mgr, err := NewManager(t.TempDir())
 	if err != nil {
@@ -169,7 +189,7 @@ func TestUpdateUserValidationIsAtomic(t *testing.T) {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
 
-	badPassword := "too-short"
+	badPassword := "short"
 	disabled := false
 	if _, err := mgr.UpdateUser(regular.ID, UpdateUserRequest{
 		DisplayName: stringPtr("Changed"),

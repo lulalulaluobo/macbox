@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -76,7 +77,7 @@ type loginAttempt struct {
 var ErrTooManyLoginAttempts = errors.New("登录尝试过多，请稍后再试")
 
 const (
-	minPasswordBytes    = 12
+	minPasswordChars    = 8
 	maxPasswordBytes    = 72 // bcrypt's maximum input size
 	maxUsernameBytes    = 128
 	maxDisplayNameBytes = 256
@@ -110,14 +111,58 @@ func validateDisplayName(displayName string) error {
 }
 
 func validateAuthPassword(password string) error {
-	if len([]byte(password)) < minPasswordBytes {
-		return fmt.Errorf("密码长度至少为 %d 个字节", minPasswordBytes)
+	if utf8.RuneCountInString(password) < minPasswordChars {
+		return fmt.Errorf("密码长度至少为 %d 个字符", minPasswordChars)
 	}
 	if len([]byte(password)) > maxPasswordBytes {
 		return fmt.Errorf("密码长度不能超过 %d 个字节", maxPasswordBytes)
 	}
 	if strings.IndexFunc(password, unicode.IsControl) >= 0 {
 		return errors.New("密码不能包含控制字符")
+	}
+
+	// Eight characters is the LAN-friendly minimum, but the minimum must not
+	// turn into a public default or an obvious dictionary credential. Require
+	// a small amount of variety for short passwords while allowing longer
+	// passphrases, which are easier to remember and still strong.
+	lower := strings.ToLower(password)
+	common := map[string]struct{}{
+		"12345678": {}, "123456789": {}, "password": {}, "qwertyui": {},
+		"admin123": {}, "adminadmin": {}, "letmein!!": {}, "11111111": {},
+	}
+	if _, exists := common[lower]; exists {
+		return errors.New("密码过于常见，请使用更难猜的密码")
+	}
+	runes := []rune(password)
+	allSame := len(runes) > 0
+	for _, r := range runes[1:] {
+		if r != runes[0] {
+			allSame = false
+			break
+		}
+	}
+	if allSame {
+		return errors.New("密码不能由同一个字符重复组成")
+	}
+	classes := 0
+	var hasLetter, hasNumber, hasOther bool
+	for _, r := range runes {
+		switch {
+		case unicode.IsLetter(r):
+			hasLetter = true
+		case unicode.IsNumber(r):
+			hasNumber = true
+		default:
+			hasOther = true
+		}
+	}
+	for _, present := range []bool{hasLetter, hasNumber, hasOther} {
+		if present {
+			classes++
+		}
+	}
+	if utf8.RuneCountInString(password) < 12 && classes < 2 {
+		return errors.New("8 至 11 个字符的密码需混合使用字母、数字或符号中的至少两类")
 	}
 	return nil
 }
@@ -162,7 +207,7 @@ func NewManager(configDir string) (*Manager, error) {
 	return m, nil
 }
 
-// NeedsSetup reports whether the fixed first administrator still needs to be
+// NeedsSetup reports whether the first administrator still needs to be
 // initialized.
 func (m *Manager) NeedsSetup() bool {
 	m.mu.RLock()

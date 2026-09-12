@@ -78,7 +78,7 @@
 
 ### 10. 会话与密码 — ✅ 完成
 
-- bcrypt（旧 HMAC 哈希在登录成功时自动升级）；密码下限 12 字节。
+- bcrypt（旧 HMAC 哈希在登录成功时自动升级）；Web 控制台密码下限 8 个字符并拒绝常见弱密码。
 - 修改密码、修改角色、禁用用户即撤销全部会话；会话含空闲与绝对过期。
 - Cookie `HttpOnly` + `SameSite=Strict`（TLS 时 `Secure`）；认证存储初始化失败拒绝启动（fail closed）。
 
