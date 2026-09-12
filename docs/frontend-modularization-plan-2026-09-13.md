@@ -320,6 +320,7 @@ npm audit --audit-level=low
 - FileManager 的新建、重命名、复制/移动和删除流程拆分为 `useFileOperations`；
 - FileManager 的夸克云盘上传、下载、复制/移动和传输任务刷新拆分为 `useTransferTasks`；
 - Settings 的终端默认身份与 AI CLI Skill 映射区拆分为独立 section；
+- Settings 的 NAS 用户、Linux 系统用户、Root 密码和主题外观区拆分为独立 section；
 - SMB 共享区拆分为独立展示模块；
 - StorageSettings 的本机目录直通管理器拆分为 `LocalMountSection`；
 - StorageSettings 的物理磁盘与 Lima 托管虚拟磁盘展示拆分为 `StorageDiskSection`；

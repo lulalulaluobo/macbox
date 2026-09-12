@@ -1,25 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Users,
-  Key,
   RefreshCw,
   Plus,
-  Trash2,
   CheckCircle2,
   AlertCircle,
   Copy,
   Check,
-  Crown,
-  UserCheck,
-  Eye,
-  EyeOff,
   Download,
   FileKey,
   X,
-  Sun,
-  Moon,
-  Monitor,
-  Palette,
 } from 'lucide-react';
 import { SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, NASUser } from '../types';
 import { api } from '../api';
@@ -27,6 +16,10 @@ import { useTheme } from '../theme';
 import { SettingsNavigation, SettingsSubTab } from './settings/SettingsNavigation';
 import { SSHSettingsSection } from './settings/SSHSettingsSection';
 import { TerminalSettingsSection } from './settings/TerminalSettingsSection';
+import { NASUsersSection } from './settings/NASUsersSection';
+import { SystemUsersSection } from './settings/SystemUsersSection';
+import { RootPasswordSection } from './settings/RootPasswordSection';
+import { AppearanceSettingsSection } from './settings/AppearanceSettingsSection';
 
 interface SettingsProps {
   primaryIP?: string;
@@ -563,319 +556,83 @@ export const Settings: React.FC<SettingsProps> = ({
 
       <SettingsNavigation activeSubTab={activeSubTab} onChange={setActiveSubTab} />
 
-      {/* ===================== 0. NAS Console Users Management Panel ===================== */}
       {activeSubTab === 'nas_users' && (
-        <div className="space-y-4">
-          {/* Header Card */}
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white p-4 dark:border-slate-800/80 dark:bg-slate-900/60">
-            <div>
-              <div className="flex items-center space-x-2.5">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white sm:text-base">NAS 用户</h3>
-              </div>
-              <p className="mt-0.5 hidden text-xs text-slate-500 dark:text-slate-400 sm:block">管理登录账号与管理员权限</p>
-            </div>
-            <button
-              onClick={() => setShowAddNASModal(true)}
-              className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-sky-500 px-3 py-2 text-xs font-bold text-white transition hover:bg-sky-600"
-            >
-              <Plus className="w-4 h-4" />
-              <span>添加用户</span>
-            </button>
-          </div>
-
-          {/* NAS Users Cards Grid */}
-          {nasUsersLoading ? (
-            <div className="p-8 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 text-center text-xs text-slate-500">
-              <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-sky-500" />
-              <span>正在加载 NAS 控制台用户列表...</span>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {nasUsers.map((u) => {
-              const isSuper = u.role === 'admin';
-              const isMe = currentUser?.id === u.id;
-              const adminCount = nasUsers.filter((x) => x.role === 'admin' && x.enabled).length;
-              const isSoleAdmin = isSuper && adminCount <= 1;
-
-              return (
-                <div
-                  key={u.id}
-                  className="p-5 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700/80 flex flex-col justify-between space-y-4 transition shadow-xs hover:shadow-md"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div
-                          className={`w-11 h-11 rounded-2xl flex items-center justify-center border shadow-xs ${
-                            isSuper
-                              ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-600 dark:text-amber-400'
-                              : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                          }`}
-                        >
-                          {isSuper ? <Crown className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
-                        </div>
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <span className="font-bold text-base text-slate-900 dark:text-white font-mono">{u.username}</span>
-                            {isMe && (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 font-semibold">
-                                当前登录
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{u.displayName || u.username}</p>
-                        </div>
-                      </div>
-
-                      <span
-                        className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold border ${
-                          isSuper
-                            ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/30'
-                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                        }`}
-                      >
-                        {isSuper ? '👑 超级管理员' : '普通用户'}
-                      </span>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-100 dark:border-slate-800/60 text-xs space-y-1 text-slate-500 dark:text-slate-400">
-                      <div className="flex justify-between">
-                        <span>账号状态:</span>
-                        <span className={u.enabled ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-rose-500 font-medium'}>
-                          {u.enabled ? '🟢 正常使用' : '⚪ 已禁用'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>最后登录:</span>
-                        <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
-                          {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('zh-CN', { hour12: false }) : '尚未登录'}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>创建时间:</span>
-                        <span className="font-mono text-[11px] text-slate-700 dark:text-slate-300">
-                          {new Date(u.createdAt).toLocaleDateString('zh-CN')}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-2 pt-1 border-t border-slate-100 dark:border-slate-800/80">
-                    <button
-                      onClick={() => handleOpenEditNASUser(u)}
-                      className="flex-1 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition text-center shadow-xs"
-                    >
-                      编辑 / 授权
-                    </button>
-
-                    <button
-                      onClick={() => setDeletingNASUser(u)}
-                      disabled={isMe || isSoleAdmin}
-                      title={
-                        isMe
-                          ? '不能删除当前正在登录的账号'
-                          : isSoleAdmin
-                          ? '系统必须至少保留一位超级管理员'
-                          : u.username === 'admin'
-                          ? '点击可安全删除初始管理员 admin'
-                          : '删除用户'
-                      }
-                      className={`p-2 rounded-xl text-xs font-medium border transition ${
-                        isMe || isSoleAdmin
-                          ? 'opacity-30 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700'
-                          : 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-900/30 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800/30 cursor-pointer shadow-xs'
-                      }`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            </div>
-          )}
-        </div>
+        <NASUsersSection
+          users={nasUsers}
+          loading={nasUsersLoading}
+          currentUser={currentUser}
+          showAddModal={showAddNASModal}
+          newUsername={newNASUsername}
+          newDisplayName={newNASDisplayName}
+          newPassword={newNASPassword}
+          newConfirmPassword={newNASConfirmPassword}
+          newRole={newNASRole}
+          editingUser={editingNASUser}
+          editDisplayName={editDisplayName}
+          editRole={editRole}
+          editEnabled={editEnabled}
+          editNewPassword={editNewPassword}
+          deletingUser={deletingNASUser}
+          actionLoading={nasActionLoading}
+          onOpenAdd={() => setShowAddNASModal(true)}
+          onCloseAdd={() => setShowAddNASModal(false)}
+          onNewUsernameChange={setNewNASUsername}
+          onNewDisplayNameChange={setNewNASDisplayName}
+          onNewPasswordChange={setNewNASPassword}
+          onNewConfirmPasswordChange={setNewNASConfirmPassword}
+          onNewRoleChange={setNewNASRole}
+          onCreate={handleCreateNASUser}
+          onOpenEdit={handleOpenEditNASUser}
+          onCloseEdit={() => setEditingNASUser(null)}
+          onEditDisplayNameChange={setEditDisplayName}
+          onEditRoleChange={setEditRole}
+          onEditEnabledChange={setEditEnabled}
+          onEditNewPasswordChange={setEditNewPassword}
+          onUpdate={handleUpdateNASUser}
+          onRequestDelete={setDeletingNASUser}
+          onCloseDelete={() => setDeletingNASUser(null)}
+          onDelete={handleDeleteNASUser}
+        />
       )}
 
-      {/* ===================== 1. Users Management Panel ===================== */}
       {activeSubTab === 'users' && (
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80">
-            <div>
-              <h3 className="text-base font-bold text-white">系统用户与权限</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                展示当前 Linux 虚拟机已创建的交互式系统用户。普通用户默认不会获得 sudo 或 docker 权限。
-              </p>
-            </div>
-            <button
-              onClick={() => setShowAddUserModal(true)}
-              className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold shadow-lg shadow-sky-500/20 transition self-start sm:self-auto"
-            >
-              <Plus className="w-4 h-4" />
-              <span>添加新用户</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {users.map((u) => {
-              const isRoot = u.isRoot || u.username === 'root';
-              const isCurrent = u.uid === 501;
-
-              return (
-                <div
-                  key={u.username}
-                  className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700/80 flex flex-col justify-between space-y-4 transition shadow-lg"
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div
-                          className={`w-11 h-11 rounded-2xl flex items-center justify-center border shadow-inner ${
-                            isRoot
-                              ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
-                              : u.isSudo
-                              ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
-                              : 'bg-slate-800 border-slate-700 text-slate-300'
-                          }`}
-                        >
-                          {isRoot ? <Crown className="w-5 h-5" /> : <Users className="w-5 h-5" />}
-                        </div>
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <span className="font-bold text-base text-white font-mono">{u.username}</span>
-                            {isCurrent && (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
-                                当前映射
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-400 font-mono mt-0.5">UID: {u.uid}</p>
-                        </div>
-                      </div>
-
-                      <span
-                        className={`text-[11px] px-2.5 py-1 rounded-full font-semibold border ${
-                          isRoot
-                            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                            : u.isSudo
-                            ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
-                            : 'bg-slate-800 text-slate-400 border-slate-700/60'
-                        }`}
-                      >
-                        {isRoot ? '超级管理员' : u.isSudo ? 'Sudo 管理员' : '普通用户'}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 font-mono text-xs">
-                      <div className="flex justify-between text-slate-400">
-                        <span>家目录:</span>
-                        <span className="text-slate-200 truncate max-w-[180px]">{u.homeDir}</span>
-                      </div>
-                      <div className="flex justify-between text-slate-400">
-                        <span>登录 Shell:</span>
-                        <span className="text-slate-200">{u.shell}</span>
-                      </div>
-                      <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800/50">
-                        <span>附加用户组: </span>
-                        <span className="text-sky-300/90">{u.groups.join(', ') || '-'}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => {
-                        setChangePwdUser(u.username);
-                        setTargetNewPwd('');
-                      }}
-                      className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition flex items-center justify-center space-x-1.5"
-                    >
-                      <Key className="w-3.5 h-3.5 text-amber-400" />
-                      <span>修改密码</span>
-                    </button>
-
-                    {!isRoot && !isCurrent && (
-                      <button
-                        onClick={() => handleDeleteUser(u.username)}
-                        className="p-2 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700 transition"
-                        title="删除该用户"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <SystemUsersSection
+          users={users}
+          showAddModal={showAddUserModal}
+          username={newUsername}
+          password={newPassword}
+          isSudo={newIsSudo}
+          changePasswordUser={changePwdUser}
+          targetPassword={targetNewPwd}
+          actionLoading={userActionLoading}
+          onOpenAdd={() => setShowAddUserModal(true)}
+          onCloseAdd={() => setShowAddUserModal(false)}
+          onUsernameChange={setNewUsername}
+          onPasswordChange={setNewPassword}
+          onSudoChange={setNewIsSudo}
+          onCreate={handleCreateUser}
+          onOpenChangePassword={(username) => {
+            setChangePwdUser(username);
+            setTargetNewPwd('');
+          }}
+          onCloseChangePassword={() => setChangePwdUser(null)}
+          onTargetPasswordChange={setTargetNewPwd}
+          onUpdatePassword={handleUpdatePassword}
+          onDelete={handleDeleteUser}
+        />
       )}
 
-      {/* ===================== 2. Root Password Panel ===================== */}
       {activeSubTab === 'rootpwd' && (
-        <div className="max-w-2xl bg-slate-900/70 p-6 rounded-3xl border border-slate-800/80 shadow-xl space-y-6">
-          <div className="flex items-start space-x-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-300 shrink-0">
-              <Crown className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-white">Root 超级管理员密码重置</h3>
-              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                设置 Linux 虚拟机内部的 root 账号密码，可用于终端中的 <code>su -</code> 切换。SSH 始终关闭密码认证，远程连接只能使用 Root SSH 密钥。
-              </p>
-            </div>
-          </div>
-
-          <form onSubmit={handleSaveRootPassword} className="space-y-4 pt-2">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300">输入新的 Root 密码:</label>
-              <div className="relative">
-                <input
-                  type={showRootPwd ? 'text' : 'password'}
-                  value={rootNewPwd}
-                  onChange={(e) => setRootNewPwd(e.target.value)}
-                  placeholder="请输入超级管理员新密码..."
-                  className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowRootPwd(!showRootPwd)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                >
-                  {showRootPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300">再次确认新密码:</label>
-              <input
-                type={showRootPwd ? 'text' : 'password'}
-                value={rootConfirmPwd}
-                onChange={(e) => setRootConfirmPwd(e.target.value)}
-                placeholder="请再次输入新密码..."
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
-              />
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200/90 leading-relaxed space-y-1">
-              <p className="font-semibold text-amber-300">💡 安全温馨提示:</p>
-              <p>Root 账户拥有整个虚拟机的最高系统控制权限，请务必妥善保存所设置的密码，建议包含大小写字母、数字及特殊符号。</p>
-            </div>
-
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={rootPwdSaving || !rootNewPwd || rootNewPwd !== rootConfirmPwd}
-                className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition flex items-center space-x-2 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {rootPwdSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                <span>确认修改 Root 密码</span>
-              </button>
-            </div>
-          </form>
-        </div>
+        <RootPasswordSection
+          password={rootNewPwd}
+          confirmPassword={rootConfirmPwd}
+          saving={rootPwdSaving}
+          visible={showRootPwd}
+          onPasswordChange={setRootNewPwd}
+          onConfirmPasswordChange={setRootConfirmPwd}
+          onToggleVisibility={() => setShowRootPwd((visible) => !visible)}
+          onSubmit={handleSaveRootPassword}
+        />
       )}
 
       {/* ===================== 3. SSH Settings Panel ===================== */}
@@ -931,299 +688,8 @@ export const Settings: React.FC<SettingsProps> = ({
         />
       )}
 
-      {/* ===================== 5. Appearance & Theme Settings ===================== */}
       {activeSubTab === 'appearance' && (
-        <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-xl space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-            <div>
-              <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                <Palette className="w-5 h-5 text-indigo-400" />
-                <span>外观与主题模式设置</span>
-              </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                支持在明亮日间模式、极客夜间暗黑模式及跟随操作系统之间自由切换。
-              </p>
-            </div>
-            <span className="text-xs font-mono font-semibold px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-              当前: {theme === 'dark' ? '🌙 夜间暗黑' : theme === 'light' ? '☀️ 日间浅色' : '💻 跟随系统'}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Dark Theme Option */}
-            <div
-              onClick={() => setTheme('dark')}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between space-y-4 ${
-                theme === 'dark'
-                  ? 'bg-slate-800/80 border-sky-500 shadow-lg shadow-sky-500/10'
-                  : 'bg-slate-800/40 border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <div className="space-y-3">
-                {/* Mockup Preview Box */}
-                <div className="w-full h-24 rounded-xl bg-[#090d16] border border-slate-700/80 p-2.5 flex flex-col justify-between shadow-inner">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                    <div className="flex items-center space-x-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    </div>
-                    <div className="w-12 h-2 rounded bg-slate-800" />
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-6 h-6 rounded-lg bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-[10px]">🍎</div>
-                    <div className="space-y-1 flex-1">
-                      <div className="w-16 h-2 rounded bg-slate-700" />
-                      <div className="w-24 h-1.5 rounded bg-slate-800" />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-white flex items-center space-x-1.5">
-                      <Moon className="w-4 h-4 text-sky-400" />
-                      <span>夜间暗黑模式 (Dark)</span>
-                    </span>
-                    {theme === 'dark' && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    专为极客与夜间运维调校的深色美学，弱光护眼，专注沉浸。
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <span className={`text-xs font-semibold px-3 py-1 rounded-lg block text-center ${
-                  theme === 'dark' ? 'bg-sky-500 text-white font-bold' : 'bg-slate-700/60 text-slate-300'
-                }`}>
-                  {theme === 'dark' ? '当前已生效' : '选择夜间模式'}
-                </span>
-              </div>
-            </div>
-
-            {/* Light Theme Option */}
-            <div
-              onClick={() => setTheme('light')}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between space-y-4 ${
-                theme === 'light'
-                  ? 'bg-slate-800/80 border-sky-500 shadow-lg shadow-sky-500/10'
-                  : 'bg-slate-800/40 border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <div className="space-y-3">
-                {/* Mockup Preview Box */}
-                <div className="w-full h-24 rounded-xl bg-slate-100 border border-slate-300 p-2.5 flex flex-col justify-between shadow-inner">
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
-                    <div className="flex items-center space-x-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    </div>
-                    <div className="w-12 h-2 rounded bg-slate-300" />
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-6 h-6 rounded-lg bg-sky-100 border border-sky-300 flex items-center justify-center text-[10px]">🍎</div>
-                    <div className="space-y-1 flex-1">
-                      <div className="w-16 h-2 rounded bg-slate-400" />
-                      <div className="w-24 h-1.5 rounded bg-slate-300" />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-white flex items-center space-x-1.5">
-                      <Sun className="w-4 h-4 text-amber-400" />
-                      <span>日间浅色模式 (Light)</span>
-                    </span>
-                    {theme === 'light' && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    清爽雅致的浅灰白底配色，强光办公清晰易读，典雅自然。
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <span className={`text-xs font-semibold px-3 py-1 rounded-lg block text-center ${
-                  theme === 'light' ? 'bg-sky-500 text-white font-bold' : 'bg-slate-700/60 text-slate-300'
-                }`}>
-                  {theme === 'light' ? '当前已生效' : '选择日间模式'}
-                </span>
-              </div>
-            </div>
-
-            {/* System Theme Option */}
-            <div
-              onClick={() => setTheme('system')}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between space-y-4 ${
-                theme === 'system'
-                  ? 'bg-slate-800/80 border-sky-500 shadow-lg shadow-sky-500/10'
-                  : 'bg-slate-800/40 border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <div className="space-y-3">
-                {/* Mockup Preview Box */}
-                <div className="w-full h-24 rounded-xl bg-gradient-to-r from-slate-900 to-slate-100 border border-slate-700/80 p-2.5 flex flex-col justify-between shadow-inner">
-                  <div className="flex items-center justify-between pb-1.5">
-                    <div className="flex items-center space-x-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    </div>
-                    <Monitor className="w-3.5 h-3.5 text-slate-400" />
-                  </div>
-                  <div className="text-center py-1">
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800/80 text-sky-300">
-                      Auto (macOS)
-                    </span>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-white flex items-center space-x-1.5">
-                      <Monitor className="w-4 h-4 text-emerald-400" />
-                      <span>跟随系统设置 (Auto)</span>
-                    </span>
-                    {theme === 'system' && <CheckCircle2 className="w-4 h-4 text-sky-400" />}
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                    智能跟随 Mac 或客户端系统的深浅色设置自动平滑过渡。
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <span className={`text-xs font-semibold px-3 py-1 rounded-lg block text-center ${
-                  theme === 'system' ? 'bg-sky-500 text-white font-bold' : 'bg-slate-700/60 text-slate-300'
-                }`}>
-                  {theme === 'system' ? '当前已生效' : '选择跟随系统'}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===================== Modal: Add User ===================== */}
-      {showAddUserModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                <UserCheck className="w-5 h-5 text-sky-400" />
-                <span>添加新系统终端用户</span>
-              </h3>
-              <button
-                onClick={() => setShowAddUserModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateUser} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">用户名:</label>
-                <input
-                  type="text"
-                  value={newUsername}
-                  onChange={(e) => setNewUsername(e.target.value.toLowerCase())}
-                  placeholder="例如: dev, backup, admin2"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">初始登录密码:</label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="输入初始密码..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center space-x-3">
-                <input
-                  type="checkbox"
-                  id="sudoCheck"
-                  checked={newIsSudo}
-                  onChange={(e) => setNewIsSudo(e.target.checked)}
-                  className="rounded border-slate-700 text-sky-500 focus:ring-0 cursor-pointer"
-                />
-                <label htmlFor="sudoCheck" className="text-xs text-slate-300 cursor-pointer select-none">
-                  授予 Sudo 超级管理员权限 (加入 sudo 组)
-                </label>
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddUserModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={userActionLoading || !newUsername.trim()}
-                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold shadow-lg shadow-sky-500/20 transition disabled:opacity-50"
-                >
-                  {userActionLoading ? '创建中...' : '确认创建用户'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ===================== Modal: Change User Password ===================== */}
-      {changePwdUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-white flex items-center space-x-2">
-              <Key className="w-4 h-4 text-amber-400" />
-              <span>修改密码 - {changePwdUser}</span>
-            </h3>
-
-            <form onSubmit={handleUpdatePassword} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">新密码:</label>
-                <input
-                  type="password"
-                  value={targetNewPwd}
-                  onChange={(e) => setTargetNewPwd(e.target.value)}
-                  placeholder="输入新密码..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono text-sm focus:outline-none focus:border-sky-500"
-                  autoFocus
-                  required
-                />
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setChangePwdUser(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={userActionLoading || !targetNewPwd}
-                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold transition disabled:opacity-50"
-                >
-                  确认修改
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <AppearanceSettingsSection theme={theme} onThemeChange={setTheme} />
       )}
 
       {/* ===================== Modal: Generated Root SSH Key ===================== */}
@@ -1398,277 +864,6 @@ export const Settings: React.FC<SettingsProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-      {/* Add NAS User Modal */}
-      {showAddNASModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 rounded-xl bg-sky-50 dark:bg-sky-500/20 text-sky-600 dark:text-sky-400 flex items-center justify-center">
-                  <UserCheck className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">添加新 NAS 控制台用户</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">用于网页控制台登录与管理</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowAddNASModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateNASUser} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">用户名 *</label>
-                <input
-                  type="text"
-                  value={newNASUsername}
-                  onChange={(e) => setNewNASUsername(e.target.value)}
-                  placeholder="英文字母、数字或下划线 (如 manager)"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">显示昵称</label>
-                <input
-                  type="text"
-                  value={newNASDisplayName}
-                  onChange={(e) => setNewNASDisplayName(e.target.value)}
-                  placeholder="用户备注名称 (可选)"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">初始登录密码 *</label>
-                <input
-                  type="password"
-                  value={newNASPassword}
-                  onChange={(e) => setNewNASPassword(e.target.value)}
-				  placeholder="至少 8 位密码"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">确认初始密码 *</label>
-                <input
-                  type="password"
-                  value={newNASConfirmPassword}
-                  onChange={(e) => setNewNASConfirmPassword(e.target.value)}
-                  placeholder="再次输入密码"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
-                  required
-                />
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">角色与权限授权</label>
-                <div className="flex items-center space-x-4 text-xs">
-                  <label className="flex items-center space-x-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="role"
-                      value="admin"
-                      checked={newNASRole === 'admin'}
-                      onChange={() => setNewNASRole('admin')}
-                      className="text-amber-500 focus:ring-amber-400"
-                    />
-                    <span className="font-semibold text-amber-600 dark:text-amber-400 flex items-center">
-                      <Crown className="w-3.5 h-3.5 mr-1" /> 授权超级管理员
-                    </span>
-                  </label>
-                  <label className="flex items-center space-x-1.5 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="role"
-                      value="user"
-                      checked={newNASRole === 'user'}
-                      onChange={() => setNewNASRole('user')}
-                      className="text-sky-500 focus:ring-sky-400"
-                    />
-                    <span className="text-slate-700 dark:text-slate-300">普通用户</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddNASModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={nasActionLoading}
-                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold shadow-md shadow-sky-500/25 transition disabled:opacity-50"
-                >
-                  {nasActionLoading ? '创建中...' : '确认创建用户'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Edit NAS User Modal */}
-      {editingNASUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">编辑用户与角色授权</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">账号: {editingNASUser.username}</p>
-              </div>
-              <button
-                onClick={() => setEditingNASUser(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleUpdateNASUser} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">显示昵称</label>
-                <input
-                  type="text"
-                  value={editDisplayName}
-                  onChange={(e) => setEditDisplayName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">权限角色分配</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <div
-                    onClick={() => setEditRole('admin')}
-                    className={`p-3 rounded-xl border cursor-pointer transition flex items-center space-x-2 ${
-                      editRole === 'admin'
-                        ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-300 dark:border-amber-500/40 text-amber-800 dark:text-amber-300'
-                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    <Crown className="w-4 h-4 text-amber-500" />
-                    <div>
-                      <p className="font-bold text-xs">超级管理员</p>
-                      <p className="text-[10px] opacity-75">全系统管理权限</p>
-                    </div>
-                  </div>
-
-                  <div
-                    onClick={() => setEditRole('user')}
-                    className={`p-3 rounded-xl border cursor-pointer transition flex items-center space-x-2 ${
-                      editRole === 'user'
-                        ? 'bg-sky-50 dark:bg-sky-500/15 border-sky-300 dark:border-sky-500/40 text-sky-800 dark:text-sky-300'
-                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    <UserCheck className="w-4 h-4 text-sky-500" />
-                    <div>
-                      <p className="font-bold text-xs">普通用户</p>
-                      <p className="text-[10px] opacity-75">基础使用权限</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">重置密码 (留空则保持原密码不变)</label>
-                <input
-                  type="password"
-                  value={editNewPassword}
-                  onChange={(e) => setEditNewPassword(e.target.value)}
-                  placeholder="留空表示不修改密码"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              <div>
-                <label className="flex items-center space-x-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer pt-1">
-                  <input
-                    type="checkbox"
-                    checked={editEnabled}
-                    onChange={(e) => setEditEnabled(e.target.checked)}
-                    className="rounded border-slate-300 dark:border-slate-700 text-sky-500 focus:ring-sky-400"
-                  />
-                  <span>账号处于启用状态 (允许登录控制台)</span>
-                </label>
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingNASUser(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={nasActionLoading}
-                  className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold shadow-md shadow-sky-500/25 transition disabled:opacity-50"
-                >
-                  {nasActionLoading ? '保存中...' : '保存更改'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Delete NAS User Confirmation Modal */}
-      {deletingNASUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4">
-            <div className="flex items-center space-x-3 text-rose-500">
-              <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 flex items-center justify-center">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">删除控制台用户</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">操作不可撤销</p>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              确定要永久删除控制台用户 <span className="font-bold font-mono text-slate-900 dark:text-white">[{deletingNASUser.username}]</span> 吗？
-              {deletingNASUser.username === 'admin' && (
-                <span className="block mt-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 font-medium">
-                  ⚠️ 您正在删除初始管理员 admin。删除后，请确保您已牢记当前登录的管理员账户与密码。
-                </span>
-              )}
-            </p>
-
-            <div className="flex justify-end space-x-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setDeletingNASUser(null)}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteNASUser}
-                disabled={nasActionLoading}
-                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/25 transition disabled:opacity-50"
-              >
-                {nasActionLoading ? '删除中...' : '确认永久删除'}
-              </button>
-            </div>
           </div>
         </div>
       )}
