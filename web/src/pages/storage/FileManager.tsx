@@ -16,11 +16,12 @@ import type { DriveDetailInfo } from './filemanager/DriveDetailModal';
 import { CloudDriveView } from './filemanager/CloudDriveView';
 import { CloudMountModal } from './filemanager/CloudMountModal';
 import { ArchiveModal } from './filemanager/ArchiveModal';
-import { ConflictPolicy, TransferDestinationModal, TransferOperation } from './filemanager/TransferDestinationModal';
+import { ConflictPolicy, TransferDestinationModal } from './filemanager/TransferDestinationModal';
 import { useFileSelection } from './filemanager/useFileSelection';
 import { useFavorites } from './filemanager/useFavorites';
 import { useFileNavigation } from './filemanager/useFileNavigation';
 import { useFileUpload } from './filemanager/useFileUpload';
+import { useFileOperations } from './filemanager/useFileOperations';
 import { useTrash } from './filemanager/useTrash';
 
 interface FileManagerProps {
@@ -29,9 +30,6 @@ interface FileManagerProps {
 
 export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' }) => {
   const [actionItem, setActionItem] = useState<FileItem | null>(null);
-
-  // Copy/move destination picker
-  const [transferRequest, setTransferRequest] = useState<{ operation: TransferOperation; paths: string[]; initialPath: string } | null>(null);
 
   const [viewingFavorites, setViewingFavorites] = useState(false);
   const { favorites, favoriteItems, favoritesLoading, toggleFavorite } = useFavorites({ enabled: viewingFavorites });
@@ -106,17 +104,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     onReload: () => loadFiles(currentPath),
   });
 
-  // Modals: CRUD
-  const [showMkdirModal, setShowMkdirModal] = useState(false);
-  const [newFolderName, setNewFolderName] = useState('');
-
-  const [showRenameModal, setShowRenameModal] = useState(false);
-  const [renameItem, setRenameItem] = useState<FileItem | null>(null);
-  const [renameNewName, setRenameNewName] = useState('');
-
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<FileItem | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [archiveItem, setArchiveItem] = useState<FileItem | null>(null);
 
   const fileListRef = useRef<HTMLDivElement>(null);
@@ -237,6 +224,42 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     handleLongPress,
   } = useFileSelection({ filteredFiles });
 
+  const {
+    transferRequest,
+    setTransferRequest,
+    showMkdirModal,
+    setShowMkdirModal,
+    newFolderName,
+    setNewFolderName,
+    showRenameModal,
+    setShowRenameModal,
+    renameItem,
+    renameNewName,
+    setRenameNewName,
+    showDeleteModal,
+    setShowDeleteModal,
+    deleteTarget,
+    setDeleteTarget,
+    deleting,
+    openTransfer,
+    handleCreateFolder,
+    handleOpenRename,
+    handleRenameConfirm,
+    handleTransferConfirm,
+    handleOpenDelete,
+    handleMoveToTrashConfirm,
+    handlePermanentDeleteConfirm,
+  } = useFileOperations({
+    currentPath,
+    selectedPaths,
+    setSelectedPaths,
+    setSelectionMode,
+    loadFiles,
+    loadTrash,
+    onSuccess: (text) => setAlertMsg({ type: 'success', text }),
+    onError: (text) => setAlertMsg({ type: 'error', text }),
+  });
+
   // Open / Preview Item
   const handleItemClick = async (item: FileItem) => {
     if (selectionMode) {
@@ -293,68 +316,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     loadFiles(currentPath);
   };
 
-  // Create Folder
-  const handleCreateFolder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newFolderName.trim()) return;
-    try {
-      const targetDir = currentPath === '/' ? `/${newFolderName.trim()}` : `${currentPath}/${newFolderName.trim()}`;
-      await api.createFolder(targetDir);
-      setShowMkdirModal(false);
-      setNewFolderName('');
-      setAlertMsg({ type: 'success', text: '文件夹创建成功' });
-      loadFiles(currentPath);
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `创建文件夹失败: ${err.message}` });
-    }
-  };
-
-  // Rename
-  const handleOpenRename = (item: FileItem, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setRenameItem(item);
-    setRenameNewName(item.name);
-    setShowRenameModal(true);
-  };
-
-  const handleRenameConfirm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!renameItem || !renameNewName.trim() || renameNewName === renameItem.name) {
-      setShowRenameModal(false);
-      return;
-    }
-    const parentDir = currentPath;
-    const newPath = parentDir === '/' ? `/${renameNewName.trim()}` : `${parentDir}/${renameNewName.trim()}`;
-    try {
-      await api.renameFile(renameItem.path, newPath);
-      setShowRenameModal(false);
-      setRenameItem(null);
-      setAlertMsg({ type: 'success', text: '重命名成功' });
-      loadFiles(currentPath);
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `重命名失败: ${err.message}` });
-    }
-  };
-
-  // Copy / move destination picker
-  const openTransfer = (operation: TransferOperation, paths: string[], initialPath = currentPath, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (paths.length === 0) return;
-    setTransferRequest({ operation, paths, initialPath });
-  };
-
-  const handleTransferConfirm = async (destination: string, conflictPolicy: ConflictPolicy) => {
-    if (!transferRequest) return;
-    const result = transferRequest.operation === 'copy'
-      ? await api.copyFiles(transferRequest.paths, destination, conflictPolicy)
-      : await api.moveFiles(transferRequest.paths, destination, conflictPolicy);
-    setTransferRequest(null);
-    setSelectedPaths(new Set());
-    setSelectionMode(false);
-    setAlertMsg({ type: 'success', text: result.message });
-    loadFiles(currentPath);
-  };
-
   const handleCopyPath = async (path: string) => {
     try {
       await navigator.clipboard.writeText(path);
@@ -380,54 +341,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     setSelectionMode(false);
     setSelectedPaths(new Set());
     setViewingFavorites(true);
-  };
-
-  // Delete / Trash Modals
-  const handleOpenDelete = (item: FileItem, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setDeleteTarget(item);
-    setShowDeleteModal(true);
-  };
-
-  const handleMoveToTrashConfirm = async () => {
-    const targets = deleteTarget ? [deleteTarget.path] : Array.from(selectedPaths);
-    if (targets.length === 0) return;
-    setDeleting(true);
-    try {
-      const res = await api.moveToTrash(targets);
-      setShowDeleteModal(false);
-      setDeleteTarget(null);
-      setSelectedPaths(new Set());
-      setSelectionMode(false);
-      setAlertMsg({ type: 'success', text: res.message });
-      loadFiles(currentPath);
-      loadTrash();
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `移入回收站失败: ${err.message}` });
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const handlePermanentDeleteConfirm = async () => {
-    const targets = deleteTarget ? [deleteTarget.path] : Array.from(selectedPaths);
-    if (targets.length === 0) return;
-    setDeleting(true);
-    try {
-      for (const p of targets) {
-        await api.deleteFile(p);
-      }
-      setShowDeleteModal(false);
-      setDeleteTarget(null);
-      setSelectedPaths(new Set());
-      setSelectionMode(false);
-      setAlertMsg({ type: 'success', text: `已彻底删除 ${targets.length} 个项目` });
-      loadFiles(currentPath);
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `删除失败: ${err.message}` });
-    } finally {
-      setDeleting(false);
-    }
   };
 
   // Save Text

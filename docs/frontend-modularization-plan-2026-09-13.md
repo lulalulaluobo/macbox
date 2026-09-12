@@ -317,6 +317,7 @@ npm audit --audit-level=low
 - Terminal 会话生命周期、文件浏览器和文件弹窗拆分；
 - FileManager 的导航、选择和收藏 hook 拆分；
 - FileManager 的本地文件上传/拖拽上传和回收站流程拆分为独立 hook；
+- FileManager 的新建、重命名、复制/移动和删除流程拆分为 `useFileOperations`；
 - Settings 的终端默认身份与 AI CLI Skill 映射区拆分为独立 section；
 - SMB 共享区拆分为独立展示模块；
 - 应用部署 SSE 流程拆为 `useAppInstallStream`，部署完成后的日志仍由用户手动关闭；
