@@ -321,6 +321,8 @@ npm audit --audit-level=low
 - FileManager 的夸克云盘上传、下载、复制/移动和传输任务刷新拆分为 `useTransferTasks`；
 - Settings 的终端默认身份与 AI CLI Skill 映射区拆分为独立 section；
 - SMB 共享区拆分为独立展示模块；
+- StorageSettings 的本机目录直通管理器拆分为 `LocalMountSection`；
+- StorageSettings 的物理磁盘与 Lima 托管虚拟磁盘展示拆分为 `StorageDiskSection`；
 - 应用部署 SSE 流程拆为 `useAppInstallStream`，部署完成后的日志仍由用户手动关闭；
 - API 与类型按领域拆分，并保留 `api.ts`、`types.ts` 兼容出口；
 - Vite `react-vendor`、`terminal-vendor` 分包及 JS gzip 体积检查脚本。

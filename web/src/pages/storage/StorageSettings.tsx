@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   HardDrive, Check, CheckCircle2, AlertCircle, RefreshCw, RotateCw,
-  X, Film, DownloadCloud, Image, FolderPlus, FolderSync, Trash2, Plus, Folder, Lock, Unlock, Zap, ArrowLeft, FolderOpen
+  X, Film, DownloadCloud, Image, FolderPlus, Folder, Lock, Unlock, Zap, ArrowLeft, FolderOpen
 } from 'lucide-react';
 import { DiskInfo, ManagedDisk, SambaStatus, LocalMount, LocalMountCandidate, LocalMountHealth, SMBShare, FileItem } from '../../types';
 import { api } from '../../api';
 import { SMBSharingSection } from './settings/SMBSharingSection';
+import { LocalMountSection } from './settings/LocalMountSection';
+import { StorageDiskSection } from './settings/StorageDiskSection';
 
 export interface StorageSettingsProps {
   configDirty?: boolean;
@@ -540,167 +542,33 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
         onDeleteShare={handleDeleteShare}
       />
 
-      {/* Local folders are managed on demand instead of expanding inside the disk page. */}
       {mode !== 'smb' && (
-        <button
-          type="button"
-          onClick={() => setShowMountManager(true)}
-          className="flex min-h-16 w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 text-left dark:border-slate-800 dark:bg-slate-900"
-        >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"><FolderSync className="h-5 w-5" /></span>
-          <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-900 dark:text-white">本机目录直通</span><span className="mt-0.5 block text-[11px] text-slate-500">{localMounts.length} 个 Mac 目录已映射到 NAS</span></span>
-          <span className="text-xs font-semibold text-sky-600 dark:text-sky-400">管理</span>
-        </button>
+        <LocalMountSection
+          localMounts={localMounts}
+          mountHealth={mountHealth}
+          showManager={showMountManager}
+          onOpenManager={() => setShowMountManager(true)}
+          onCloseManager={() => setShowMountManager(false)}
+          onOpenAdd={() => { setShowMountManager(false); setNewMountGuestTarget('media/MacMedia'); setShowAddMountModal(true); }}
+          onDeleteMount={handleDeleteMount}
+          onToggleMountWritable={handleToggleMountWritable}
+          onToggleMount={handleToggleMount}
+        />
       )}
 
-      {showMountManager && (
-        <div className="fixed inset-0 z-[60] bg-white dark:bg-slate-950 sm:flex sm:items-center sm:justify-center sm:bg-slate-950/55 sm:p-6">
-          <section className="flex h-[100dvh] w-full flex-col bg-white dark:bg-slate-950 sm:h-auto sm:max-h-[82dvh] sm:max-w-xl sm:rounded-3xl sm:border sm:border-slate-200 sm:dark:border-slate-800">
-            <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-slate-100 px-4 dark:border-slate-800">
-              <button type="button" onClick={() => setShowMountManager(false)} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" aria-label="关闭"><X className="h-5 w-5" /></button>
-              <div className="min-w-0 flex-1"><h3 className="text-base font-bold text-slate-900 dark:text-white">本机目录直通</h3><p className="text-[11px] text-slate-500">将 Mac 文件夹映射到 NAS，不复制或删除原目录</p></div>
-              <button type="button" onClick={() => { setShowMountManager(false); setNewMountGuestTarget('media/MacMedia'); setShowAddMountModal(true); }} className="flex min-h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-bold text-white"><Plus className="h-4 w-4" />添加</button>
-            </header>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
-              {localMounts.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-500 dark:border-slate-800">还没有直通目录</div>
-              ) : localMounts.map((m) => (
-                <article key={m.id} className={`rounded-2xl border p-3 ${m.enabled ? 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900' : 'border-slate-200 bg-slate-50 opacity-60 dark:border-slate-800 dark:bg-slate-900/50'}`}>
-                  {(() => {
-                    const health = mountHealth.find((item) => item.id === m.id);
-                    const healthClass = health?.healthy ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : health?.status === 'disabled' ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200';
-                    return health ? <p className={`mb-2 rounded-xl px-3 py-2 text-[11px] font-semibold ${healthClass}`}>探针：{health.message}</p> : null;
-                  })()}
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400"><Folder className="h-5 w-5" /></span>
-                    <div className="min-w-0 flex-1"><h4 className="truncate text-sm font-bold text-slate-900 dark:text-white">{m.name}</h4><p className="truncate text-[11px] text-slate-500" title={m.hostPath}>{m.hostPath}</p></div>
-                    <button type="button" onClick={() => handleDeleteMount(m.id, m.name)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-rose-50 hover:text-rose-600" aria-label="移除目录"><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <div
-                      className={`flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold ${m.writable ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200'}`}
-                      role="status"
-                      aria-label={`当前访问权限：${m.writable ? '可读写' : '只读'}`}
-                    >
-                      {m.writable ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
-                      <span>当前：{m.writable ? '可读写' : '只读'}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleMountWritable(m.id, !m.writable)}
-                      className="min-h-10 rounded-xl bg-slate-100 px-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                      title={m.writable ? '切换为只读保护' : '开启读写权限'}
-                    >
-                      {m.writable ? '切换为只读' : '切换为可读写'}
-                    </button>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span className="min-w-0 truncate" title={`/data/${m.guestTarget}`}>NAS 目录：<code className="font-mono">/data/{m.guestTarget}</code></span>
-                    <button type="button" onClick={() => handleToggleMount(m.id)} className={`shrink-0 rounded-lg px-2 py-1 font-semibold ${m.enabled ? 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`} title={m.enabled ? '停用本机目录直通' : '启用本机目录直通'}>{m.enabled ? '已启用 · 停用' : '已停用 · 启用'}</button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        </div>
-      )}
-
-      {/* Section 4: Physical Disks List */}
-      <div className={`${mode === 'smb' ? 'hidden' : ''} space-y-3`}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">磁盘</h3>
-          </div>
-          <span className="text-xs text-slate-500 dark:text-slate-400">{disks.length} 个设备</span>
-        </div>
-
-        {disks.length === 0 && !loading ? (
-          <div className="p-8 rounded-2xl bg-white dark:bg-slate-900/40 border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-500 dark:text-slate-400 text-sm shadow-xs">
-            未扫描到外接磁盘设备，请检查 USB/雷电外接硬盘连接。
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {disks.map((disk) => {
-              const isSelected = disk.identifier === selectedDiskId || disk.deviceNode === selectedDiskId || disk.isSelected;
-              const roleLabel = isSelected ? '主存储' : disk.isSecondary ? '扩展存储' : disk.isExternal ? '外接磁盘' : '系统磁盘';
-              return (
-                <article
-                  key={disk.identifier}
-                  className={`rounded-2xl border bg-white p-4 dark:bg-slate-900 ${
-                    isSelected
-                      ? 'border-sky-400 dark:border-sky-500'
-                      : disk.isSecondary ? 'border-violet-300 dark:border-violet-700' : 'border-slate-200 dark:border-slate-800'
-                  }`}
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${isSelected ? 'bg-sky-50 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400' : disk.isSecondary ? 'bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>
-                      <HardDrive className="h-5 w-5" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <h4 className="truncate text-sm font-bold text-slate-900 dark:text-white" title={disk.name}>{disk.name}</h4>
-                      <p className="mt-0.5 truncate text-[11px] text-slate-500">{roleLabel}{disk.isSSD ? ' · SSD' : ''} · {disk.totalSizeString}</p>
-                    </div>
-                    {(isSelected || disk.isSecondary) && <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${isSelected ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300' : 'bg-violet-50 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300'}`}>{isSelected ? '使用中' : '已扩展'}</span>}
-                  </div>
-
-                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                    <div className={`h-full ${isSelected ? 'bg-sky-500' : disk.isSecondary ? 'bg-violet-500' : 'bg-slate-400'}`} style={{ width: `${Math.min(disk.usedPercent || 0, 100)}%` }} />
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="truncate text-[11px] text-slate-500">{disk.usedPercent > 0 ? `${disk.usedPercent.toFixed(0)}% 已用` : disk.mounted ? '已就绪' : '未挂载'}</span>
-                    {isSelected ? (
-                      isExternalActive ? <button type="button" onClick={() => setShowUnbindConfirm(true)} className="min-h-9 shrink-0 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200" title={dataPath}>解除主盘</button> : <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">主盘</span>
-                    ) : disk.isSecondary ? (
-                      <button type="button" onClick={handleUnbindSecondary} className="min-h-9 shrink-0 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">解除扩展</button>
-                    ) : (
-                      <div className="flex shrink-0 items-center gap-2">
-                        {disk.mountPoint && <button type="button" onClick={() => handleOpenBindModal(disk)} className="min-h-9 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">设为主盘</button>}
-                        <button type="button" onClick={() => handleOpenSecondaryModal(disk)} className="min-h-9 rounded-xl bg-violet-500 px-3 text-xs font-semibold text-white">设为扩展</button>
-                      </div>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Section 3: Lima Managed Disks Info */}
-      {mode !== 'smb' && managedDisks.length > 0 && (
-        <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/40">
-          <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between px-4">
-            <span className="text-sm font-bold text-slate-900 dark:text-white">虚拟磁盘</span>
-            <span className="text-xs text-slate-500">{managedDisks.length} 个 · 查看详情</span>
-          </summary>
-          <div className="space-y-3 border-t border-slate-100 p-4 dark:border-slate-800">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-bold text-slate-900 dark:text-white">Lima 托管 ext4 虚拟磁盘 (Managed Disks)</h4>
-            <span className="text-[11px] text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full font-semibold">
-              动态精简分配 (Thin Provisioning)
-            </span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {managedDisks.map((md) => (
-              <div key={md.name} className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 flex flex-col justify-between space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bold text-slate-900 dark:text-slate-200">{md.name}</span>
-                    <span className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-sky-500/20 text-sky-700 dark:text-sky-300">ext4</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400 font-semibold">
-                    实际占用: {md.actualSizeString || '24 MB'}
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-500 dark:text-slate-400 space-y-0.5">
-                  <p>虚拟上限: <strong className="text-slate-800 dark:text-slate-300 font-mono">{(md.size / 1024 / 1024 / 1024).toFixed(0)} GiB</strong> · 格式: <span className="font-mono text-slate-700 dark:text-slate-300">{md.format}</span></p>
-                </div>
-              </div>
-            ))}
-          </div>
-          </div>
-        </details>
-      )}
+      <StorageDiskSection
+        visible={mode !== 'smb'}
+        loading={loading}
+        disks={disks}
+        managedDisks={managedDisks}
+        selectedDiskId={selectedDiskId}
+        isExternalActive={isExternalActive}
+        dataPath={dataPath}
+        onOpenBindModal={handleOpenBindModal}
+        onOpenSecondaryModal={handleOpenSecondaryModal}
+        onRequestUnbind={() => setShowUnbindConfirm(true)}
+        onUnbindSecondary={handleUnbindSecondary}
+      />
 
       {/* Add / Edit SMB Share Modal */}
       {showShareModal && (
