@@ -1,9 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import {
-  RefreshCw,
-  CheckCircle2,
-  AlertCircle,
-} from 'lucide-react';
 import { SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, NASUser } from '../types';
 import { api } from '../api';
 import { useTheme } from '../theme';
@@ -16,6 +11,7 @@ import { RootPasswordSection } from './settings/RootPasswordSection';
 import { AppearanceSettingsSection } from './settings/AppearanceSettingsSection';
 import { SSHKeyModals } from './settings/SSHKeyModals';
 import { useNASUserSettings } from './settings/useNASUserSettings';
+import { SettingsAlert, SettingsHeader, SettingsAlertMessage } from './settings/SettingsHeader';
 
 interface SettingsProps {
   primaryIP?: string;
@@ -30,7 +26,7 @@ export const Settings: React.FC<SettingsProps> = ({
 }) => {
   const { theme, setTheme } = useTheme();
   const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>('nas_users');
-  const [alertMsg, setAlertMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [alertMsg, setAlertMsg] = useState<SettingsAlertMessage | null>(null);
 
   const {
     nasUsers,
@@ -420,41 +416,8 @@ export const Settings: React.FC<SettingsProps> = ({
 
   return (
     <div className="space-y-4 pb-4">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-2xl">设置</h2>
-          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">账户、安全与系统偏好</p>
-        </div>
-
-        <button
-          onClick={loadData}
-          aria-label="刷新设置状态"
-          className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${usersLoading || sshLoading ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">刷新</span>
-        </button>
-      </div>
-
-      {/* Alert Banner */}
-      {alertMsg && (
-        <div
-          className={`p-4 rounded-2xl text-xs flex items-center justify-between transition-all ${
-            alertMsg.type === 'success'
-              ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
-              : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
-          }`}
-        >
-          <div className="flex items-center space-x-2.5">
-            {alertMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
-            <span>{alertMsg.text}</span>
-          </div>
-          <button onClick={() => setAlertMsg(null)} className="text-xs opacity-70 hover:opacity-100 ml-4 font-bold">
-            ✕
-          </button>
-        </div>
-      )}
+      <SettingsHeader loading={usersLoading || sshLoading} onRefresh={loadData} />
+      {alertMsg && <SettingsAlert alert={alertMsg} onDismiss={() => setAlertMsg(null)} />}
 
       <SettingsNavigation activeSubTab={activeSubTab} onChange={setActiveSubTab} />
 
