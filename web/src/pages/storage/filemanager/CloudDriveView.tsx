@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowLeft, CheckSquare, ChevronRight, Cloud, Copy, Download, Folder, ListChecks, MoreHorizontal, Move, Pencil, Plus, RefreshCw, Square, Trash2, Upload, X } from 'lucide-react';
 import { api } from '../../../api';
-import { BackgroundJob, CloudFile, CloudMount } from '../../../types';
+import { CloudFile, CloudMount } from '../../../types';
 import { CloudDownloadModal } from './CloudDownloadModal';
 import { CloudDestinationModal } from './CloudDestinationModal';
 import { CloudTransferTasksModal } from './CloudTransferTasksModal';
+import { useTransferTasks } from './useTransferTasks';
 
 interface CloudDriveViewProps {
   mount: CloudMount;
@@ -30,17 +31,8 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
   const [files, setFiles] = useState<CloudFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [downloadTargets, setDownloadTargets] = useState<CloudFile[]>([]);
-  const [jobs, setJobs] = useState<BackgroundJob[]>([]);
-  const [showTransferTasks, setShowTransferTasks] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedFids, setSelectedFids] = useState<Set<string>>(new Set());
-  const [cloudTransfer, setCloudTransfer] = useState<{ operation: 'copy' | 'move'; files: CloudFile[] } | null>(null);
-  const [isDraggingUpload, setIsDraggingUpload] = useState(false);
-  const uploadInputRef = useRef<HTMLInputElement>(null);
-  const lastCompletedUploadRef = useRef('');
-
-  const isTransferJob = (job: BackgroundJob) => job.kind === 'cloud.download' || job.kind === 'cloud.upload';
 
   const loadFiles = async (fid = parentFid) => {
     setLoading(true);
@@ -60,30 +52,9 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
     setBreadcrumbs([{ fid: mount.rootFid || '0', name: mount.name }]);
     setSelectionMode(false);
     setSelectedFids(new Set());
-    setDownloadTargets([]);
-    setCloudTransfer(null);
   }, [mount.id, mount.rootFid, mount.name]);
 
   useEffect(() => { loadFiles(parentFid); }, [mount.id, parentFid]);
-
-  useEffect(() => {
-    let active = true;
-    const refreshJobs = () => api.getJobs().then((result) => {
-      if (active) setJobs((result.jobs || []).filter(isTransferJob).slice(0, 50));
-    }).catch(() => {});
-    refreshJobs();
-    const timer = window.setInterval(refreshJobs, 1500);
-    return () => { active = false; window.clearInterval(timer); };
-  }, []);
-
-  useEffect(() => {
-    const latest = jobs
-      .filter((job) => job.kind === 'cloud.upload' && job.status === 'succeeded')
-      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0];
-    if (!latest || latest.id === lastCompletedUploadRef.current) return;
-    lastCompletedUploadRef.current = latest.id;
-    void loadFiles();
-  }, [jobs, parentFid, mount.id]);
 
   const openFolder = (file: CloudFile) => {
     setParentFid(file.fid);
@@ -102,6 +73,34 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
   };
 
   const selectedFiles = files.filter((file) => selectedFids.has(file.fid));
+
+  const {
+    downloadTargets,
+    setDownloadTargets,
+    jobs,
+    showTransferTasks,
+    setShowTransferTasks,
+    cloudTransfer,
+    setCloudTransfer,
+    isDraggingUpload,
+    uploadInputRef,
+    handleUploadChange,
+    handleUploadDragOver,
+    handleUploadDragLeave,
+    handleUploadDrop,
+    download,
+    transferFiles,
+    refreshJobs,
+    cancelJob,
+    clearTransferJobs,
+  } = useTransferTasks({
+    mountId: mount.id,
+    parentFid,
+    setSelectionMode,
+    setSelectedFids,
+    loadFiles: () => loadFiles(),
+    onError: setError,
+  });
 
   const toggleSelection = (file: CloudFile) => {
     setSelectedFids((current) => {
@@ -123,75 +122,6 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
     setSelectedFids((current) => current.size === files.length ? new Set() : new Set(files.map((file) => file.fid)));
   };
 
-  async function refreshJobs() {
-    const result = await api.getJobs();
-    setJobs((result.jobs || []).filter(isTransferJob).slice(0, 50));
-  }
-
-  const clearTransferJobs = async () => {
-    const result = await api.clearTransferJobs();
-    await refreshJobs();
-    return result.count;
-  };
-
-  const download = async (targets: CloudFile[], destination: string) => {
-    try {
-      await Promise.all(targets.map((file) => api.downloadCloudFile(mount.id, file, destination)));
-      setDownloadTargets([]);
-      setSelectionMode(false);
-      setSelectedFids(new Set());
-      await refreshJobs();
-    } catch (err: any) {
-      throw new Error(err.message || '创建下载任务失败');
-    }
-  };
-
-  const uploadFiles = async (selected: File[]) => {
-    if (!selected.length) return;
-    setError('');
-    try {
-      for (const file of selected) await api.uploadCloudFile(mount.id, parentFid, file);
-      await refreshJobs();
-      await loadFiles();
-    } catch (err: any) {
-      setError(err.message || '创建云盘上传任务失败');
-    }
-  };
-
-  const handleUploadDragOver = (event: React.DragEvent) => {
-    if (!event.dataTransfer.types.includes('Files')) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setIsDraggingUpload(true);
-  };
-
-  const handleUploadDragLeave = (event: React.DragEvent) => {
-    if (!event.dataTransfer.types.includes('Files')) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-    setIsDraggingUpload(false);
-  };
-
-  const handleUploadDrop = (event: React.DragEvent) => {
-    if (!event.dataTransfer.types.includes('Files')) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setIsDraggingUpload(false);
-    const selected = Array.from(event.dataTransfer.files || []);
-    void uploadFiles(selected);
-  };
-
-  const transferFiles = async (targetFid: string) => {
-    if (!cloudTransfer) return;
-    const fids = cloudTransfer.files.map((file) => file.fid);
-    if (cloudTransfer.operation === 'copy') await api.copyCloudFiles(mount.id, fids, targetFid);
-    else await api.moveCloudFiles(mount.id, fids, targetFid);
-    setCloudTransfer(null);
-    setSelectionMode(false);
-    setSelectedFids(new Set());
-    await loadFiles();
-  };
 
   const createFolder = async () => {
     const name = window.prompt('新建云端文件夹', '新建文件夹');
@@ -248,7 +178,7 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
             <Cloud className="h-4 w-4 shrink-0 text-sky-500" />
             {breadcrumbs.map((crumb, index) => <React.Fragment key={crumb.fid}><button type="button" onClick={() => jumpTo(index)} className="max-w-[140px] truncate hover:text-sky-600">{crumb.name}</button>{index < breadcrumbs.length - 1 && <ChevronRight className="h-3.5 w-3.5 shrink-0" />}</React.Fragment>)}
           </div>
-          <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={(event) => { const selected = Array.from(event.target.files || []); event.target.value = ''; void uploadFiles(selected); }} />
+          <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleUploadChange} />
           <button type="button" onClick={() => uploadInputRef.current?.click()} className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-semibold text-white shadow-sm"><Upload className="h-4 w-4" />上传</button>
           <button type="button" onClick={createFolder} className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-semibold text-white shadow-sm"><Plus className="h-4 w-4" />新建</button>
           <button type="button" onClick={() => loadFiles()} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-slate-800" aria-label="刷新云盘"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
@@ -282,7 +212,7 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
       </section>
       <CloudDownloadModal files={downloadTargets} onClose={() => setDownloadTargets([])} onConfirm={(destination) => download(downloadTargets, destination)} />
       {cloudTransfer && <CloudDestinationModal mount={mount} operation={cloudTransfer.operation} count={cloudTransfer.files.length} initialFid={parentFid} initialName={breadcrumbs[breadcrumbs.length - 1]?.name || mount.name} onClose={() => setCloudTransfer(null)} onConfirm={transferFiles} />}
-      {showTransferTasks && <CloudTransferTasksModal jobs={jobs} onClose={() => setShowTransferTasks(false)} onRefresh={refreshJobs} onCancel={async (id) => { await api.cancelJob(id); await refreshJobs(); }} onClear={clearTransferJobs} />}
+      {showTransferTasks && <CloudTransferTasksModal jobs={jobs} onClose={() => setShowTransferTasks(false)} onRefresh={refreshJobs} onCancel={cancelJob} onClear={clearTransferJobs} />}
     </div>
   );
 };
