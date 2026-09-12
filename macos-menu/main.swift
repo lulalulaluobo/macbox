@@ -38,6 +38,22 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private struct MenuBarStatus: Decodable {
+        let cpuPercent: Double?
+        let memUsed: UInt64?
+        let memTotal: UInt64?
+        let memPercent: Double?
+        let storageName: String?
+        let storageUsed: UInt64?
+        let storageTotal: UInt64?
+        let storageUsedPercent: Double?
+        let limaInstalled: Bool?
+        let vmStatus: String?
+        let dockerReady: Bool?
+        let dockerTotal: Int?
+        let dockerRunning: Int?
+    }
+
     private let fileManager = FileManager.default
     private let home = FileManager.default.homeDirectoryForCurrentUser.path
     private let defaultPort = 19808
@@ -49,7 +65,13 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var backendLogHandle: FileHandle?
     private var actionInProgress = false
     private var backendRunning = false
+    private var monitorRequestInFlight = false
     private var webServiceState: WebServiceState = .checking
+    private var monitorHeaderItem: NSMenuItem!
+    private var cpuMonitorItem: NSMenuItem!
+    private var memoryMonitorItem: NSMenuItem!
+    private var storageMonitorItem: NSMenuItem!
+    private var servicesMonitorItem: NSMenuItem!
     private var port: Int { configuredPort() }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -73,6 +95,17 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusMenuItem = NSMenuItem(title: "MacNAS · 检查中", action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
+        monitorHeaderItem = disabledItem("资源监控（每 5 秒更新）")
+        monitorHeaderItem.indentationLevel = 1
+        menu.addItem(monitorHeaderItem)
+        cpuMonitorItem = disabledItem("CPU：—")
+        memoryMonitorItem = disabledItem("内存：—")
+        storageMonitorItem = disabledItem("存储：—")
+        servicesMonitorItem = disabledItem("Lima：— · Docker：—")
+        for monitorItem in [cpuMonitorItem!, memoryMonitorItem!, storageMonitorItem!, servicesMonitorItem!] {
+            monitorItem.indentationLevel = 1
+            menu.addItem(monitorItem)
+        }
         menu.addItem(.separator())
         menu.addItem(item("打开网页端", #selector(openWeb)))
         menu.addItem(.separator())
@@ -97,6 +130,12 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return result
     }
 
+    private func disabledItem(_ title: String) -> NSMenuItem {
+        let result = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        result.isEnabled = false
+        return result
+    }
+
     @objc private func openWeb(_ sender: Any?) {
         guard let url = URL(string: "http://127.0.0.1:\(port)") else { return }
         NSWorkspace.shared.open(url)
@@ -112,6 +151,11 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             self.backendRunning = running
             self.applyStatusVisual(running ? .running : .stopped)
+            if running {
+                self.refreshMonitoringStatus()
+            } else {
+                self.updateMonitoringItems(nil)
+            }
         }
     }
 
@@ -136,6 +180,90 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         image.isTemplate = false
         image.size = size
         return image
+    }
+
+    private func refreshMonitoringStatus() {
+        guard backendRunning, !monitorRequestInFlight else { return }
+        guard let url = URL(string: "http://127.0.0.1:\(port)/api/system/menubar-status") else { return }
+
+        monitorRequestInFlight = true
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 2.5)
+        request.httpMethod = "GET"
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            let status: MenuBarStatus?
+            if (response as? HTTPURLResponse)?.statusCode == 200, let data {
+                status = try? JSONDecoder().decode(MenuBarStatus.self, from: data)
+            } else {
+                status = nil
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.monitorRequestInFlight = false
+                self.updateMonitoringItems(status)
+            }
+        }.resume()
+    }
+
+    private func updateMonitoringItems(_ status: MenuBarStatus?) {
+        guard let status else {
+            cpuMonitorItem?.title = "CPU：—"
+            memoryMonitorItem?.title = "内存：—"
+            storageMonitorItem?.title = "存储：—"
+            servicesMonitorItem?.title = "Lima：— · Docker：—"
+            return
+        }
+
+        cpuMonitorItem.title = "CPU：\(formatPercent(status.cpuPercent))"
+        if let used = status.memUsed, let total = status.memTotal {
+            memoryMonitorItem.title = "内存：\(formatBytes(used)) / \(formatBytes(total))（\(formatPercent(status.memPercent))）"
+        } else {
+            memoryMonitorItem.title = "内存：\(formatPercent(status.memPercent))"
+        }
+        let storageLabel = status.storageName ?? "—"
+        storageMonitorItem.title = "存储：\(storageLabel) · \(formatPercent(status.storageUsedPercent))"
+
+        let limaLabel: String
+        if status.limaInstalled != true {
+            limaLabel = "未安装"
+        } else {
+            limaLabel = vmStatusLabel(status.vmStatus)
+        }
+        let dockerLabel: String
+        if let running = status.dockerRunning, let total = status.dockerTotal {
+            dockerLabel = "Docker \(running)/\(total)"
+        } else if status.dockerReady == true {
+            dockerLabel = "Docker 就绪"
+        } else {
+            dockerLabel = "Docker 未就绪"
+        }
+        servicesMonitorItem.title = "Lima：\(limaLabel) · \(dockerLabel)"
+    }
+
+    private func vmStatusLabel(_ status: String?) -> String {
+        switch status {
+        case "Running": return "运行中"
+        case "Stopped": return "已停止"
+        case "NotCreated": return "未创建"
+        case "Broken": return "异常"
+        default: return status ?? "未知"
+        }
+    }
+
+    private func formatPercent(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return String(format: "%.0f%%", max(0, min(100, value)))
+    }
+
+    private func formatBytes(_ value: UInt64) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var amount = Double(value)
+        var index = 0
+        while amount >= 1024 && index < units.count - 1 {
+            amount /= 1024
+            index += 1
+        }
+        if index == 0 { return "\(value) B" }
+        return String(format: "%.1f %@", amount, units[index])
     }
 
     @objc private func startBackend(_ sender: Any?) {

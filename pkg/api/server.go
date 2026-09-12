@@ -478,7 +478,8 @@ func (s *Server) Handler() http.Handler {
 		// API Authentication Interceptor
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			// Whitelisted unauthenticated endpoints
-			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" {
+			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" ||
+				(r.URL.Path == "/api/system/menubar-status" && s.isLoopbackRequest(r)) {
 				s.mux.ServeHTTP(w, r)
 				return
 			}

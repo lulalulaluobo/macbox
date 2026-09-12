@@ -70,6 +70,8 @@ services:
 
 更多安装、校验、目录直通和卸载说明见 [`docs/macos-cli-install.md`](docs/macos-cli-install.md)。
 
+新用户选择 Release、源码构建和本地部署的完整说明见 [`docs/distribution-and-local-deploy.md`](docs/distribution-and-local-deploy.md)。普通用户建议直接下载 GitHub Release，源码方式仅用于开发和贡献。
+
 ### AI 终端维护容器
 
 Web 终端顶部提供 `Codex`、`Claude` 和 `Anti Gravity` 三个快捷入口，分别执行对应 CLI 的高权限模式：
