@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -49,6 +50,13 @@ type cloudDownloadEntry struct {
 	relative string
 	size     int64
 }
+
+type cloudFileTransferRequest struct {
+	Fids      []string `json:"fids"`
+	TargetFid string   `json:"targetFid"`
+}
+
+const maxCloudUploadSize int64 = 10 << 30
 
 func (s *Server) handleQuarkQRBegin(w http.ResponseWriter, r *http.Request) {
 	challenge, err := cloud.BeginQuarkQRLogin(r.Context())
@@ -372,6 +380,161 @@ func (s *Server) handleCloudFileDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleCloudFileCopy(w http.ResponseWriter, r *http.Request) {
+	s.handleCloudFileTransfer(w, r, true)
+}
+
+func (s *Server) handleCloudFileMove(w http.ResponseWriter, r *http.Request) {
+	s.handleCloudFileTransfer(w, r, false)
+}
+
+func (s *Server) handleCloudFileTransfer(w http.ResponseWriter, r *http.Request, copyFiles bool) {
+	client, _, err := s.cloudClient(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	var req cloudFileTransferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if req.TargetFid == "" {
+		req.TargetFid = "0"
+	}
+	if copyFiles {
+		err = client.Copy(r.Context(), req.Fids, req.TargetFid)
+	} else {
+		err = client.Move(r.Context(), req.Fids, req.TargetFid)
+	}
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	status := "moved"
+	if copyFiles {
+		status = "copied"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+func (s *Server) handleCloudUpload(w http.ResponseWriter, r *http.Request) {
+	if r.ContentLength > maxCloudUploadSize+(1<<20) {
+		writeError(w, http.StatusRequestEntityTooLarge, "上传文件不能超过 10 GiB")
+		return
+	}
+	slotAcquired := false
+	if s.uploadSlots != nil {
+		select {
+		case s.uploadSlots <- struct{}{}:
+			slotAcquired = true
+		default:
+			writeError(w, http.StatusTooManyRequests, "当前已有多个文件在上传，请稍后重试")
+			return
+		}
+	}
+	releaseSlot := func() {
+		if slotAcquired {
+			<-s.uploadSlots
+			slotAcquired = false
+		}
+	}
+	defer releaseSlot()
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxCloudUploadSize+(1<<20))
+	reader, err := r.MultipartReader()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "上传请求格式无效")
+		return
+	}
+	part, err := reader.NextPart()
+	if err == io.EOF {
+		writeError(w, http.StatusBadRequest, "上传文件不能为空")
+		return
+	}
+	if err != nil || part.FormName() != "file" {
+		writeError(w, http.StatusBadRequest, "上传请求必须包含 file 文件字段")
+		return
+	}
+	fileName := path.Base(strings.ReplaceAll(part.FileName(), "\\", "/"))
+	if err := validateCloudFileName(fileName); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	parentFid := r.URL.Query().Get("parentFid")
+	if parentFid == "" {
+		parentFid = "0"
+	}
+	if _, _, err := s.cloudClient(r.PathValue("id")); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	tempFile, err := os.CreateTemp("", "macnas-quark-upload-*")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "准备上传临时文件失败")
+		return
+	}
+	tempPath := tempFile.Name()
+	keepTemp := false
+	defer func() {
+		_ = tempFile.Close()
+		if !keepTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	written, err := io.Copy(tempFile, io.LimitReader(part, maxCloudUploadSize+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "读取上传文件失败")
+		return
+	}
+	if written > maxCloudUploadSize {
+		writeError(w, http.StatusRequestEntityTooLarge, "上传文件不能超过 10 GiB")
+		return
+	}
+	if err := tempFile.Close(); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存上传临时文件失败")
+		return
+	}
+
+	ctx, cancel := context.WithCancel(s.serverCtx)
+	job := s.jobs.addWithStage("cloud.upload", "queued", 0, "准备上传到夸克网盘", cancel)
+	mountID := r.PathValue("id")
+	ownsSlot := slotAcquired
+	slotAcquired = false
+	keepTemp = true
+	go func() {
+		if ownsSlot {
+			defer func() { <-s.uploadSlots }()
+		}
+		defer os.Remove(tempPath)
+		err := s.runCloudUpload(ctx, job.ID, mountID, tempPath, parentFid, fileName, written)
+		s.jobs.finish(job.ID, err)
+	}()
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "jobId": job.ID})
+}
+
+func (s *Server) runCloudUpload(ctx context.Context, jobID, mountID, tempPath, parentFid, fileName string, total int64) error {
+	client, _, err := s.cloudClient(mountID)
+	if err != nil {
+		return err
+	}
+	s.jobs.updateTransfer(jobID, "uploading", 0, "正在上传到夸克网盘", fileName, 0, total, 0)
+	started := time.Now()
+	err = client.UploadFile(ctx, tempPath, parentFid, fileName, func(done, size int64) {
+		progress := 0
+		if size > 0 {
+			progress = int(done * 100 / size)
+		}
+		speed := int64(float64(done) / maxDurationSeconds(time.Since(started)))
+		s.jobs.updateTransfer(jobID, "uploading", progress, "正在上传到夸克网盘", fileName, done, size, speed)
+	})
+	if err != nil {
+		return fmt.Errorf("上传 %s 失败: %w", fileName, err)
+	}
+	s.jobs.updateTransfer(jobID, "completed", 100, "已上传到夸克网盘", fileName, total, total, int64(float64(total)/maxDurationSeconds(time.Since(started))))
+	return nil
 }
 
 func (s *Server) handleCloudDownload(w http.ResponseWriter, r *http.Request) {

@@ -89,7 +89,7 @@ export const CloudTransferTasksModal: React.FC<CloudTransferTasksModalProps> = (
             </div>;
           })}</div>}
         </div>
-        <div className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800">清理只删除任务记录，不删除云端文件或已下载文件。</div>
+        <div className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400 dark:border-slate-800">清理只删除任务记录，不删除云端文件或已传输文件。</div>
       </div>
     </div>
   );

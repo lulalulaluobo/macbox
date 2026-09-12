@@ -260,7 +260,11 @@ func (m *jobManager) clearFinished(kind string) int {
 		if job == nil || job.Status == "running" {
 			continue
 		}
-		if kind != "" && job.Kind != kind {
+		if kind == "cloud.transfer" {
+			if !strings.HasPrefix(job.Kind, "cloud.") {
+				continue
+			}
+		} else if kind != "" && job.Kind != kind {
 			continue
 		}
 		delete(m.jobs, id)
@@ -321,9 +325,9 @@ func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleJobsClear(w http.ResponseWriter, r *http.Request) {
 	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
 	if kind == "" {
-		kind = "cloud.download"
+		kind = "cloud.transfer"
 	}
-	if kind != "cloud.download" {
+	if kind != "cloud.transfer" && kind != "cloud.download" && kind != "cloud.upload" && kind != "cloud.copy" && kind != "cloud.move" {
 		writeError(w, http.StatusBadRequest, "不支持清理此类任务")
 		return
 	}

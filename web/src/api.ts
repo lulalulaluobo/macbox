@@ -139,6 +139,27 @@ export const api = {
     body: JSON.stringify({ fid, name }),
   }),
   deleteCloudFile: (id: string, fid: string) => fetchJSON<{ status: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/files?fid=${encodeURIComponent(fid)}`, { method: 'DELETE' }),
+  copyCloudFiles: (id: string, fids: string[], targetFid: string) => fetchJSON<{ status: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/copy`, {
+    method: 'POST',
+    body: JSON.stringify({ fids, targetFid }),
+  }),
+  moveCloudFiles: (id: string, fids: string[], targetFid: string) => fetchJSON<{ status: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/move`, {
+    method: 'POST',
+    body: JSON.stringify({ fids, targetFid }),
+  }),
+  uploadCloudFile: async (id: string, parentFid: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/upload?parentFid=${encodeURIComponent(parentFid)}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(err.error || 'Upload failed');
+    }
+    return res.json() as Promise<{ status: string; jobId: string }>;
+  },
   downloadCloudFile: (id: string, file: Pick<CloudFile, 'fid' | 'name' | 'isDir' | 'size'>, destination: string) => fetchJSON<{ status: string; jobId: string }>(`${BASE_URL}/storage/cloud-mounts/${encodeURIComponent(id)}/download`, {
     method: 'POST',
     body: JSON.stringify({ ...file, destination }),
@@ -269,7 +290,7 @@ export const api = {
   getJobs: () => fetchJSON<{ jobs: BackgroundJob[] }>(`${BASE_URL}/jobs`),
   getJob: (id: string) => fetchJSON<BackgroundJob>(`${BASE_URL}/jobs/${encodeURIComponent(id)}`),
   cancelJob: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
-  clearTransferJobs: () => fetchJSON<{ status: string; count: number }>(`${BASE_URL}/jobs/clear?kind=cloud.download`, { method: 'POST' }),
+  clearTransferJobs: () => fetchJSON<{ status: string; count: number }>(`${BASE_URL}/jobs/clear?kind=cloud.transfer`, { method: 'POST' }),
 
   // Web Terminal & File System
   listFiles: (path?: string, offset = 0, limit = 300) => fetchJSON<{ status: string; path: string; items: FileItem[]; hasMore: boolean; nextOffset: number }>(
@@ -312,11 +333,17 @@ export const api = {
     return res.json();
   },
   getFileDownloadUrl: (path: string) => getAuthenticatedFileUrl('download', path),
-  archiveFiles: (sourcePaths: string[], operation: 'compress' | 'extract', format: 'zip' | 'rar' | '7z', destination: string) => fetchJSON<{ status: string; message: string }>(
+  getArchiveCapabilities: () => fetchJSON<{ zip: boolean }>(`${BASE_URL}/terminal/files/archive-capabilities`),
+  getBatchDownloadUrl: (paths: string[]) => {
+    const params = new URLSearchParams();
+    paths.forEach((path) => params.append('path', path));
+    return `${BASE_URL}/terminal/files/download-archive?${params.toString()}`;
+  },
+  archiveFiles: (sourcePaths: string[], operation: 'compress' | 'extract', format: 'zip', destination: string, conflictPolicy: 'error' | 'overwrite' | 'rename' | 'skip' = 'error') => fetchJSON<{ status: string; message: string }>(
     `${BASE_URL}/terminal/files/archive`,
     {
       method: 'POST',
-      body: JSON.stringify({ sourcePaths, operation, format, destination }),
+      body: JSON.stringify({ sourcePaths, operation, format, destination, conflictPolicy }),
     }
   ),
   getFileRawUrl: (path: string) => getAuthenticatedFileUrl('raw', path),
@@ -327,18 +354,18 @@ export const api = {
       body: JSON.stringify({ oldPath, newPath }),
     }
   ),
-  copyFiles: (srcPaths: string[], destDir: string) => fetchJSON<{ status: string; message: string }>(
+  copyFiles: (srcPaths: string[], destDir: string, conflictPolicy: 'error' | 'overwrite' | 'rename' | 'skip' = 'error') => fetchJSON<{ status: string; message: string }>(
     `${BASE_URL}/terminal/files/copy`,
     {
       method: 'POST',
-      body: JSON.stringify({ srcPaths, destDir }),
+      body: JSON.stringify({ srcPaths, destDir, conflictPolicy }),
     }
   ),
-  moveFiles: (srcPaths: string[], destDir: string) => fetchJSON<{ status: string; message: string }>(
+  moveFiles: (srcPaths: string[], destDir: string, conflictPolicy: 'error' | 'overwrite' | 'rename' | 'skip' = 'error') => fetchJSON<{ status: string; message: string }>(
     `${BASE_URL}/terminal/files/move`,
     {
       method: 'POST',
-      body: JSON.stringify({ srcPaths, destDir }),
+      body: JSON.stringify({ srcPaths, destDir, conflictPolicy }),
     }
   ),
   moveToTrash: (paths: string[]) => fetchJSON<{ status: string; message: string }>(

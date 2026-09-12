@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 INSTALL_ROOT="${HOME}/.local/share/macnas"
 BIN_DIR="${HOME}/.local/bin"
+MENU_APP="${HOME}/Applications/MacNASMenu.app"
 DEFAULT_PORT=19808
 DEFAULT_HOST="0.0.0.0"
 START_AFTER_INSTALL=0
@@ -36,7 +37,7 @@ MacNAS macOS Web 服务安装器
   命令：~/.local/bin/macnas
 
 图形化入口：
-  双击发行包根目录中的 MacNASMenu.app，可在 macOS 顶部菜单栏控制服务。
+  安装后双击 ~/Applications/MacNASMenu.app，可在 macOS 顶部菜单栏控制服务。
   MacNAS.command 仍可作为无菜单栏助手时的备用控制器。
 USAGE
 }
@@ -149,6 +150,12 @@ install_files() {
   mv "$stage" "$INSTALL_ROOT"
   trap - EXIT
 
+  mkdir -p "$(dirname -- "$MENU_APP")"
+  [[ "$MENU_APP" == "$HOME/Applications/MacNASMenu.app" ]] || die "拒绝覆盖非预期菜单栏应用：$MENU_APP"
+  rm -rf -- "$MENU_APP"
+  cp -R "$INSTALL_ROOT/MacNASMenu.app" "$MENU_APP"
+  chmod 0755 "$MENU_APP/Contents/MacOS/MacNASMenu"
+
   mkdir -p "$BIN_DIR"
   local command_path="${BIN_DIR}/macnas"
   if [[ -e "$command_path" || -L "$command_path" ]]; then
@@ -169,7 +176,7 @@ print_next_steps() {
 
   log "安装完成。"
   printf '\n下一步：\n'
-  printf '  1. 在 Finder 中双击 MacNASMenu.app，顶部栏会出现 MacNAS 图标。\n'
+  printf '  1. 在 Finder 中双击 ~/Applications/MacNASMenu.app，顶部栏会出现 MacNAS 图标。\n'
   printf '  2. 从顶部栏选择“启动后端服务”，再打开网页端完成首次初始化（首次登录时现场设置管理员用户名和至少 8 个字符的强密码）：\n'
   printf '     http://127.0.0.1:%s\n' "$PORT"
   if [[ -n "$lan_ip" ]]; then

@@ -48,6 +48,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/folders", s.adminOnly(s.handleCloudFolderCreate))
 	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/rename", s.adminOnly(s.handleCloudFileRename))
 	s.mux.HandleFunc("DELETE /api/storage/cloud-mounts/{id}/files", s.adminOnly(s.handleCloudFileDelete))
+	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/copy", s.adminOnly(s.handleCloudFileCopy))
+	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/move", s.adminOnly(s.handleCloudFileMove))
+	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/upload", s.adminOnly(s.handleCloudUpload))
 	s.mux.HandleFunc("POST /api/storage/cloud-mounts/{id}/download", s.adminOnly(s.handleCloudDownload))
 
 	// 4. Docker Overview & Containers
@@ -109,6 +112,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/terminal/files/rename", s.adminOnly(s.handleTerminalFileRename))
 	s.mux.HandleFunc("DELETE /api/terminal/files", s.adminOnly(s.handleTerminalFileDelete))
 	s.mux.HandleFunc("GET /api/terminal/files/download", s.handleTerminalFileDownload)
+	s.mux.HandleFunc("GET /api/terminal/files/download-archive", s.adminOnly(s.handleTerminalFilesBatchDownload))
+	s.mux.HandleFunc("GET /api/terminal/files/archive-capabilities", s.handleTerminalArchiveCapabilities)
 	s.mux.HandleFunc("POST /api/terminal/files/archive", s.adminOnly(s.handleTerminalArchive))
 	s.mux.HandleFunc("GET /api/terminal/files/raw", s.handleTerminalFileRaw)
 	s.mux.HandleFunc("POST /api/terminal/files/copy", s.adminOnly(s.handleTerminalFilesCopy))

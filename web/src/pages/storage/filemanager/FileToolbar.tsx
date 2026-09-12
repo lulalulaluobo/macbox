@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, CheckSquare, Clipboard, Copy, FolderPlus, Grid, List, Plus, RefreshCw, Scissors, Search, SlidersHorizontal, Upload, X } from 'lucide-react';
-import { ClipboardState } from './types';
+import { ArrowLeft, CheckSquare, FolderPlus, Grid, List, Plus, RefreshCw, Search, SlidersHorizontal, Upload, X } from 'lucide-react';
 
 interface FileToolbarProps {
   currentPath: string;
@@ -14,7 +13,6 @@ interface FileToolbarProps {
   loading: boolean;
   uploading: boolean;
   uploadProgress: string;
-  clipboard: ClipboardState | null;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onGoUp: () => void;
   onSearchChange: (query: string) => void;
@@ -25,8 +23,6 @@ interface FileToolbarProps {
   onOpenMkdir: () => void;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRefresh: () => void;
-  onPaste: () => void;
-  onClearClipboard: () => void;
 }
 
 const sortOptions = [
@@ -38,9 +34,9 @@ const sortOptions = [
 
 export const FileToolbar: React.FC<FileToolbarProps> = ({
   currentPath, searchQuery, sortBy, sortOrder, viewMode, selectionMode, selectedCount, totalCount,
-  loading, uploading, uploadProgress, clipboard, fileInputRef, onGoUp,
+  loading, uploading, uploadProgress, fileInputRef, onGoUp,
   onSearchChange, onSortChange, onViewModeChange, onToggleSelectionMode, onSelectAll, onOpenMkdir,
-  onFileChange, onRefresh, onPaste, onClearClipboard,
+  onFileChange, onRefresh,
 }) => {
   const [showFilters, setShowFilters] = useState(false);
 
@@ -89,15 +85,6 @@ export const FileToolbar: React.FC<FileToolbarProps> = ({
       <input type="file" ref={fileInputRef} onChange={onFileChange} multiple className="hidden" />
 
       {uploading && <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs text-sky-600 dark:text-sky-300"><span>{uploadProgress || '正在上传文件…'}</span></div>}
-
-      {clipboard && (
-        <div className="flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-          {clipboard.action === 'copy' ? <Copy className="h-4 w-4 shrink-0" /> : <Scissors className="h-4 w-4 shrink-0" />}
-          <span className="min-w-0 flex-1 truncate">已{clipboard.action === 'copy' ? '复制' : '移动'} {clipboard.items.length} 项</span>
-          <button type="button" onClick={onPaste} className="flex min-h-9 items-center gap-1 rounded-xl bg-amber-500 px-3 font-bold text-white"><Clipboard className="h-3.5 w-3.5" />粘贴</button>
-          <button type="button" onClick={onClearClipboard} className="flex h-9 w-9 items-center justify-center" aria-label="清除剪贴板"><X className="h-4 w-4" /></button>
-        </div>
-      )}
 
       {!selectionMode && (
         <details className="fixed bottom-[calc(92px+env(safe-area-inset-bottom))] right-4 z-30 md:hidden">

@@ -403,6 +403,44 @@ def open_parent(raw):
     parts = parts_for(raw)
     return open_dir(parts[:-1]), parts[-1]
 
+def path_exists(parent_fd, name):
+    try:
+        os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        return True
+    except FileNotFoundError:
+        return False
+
+def remove_entry(parent_fd, name):
+    info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if stat.S_ISDIR(info.st_mode):
+        shutil.rmtree(name, dir_fd=parent_fd)
+    else:
+        os.unlink(name, dir_fd=parent_fd)
+
+def unique_name(parent_fd, name):
+    stem, extension = os.path.splitext(name)
+    index = 1
+    while True:
+        candidate = f'{stem} ({index}){extension}'
+        if not path_exists(parent_fd, candidate):
+            return candidate
+        index += 1
+
+def prepare_destination(parent_fd, name):
+    policy = request.get('conflictPolicy', 'error')
+    if policy not in ('error', 'overwrite', 'rename', 'skip'):
+        raise RuntimeError('同名冲突策略无效')
+    if not path_exists(parent_fd, name):
+        return name
+    if policy == 'skip':
+        return None
+    if policy == 'rename':
+        return unique_name(parent_fd, name)
+    if policy == 'overwrite':
+        remove_entry(parent_fd, name)
+        return name
+    raise RuntimeError(f'目标中已存在同名项目: {name}')
+
 operation = request['operation']
 if operation == 'delete':
     parent_fd, name = open_parent(request['path'])
@@ -418,10 +456,12 @@ elif operation in ('rename', 'move'):
     source_fd, source_name = open_parent(request['source'])
     if operation == 'move':
         destination_fd = open_dir(parts_for(request['destination'], allow_root=True))
-        destination_name = source_name
+        destination_name = prepare_destination(destination_fd, source_name)
     else:
         destination_fd, destination_name = open_parent(request['destination'])
     try:
+        if destination_name is None:
+            raise SystemExit(0)
         os.rename(source_name, destination_name, src_dir_fd=source_fd, dst_dir_fd=destination_fd)
     finally:
         os.close(source_fd)
@@ -450,11 +490,14 @@ elif operation == 'copy':
     source_fd, source_name = open_parent(request['source'])
     destination_fd = open_dir(parts_for(request['destination'], allow_root=True))
     source_path = f'/proc/self/fd/{source_fd}/{source_name}'
-    destination_path = f'/proc/self/fd/{destination_fd}/{source_name}'
     try:
         info = os.stat(source_name, dir_fd=source_fd, follow_symlinks=False)
         if stat.S_ISLNK(info.st_mode):
             raise RuntimeError('不允许复制符号链接')
+        destination_name = prepare_destination(destination_fd, source_name)
+        if destination_name is None:
+            raise SystemExit(0)
+        destination_path = f'/proc/self/fd/{destination_fd}/{destination_name}'
         if stat.S_ISDIR(info.st_mode):
             shutil.copytree(source_path, destination_path, symlinks=True)
         else:
@@ -611,6 +654,33 @@ func DownloadFile(w http.ResponseWriter, r *http.Request, instanceName, filePath
 	streamCommandDownload(w, cmd, fileName, "application/octet-stream", fileInfo.Size)
 }
 
+// DownloadPathsAsZip streams a selected set of files and folders as one ZIP.
+// The archive is created inside the VM process and never materialized on the
+// NAS data disk, which avoids the previous 0 KB browser download failure and
+// keeps batch downloads from triggering multiple-download blocking.
+func DownloadPathsAsZip(w http.ResponseWriter, r *http.Request, instanceName string, requestedPaths []string) error {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	if len(requestedPaths) == 0 || len(requestedPaths) > 100 {
+		return fmt.Errorf("一次最多下载 100 个项目")
+	}
+	resolved := make([]string, 0, len(requestedPaths))
+	for _, requested := range requestedPaths {
+		filePath, err := resolveAllowedPathContext(r.Context(), instanceName, requested)
+		if err != nil {
+			return fmt.Errorf("下载路径无效: %w", err)
+		}
+		if path.Clean(filePath) == "/data" {
+			return fmt.Errorf("禁止下载存储根目录")
+		}
+		resolved = append(resolved, filePath)
+	}
+	cmd := privilegedCommand(r.Context(), instanceName, append([]string{"python3", "-c", zipSelectedPathsStreamScript}, resolved...)...)
+	streamCommandDownload(w, cmd, "MacNAS-批量下载.zip", "application/zip", -1)
+	return nil
+}
+
 // streamCommandDownload streams command output only after the first chunk has
 // been read. This prevents clients from saving a successful-looking empty
 // file when a VM-side command failed before producing data.
@@ -704,11 +774,60 @@ with zipfile.ZipFile(sys.stdout.buffer, 'w', compression=zipfile.ZIP_DEFLATED, a
             archive.write(source, prefix + '/' + name)
 `
 
+const zipSelectedPathsStreamScript = `import os, stat, sys, zipfile
+
+root = os.path.realpath('/data')
+sources = [os.path.realpath(value) for value in sys.argv[1:]]
+if not sources or len(sources) > 100:
+    raise RuntimeError('批量下载项目数量无效')
+
+def inside(candidate):
+    try:
+        return os.path.commonpath((root, candidate)) == root
+    except ValueError:
+        return False
+
+def add_tree(archive, source, archive_name):
+    if os.path.isdir(source) and not os.path.islink(source):
+        for current, directories, files in os.walk(source, topdown=True, followlinks=False):
+            directories[:] = sorted(name for name in directories if not os.path.islink(os.path.join(current, name)))
+            files = sorted(files)
+            relative = os.path.relpath(current, source)
+            prefix = archive_name if relative == '.' else archive_name + '/' + relative.replace(os.sep, '/')
+            if not directories and not files:
+                archive.writestr(prefix.rstrip('/') + '/', b'')
+            for name in files:
+                source_file = os.path.join(current, name)
+                info = os.lstat(source_file)
+                if stat.S_ISREG(info.st_mode):
+                    archive.write(source_file, prefix + '/' + name)
+    else:
+        info = os.lstat(source)
+        if not stat.S_ISREG(info.st_mode):
+            raise RuntimeError('不支持下载符号链接或特殊文件')
+        archive.write(source, archive_name)
+
+used = set()
+with zipfile.ZipFile(sys.stdout.buffer, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+    for source in sources:
+        if not inside(source) or source == root or not os.path.lexists(source):
+            raise RuntimeError('下载路径无效')
+        name = os.path.basename(source.rstrip(os.sep))
+        original = name
+        index = 1
+        while name in used:
+            name = f'{original} ({index})'
+            index += 1
+        used.add(name)
+        add_tree(archive, source, name)
+`
+
 const archiveZipScript = `import os, shutil, stat, sys, zipfile
 
 operation = sys.argv[1]
 destination = os.path.realpath(sys.argv[2])
-sources = [os.path.realpath(value) for value in sys.argv[3:]]
+conflict_policy = sys.argv[3]
+sources = [os.path.realpath(value) for value in sys.argv[4:]]
 root = os.path.realpath('/data')
 
 def inside(base, candidate):
@@ -725,9 +844,33 @@ for source in sources:
     if not inside(root, source) or source == root or not os.path.lexists(source):
         raise RuntimeError('源文件路径无效')
 
+def remove_path(target):
+    if os.path.isdir(target) and not os.path.islink(target):
+        shutil.rmtree(target)
+    else:
+        os.unlink(target)
+
+def unique_path(target):
+    parent = os.path.dirname(target)
+    name = os.path.basename(target)
+    stem, extension = os.path.splitext(name)
+    index = 1
+    while True:
+        candidate = os.path.join(parent, f'{stem} ({index}){extension}')
+        if not os.path.lexists(candidate):
+            return candidate
+        index += 1
+
 if operation == 'compress':
     if os.path.lexists(destination):
-        raise RuntimeError('目标压缩包已存在，请换一个名称')
+        if conflict_policy == 'overwrite':
+            remove_path(destination)
+        elif conflict_policy == 'rename':
+            destination = unique_path(destination)
+        elif conflict_policy == 'skip':
+            raise SystemExit(0)
+        else:
+            raise RuntimeError('目标压缩包已存在，请选择覆盖、自动改名或跳过')
     if any(destination == source or inside(source, destination) for source in sources if os.path.isdir(source)):
         raise RuntimeError('压缩包不能创建在待压缩文件夹内部')
     os.makedirs(os.path.dirname(destination), exist_ok=True)
@@ -771,9 +914,30 @@ elif operation == 'extract':
             if stat.S_ISLNK(mode):
                 raise RuntimeError('压缩包包含不安全符号链接')
             if entry.is_dir() or name.endswith('/'):
+                if os.path.lexists(target):
+                    if os.path.islink(target):
+                        raise RuntimeError('解压目标包含不安全符号链接')
+                    if not os.path.isdir(target):
+                        if conflict_policy == 'overwrite':
+                            remove_path(target)
+                        elif conflict_policy == 'rename':
+                            target = unique_path(target)
+                        elif conflict_policy == 'skip':
+                            continue
+                        else:
+                            raise RuntimeError('解压目标存在同名文件')
                 os.makedirs(target, exist_ok=True)
                 continue
             os.makedirs(os.path.dirname(target), exist_ok=True)
+            if os.path.lexists(target):
+                if conflict_policy == 'overwrite':
+                    remove_path(target)
+                elif conflict_policy == 'rename':
+                    target = unique_path(target)
+                elif conflict_policy == 'skip':
+                    continue
+                else:
+                    raise RuntimeError('解压目标存在同名文件')
             with archive.open(entry, 'r') as source, open(target, 'wb') as output:
                 shutil.copyfileobj(source, output)
 else:
@@ -790,6 +954,7 @@ const archiveExternalExtractScript = `import os, shutil, stat, subprocess, sys, 
 tool = sys.argv[1]
 archive = os.path.realpath(sys.argv[2])
 destination = os.path.realpath(sys.argv[3])
+conflict_policy = sys.argv[4]
 if not os.path.isfile(archive):
     raise RuntimeError('压缩包不存在')
 if not os.path.isdir(destination):
@@ -824,6 +989,23 @@ try:
             elif not stat.S_ISREG(info.st_mode):
                 raise RuntimeError('压缩包包含不支持的特殊文件')
 
+    def remove_path(target):
+        if os.path.isdir(target) and not os.path.islink(target):
+            shutil.rmtree(target)
+        else:
+            os.unlink(target)
+
+    def unique_path(target):
+        parent = os.path.dirname(target)
+        name = os.path.basename(target)
+        stem, extension = os.path.splitext(name)
+        index = 1
+        while True:
+            candidate = os.path.join(parent, f'{stem} ({index}){extension}')
+            if not os.path.lexists(candidate):
+                return candidate
+            index += 1
+
     def merge_tree(source, target):
         for entry in os.scandir(source):
             destination_path = os.path.join(target, entry.name)
@@ -833,13 +1015,38 @@ try:
             if stat.S_ISDIR(info.st_mode):
                 if os.path.lexists(destination_path):
                     if not os.path.isdir(destination_path) or os.path.islink(destination_path):
-                        raise RuntimeError('解压目标存在同名非目录')
+                        if conflict_policy == 'overwrite':
+                            remove_path(destination_path)
+                        elif conflict_policy == 'rename':
+                            destination_path = unique_path(destination_path)
+                        elif conflict_policy == 'skip':
+                            continue
+                        else:
+                            raise RuntimeError('解压目标存在同名非目录')
+                    elif conflict_policy == 'skip':
+                        continue
                 else:
                     os.mkdir(destination_path, 0o755)
                 merge_tree(entry.path, destination_path)
             elif stat.S_ISREG(info.st_mode):
                 if os.path.lexists(destination_path) and os.path.isdir(destination_path):
-                    raise RuntimeError('解压目标存在同名目录')
+                    if conflict_policy == 'overwrite':
+                        remove_path(destination_path)
+                    elif conflict_policy == 'rename':
+                        destination_path = unique_path(destination_path)
+                    elif conflict_policy == 'skip':
+                        continue
+                    else:
+                        raise RuntimeError('解压目标存在同名目录')
+                elif os.path.lexists(destination_path):
+                    if conflict_policy == 'overwrite':
+                        remove_path(destination_path)
+                    elif conflict_policy == 'rename':
+                        destination_path = unique_path(destination_path)
+                    elif conflict_policy == 'skip':
+                        continue
+                    else:
+                        raise RuntimeError('解压目标存在同名文件')
                 fd = os.open(destination_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
                 try:
                     with os.fdopen(fd, 'wb', closefd=True) as output, open(entry.path, 'rb') as source:
@@ -857,6 +1064,44 @@ try:
     merge_tree(temporary, destination)
 finally:
     shutil.rmtree(temporary, ignore_errors=True)
+`
+
+const prepareArchiveDestinationScript = `import os, shutil, sys
+
+destination = os.path.realpath(sys.argv[1])
+policy = sys.argv[2]
+root = os.path.realpath('/data')
+if os.path.commonpath((root, destination)) != root or destination == root:
+    raise RuntimeError('目标路径超出 /data 存储范围')
+if policy not in ('error', 'overwrite', 'rename', 'skip'):
+    raise RuntimeError('同名冲突策略无效')
+
+def remove_path(target):
+    if os.path.isdir(target) and not os.path.islink(target):
+        shutil.rmtree(target)
+    else:
+        os.unlink(target)
+
+if os.path.lexists(destination):
+    if policy == 'overwrite':
+        remove_path(destination)
+    elif policy == 'rename':
+        parent = os.path.dirname(destination)
+        name = os.path.basename(destination)
+        stem, extension = os.path.splitext(name)
+        index = 1
+        while True:
+            candidate = os.path.join(parent, f'{stem} ({index}){extension}')
+            if not os.path.lexists(candidate):
+                destination = candidate
+                break
+            index += 1
+    elif policy == 'skip':
+        print('SKIP')
+        raise SystemExit(0)
+    else:
+        raise RuntimeError('目标压缩包已存在，请选择覆盖、自动改名或跳过')
+print(destination)
 `
 
 const maxArchiveListingBytes = 8 << 20
@@ -981,6 +1226,10 @@ func validateExternalArchive(ctx context.Context, instanceName, tool, archivePat
 // ZIP is built in with Python's standard library; 7z and RAR use native VM
 // tools when available and return an actionable error when they are absent.
 func ArchivePathsContext(ctx context.Context, instanceName, operation, format, destination string, sourcePaths []string) error {
+	return ArchivePathsWithPolicyContext(ctx, instanceName, operation, format, destination, sourcePaths, "error")
+}
+
+func ArchivePathsWithPolicyContext(ctx context.Context, instanceName, operation, format, destination string, sourcePaths []string, conflictPolicy string) error {
 	if instanceName == "" {
 		instanceName = "macnas"
 	}
@@ -989,8 +1238,11 @@ func ArchivePathsContext(ctx context.Context, instanceName, operation, format, d
 	if operation != "compress" && operation != "extract" {
 		return fmt.Errorf("不支持的压缩操作")
 	}
-	if format != "zip" && format != "7z" && format != "rar" {
-		return fmt.Errorf("不支持的压缩格式: %s", format)
+	if conflictPolicy != "error" && conflictPolicy != "overwrite" && conflictPolicy != "rename" && conflictPolicy != "skip" {
+		return fmt.Errorf("同名冲突策略无效")
+	}
+	if format != "zip" {
+		return fmt.Errorf("目前仅支持 ZIP 压缩格式")
 	}
 	if len(sourcePaths) == 0 || len(sourcePaths) > 100 {
 		return fmt.Errorf("源文件数量必须在 1 到 100 个之间")
@@ -1016,7 +1268,7 @@ func ArchivePathsContext(ctx context.Context, instanceName, operation, format, d
 	}
 
 	if format == "zip" {
-		args := []string{"python3", "-c", archiveZipScript, operation, resolvedDestination}
+		args := []string{"python3", "-c", archiveZipScript, operation, resolvedDestination, conflictPolicy}
 		args = append(args, resolvedSources...)
 		cmd := privilegedCommand(ctx, instanceName, args...)
 		output, runErr := cmd.CombinedOutput()
@@ -1034,20 +1286,61 @@ func ArchivePathsContext(ctx context.Context, instanceName, operation, format, d
 		if err := validateExternalArchive(ctx, instanceName, tool, resolvedSources[0]); err != nil {
 			return fmt.Errorf("%s 解压前安全检查失败: %w", strings.ToUpper(format), err)
 		}
-		cmd := privilegedCommand(ctx, instanceName, "python3", "-c", archiveExternalExtractScript, tool, resolvedSources[0], resolvedDestination)
+		cmd := privilegedCommand(ctx, instanceName, "python3", "-c", archiveExternalExtractScript, tool, resolvedSources[0], resolvedDestination, conflictPolicy)
 		output, runErr := cmd.CombinedOutput()
 		if runErr != nil {
 			return fmt.Errorf("%s 解压失败: %s (%w)", strings.ToUpper(format), strings.TrimSpace(string(output)), runErr)
 		}
 		return nil
 	}
-	args := archiveToolArgs(tool, operation, format, resolvedDestination, resolvedSources)
+	preparedDestination, skipped, prepareErr := prepareExternalArchiveDestination(ctx, instanceName, resolvedDestination, conflictPolicy)
+	if prepareErr != nil {
+		return prepareErr
+	}
+	if skipped {
+		return nil
+	}
+	args := archiveToolArgs(tool, operation, format, preparedDestination, resolvedSources)
 	cmd := privilegedCommand(ctx, instanceName, args...)
 	output, runErr := cmd.CombinedOutput()
 	if runErr != nil {
 		return fmt.Errorf("%s %s失败: %s (%w)", strings.ToUpper(format), archiveOperationLabel(operation), strings.TrimSpace(string(output)), runErr)
 	}
 	return nil
+}
+
+func prepareExternalArchiveDestination(ctx context.Context, instanceName, destination, conflictPolicy string) (string, bool, error) {
+	cmd := privilegedCommand(ctx, instanceName, "python3", "-c", prepareArchiveDestinationScript, destination, conflictPolicy)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", false, fmt.Errorf("准备压缩包目标失败: %s (%w)", strings.TrimSpace(string(output)), err)
+	}
+	resolved := strings.TrimSpace(string(output))
+	if resolved == "SKIP" {
+		return "", true, nil
+	}
+	if resolved == "" {
+		return "", false, fmt.Errorf("准备压缩包目标失败: 未返回目标路径")
+	}
+	return resolved, false, nil
+}
+
+// ArchiveCapabilities reports which optional VM-side tools are available.
+func ArchiveCapabilitiesContext(ctx context.Context, instanceName string) map[string]bool {
+	if instanceName == "" {
+		instanceName = "macnas"
+	}
+	capabilities := map[string]bool{"zip": true, "sevenZip": false, "rarExtract": false, "rarCompress": false}
+	if _, err := findArchiveTool(ctx, instanceName, "compress", "7z"); err == nil {
+		capabilities["sevenZip"] = true
+	}
+	if _, err := findArchiveTool(ctx, instanceName, "extract", "rar"); err == nil {
+		capabilities["rarExtract"] = true
+	}
+	if _, err := findArchiveTool(ctx, instanceName, "compress", "rar"); err == nil {
+		capabilities["rarCompress"] = true
+	}
+	return capabilities
 }
 
 func archiveOperationLabel(operation string) string {
@@ -1249,10 +1542,14 @@ func RenamePathContext(ctx context.Context, instanceName, oldPath, newPath strin
 
 // CopyPaths copies multiple files or directories to destination directory
 func CopyPaths(instanceName string, srcPaths []string, destDir string) error {
-	return CopyPathsContext(context.Background(), instanceName, srcPaths, destDir)
+	return CopyPathsWithPolicyContext(context.Background(), instanceName, srcPaths, destDir, "error")
 }
 
 func CopyPathsContext(ctx context.Context, instanceName string, srcPaths []string, destDir string) error {
+	return CopyPathsWithPolicyContext(ctx, instanceName, srcPaths, destDir, "error")
+}
+
+func CopyPathsWithPolicyContext(ctx context.Context, instanceName string, srcPaths []string, destDir, conflictPolicy string) error {
 	if instanceName == "" {
 		instanceName = "macnas"
 	}
@@ -1269,7 +1566,7 @@ func CopyPathsContext(ctx context.Context, instanceName string, srcPaths []strin
 		if path.Clean(src) == "/data" {
 			return fmt.Errorf("禁止复制存储根目录")
 		}
-		err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "copy", "source": src, "destination": destDir}, nil)
+		err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "copy", "source": src, "destination": destDir, "conflictPolicy": conflictPolicy}, nil)
 		if err != nil {
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "Read-only file system") {
@@ -1283,10 +1580,14 @@ func CopyPathsContext(ctx context.Context, instanceName string, srcPaths []strin
 
 // MovePaths moves multiple files or directories to destination directory
 func MovePaths(instanceName string, srcPaths []string, destDir string) error {
-	return MovePathsContext(context.Background(), instanceName, srcPaths, destDir)
+	return MovePathsWithPolicyContext(context.Background(), instanceName, srcPaths, destDir, "error")
 }
 
 func MovePathsContext(ctx context.Context, instanceName string, srcPaths []string, destDir string) error {
+	return MovePathsWithPolicyContext(ctx, instanceName, srcPaths, destDir, "error")
+}
+
+func MovePathsWithPolicyContext(ctx context.Context, instanceName string, srcPaths []string, destDir, conflictPolicy string) error {
 	if instanceName == "" {
 		instanceName = "macnas"
 	}
@@ -1303,7 +1604,7 @@ func MovePathsContext(ctx context.Context, instanceName string, srcPaths []strin
 		if isSystemProtectedDir(src) {
 			return fmt.Errorf("禁止移动系统核心目录: %s", src)
 		}
-		err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "move", "source": src, "destination": destDir}, nil)
+		err = runSafeMutation(ctx, instanceName, map[string]string{"operation": "move", "source": src, "destination": destDir, "conflictPolicy": conflictPolicy}, nil)
 		if err != nil {
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "Read-only file system") {

@@ -3,12 +3,19 @@ package cloud
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,9 +23,10 @@ import (
 )
 
 const (
-	quarkDriveBaseURL = "https://drive-pc.quark.cn"
-	quarkUserAgent    = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36"
-	maxJSONResponse   = 32 << 20
+	quarkDriveBaseURL     = "https://drive-pc.quark.cn"
+	quarkUserAgent        = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36"
+	quarkDesktopUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.56 Chrome/100.0.4896.160 Electron/18.3.5.12-a038f7b798 Safari/537.36 Channel/pckk_other_ch"
+	maxJSONResponse       = 32 << 20
 )
 
 type File struct {
@@ -34,6 +42,13 @@ type DownloadStream struct {
 	Name string
 	Size int64
 }
+
+type UploadProgress func(done, total int64)
+
+const (
+	quarkUploadUserAgent = "aliyun-sdk-js/6.6.1"
+	quarkUploadPartSize  = int64(4 << 20)
+)
 
 type Client struct {
 	httpClient *http.Client
@@ -136,16 +151,38 @@ func (c *Client) Rename(ctx context.Context, fid, name string) error {
 }
 
 func (c *Client) Delete(ctx context.Context, fids []string) error {
-	if len(fids) == 0 || len(fids) > 100 {
-		return fmt.Errorf("一次最多删除 100 个云端项目")
-	}
-	for _, fid := range fids {
-		if err := validateFid(fid); err != nil {
-			return err
-		}
+	if err := validateFids(fids, "删除"); err != nil {
+		return err
 	}
 	_, err := c.requestJSON(ctx, http.MethodPost, "/1/clouddrive/file/delete", nil, map[string]any{
 		"action_type":  2,
+		"filelist":     fids,
+		"exclude_fids": []string{},
+	})
+	return err
+}
+
+func (c *Client) Move(ctx context.Context, fids []string, targetFid string) error {
+	return c.fileTransfer(ctx, "/1/clouddrive/file/move", fids, targetFid)
+}
+
+func (c *Client) Copy(ctx context.Context, fids []string, targetFid string) error {
+	return c.fileTransfer(ctx, "/1/clouddrive/file/copy", fids, targetFid)
+}
+
+func (c *Client) fileTransfer(ctx context.Context, endpoint string, fids []string, targetFid string) error {
+	if err := validateFids(fids, "操作"); err != nil {
+		return err
+	}
+	if targetFid == "" {
+		targetFid = "0"
+	}
+	if err := validateFid(targetFid); err != nil {
+		return err
+	}
+	_, err := c.requestJSON(ctx, http.MethodPost, endpoint, nil, map[string]any{
+		"action_type":  1,
+		"to_pdir_fid":  targetFid,
 		"filelist":     fids,
 		"exclude_fids": []string{},
 	})
@@ -159,7 +196,11 @@ func (c *Client) Download(ctx context.Context, fid string) (*DownloadStream, err
 	if err := validateFid(fid); err != nil {
 		return nil, err
 	}
-	raw, err := c.requestJSON(ctx, http.MethodPost, "/1/clouddrive/file/download", nil, map[string]any{"fids": []string{fid}})
+	query := url.Values{}
+	// Quark validates fids in both places. Sending only the JSON body results
+	// in HTTP 400 on the current drive-pc endpoint.
+	query.Set("fids", fid)
+	raw, err := c.requestJSONWithUserAgent(ctx, http.MethodPost, "/1/clouddrive/file/download", query, map[string]any{"fids": []string{fid}}, quarkDesktopUserAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +240,359 @@ func (c *Client) Download(ctx context.Context, fid string) (*DownloadStream, err
 		size = intValue(entry, "size", "file_size", "size_bytes")
 	}
 	return &DownloadStream{Body: response.Body, Name: stringValue(entry, "file_name", "name"), Size: size}, nil
+}
+
+// UploadFile uploads one local file to a Quark folder. The caller owns the
+// local file and may use progress to persist a transfer status in its job UI.
+func (c *Client) UploadFile(ctx context.Context, localPath, parentFid, fileName string, progress UploadProgress) error {
+	if strings.TrimSpace(parentFid) == "" {
+		parentFid = "0"
+	}
+	if err := validateFid(parentFid); err != nil {
+		return err
+	}
+	if err := validateName(fileName, "文件名称"); err != nil {
+		return err
+	}
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return fmt.Errorf("读取待上传文件失败: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("只能上传普通文件")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	md5Sum, sha1Sum, err := fileHashes(localPath)
+	if err != nil {
+		return err
+	}
+	contentType := mime.TypeByExtension(filepath.Ext(fileName))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	now := time.Now().UnixMilli()
+	preRaw, err := c.requestJSON(ctx, http.MethodPost, "/1/clouddrive/file/upload/pre", nil, map[string]any{
+		"ccp_hash_update": true,
+		"parallel_upload": true,
+		"dir_name":        "",
+		"file_name":       fileName,
+		"format_type":     contentType,
+		"l_created_at":    now,
+		"l_updated_at":    now,
+		"pdir_fid":        parentFid,
+		"size":            info.Size(),
+	})
+	if err != nil {
+		return fmt.Errorf("上传预处理失败: %w", err)
+	}
+	pre, ok := firstDataObject(preRaw)
+	if !ok {
+		return fmt.Errorf("夸克上传预处理未返回任务信息")
+	}
+	taskID := stringValue(pre, "task_id", "taskId")
+	fileID := stringValue(pre, "fid", "file_id", "fileId")
+	if taskID == "" {
+		return fmt.Errorf("夸克上传预处理缺少任务标识")
+	}
+	hashRaw, err := c.requestJSON(ctx, http.MethodPost, "/1/clouddrive/file/update/hash", nil, map[string]any{
+		"task_id": taskID,
+		"md5":     md5Sum,
+		"sha1":    sha1Sum,
+	})
+	if err != nil {
+		return fmt.Errorf("上传哈希校验失败: %w", err)
+	}
+	if responseFinish(hashRaw) {
+		if err := c.waitForUploadedFile(ctx, parentFid, fileID, fileName, info.Size()); err != nil {
+			return err
+		}
+		if progress != nil {
+			progress(info.Size(), info.Size())
+		}
+		return nil
+	}
+
+	objKey := stringValue(pre, "obj_key", "objKey")
+	uploadID := stringValue(pre, "upload_id", "uploadId")
+	authInfo := stringValue(pre, "auth_info", "authInfo")
+	bucket := stringValue(pre, "bucket")
+	if objKey == "" || uploadID == "" || authInfo == "" {
+		return fmt.Errorf("夸克上传预处理返回信息不完整")
+	}
+	if bucket == "" {
+		bucket = "ul-zb"
+	}
+	metadata, _ := asMap(pre["metadata"])
+	partSize := intValue(metadata, "part_size", "partSize")
+	if partSize < 1<<20 || partSize > 64<<20 {
+		partSize = quarkUploadPartSize
+	}
+	uploadBase, err := normalizeUploadBase(stringValue(pre, "upload_url", "uploadUrl"), bucket)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("打开待上传文件失败: %w", err)
+	}
+	defer file.Close()
+	parts, err := c.uploadParts(ctx, file, info.Size(), contentType, uploadBase, bucket, objKey, uploadID, authInfo, taskID, partSize, progress)
+	if err != nil {
+		return err
+	}
+	if err := c.completeUpload(ctx, contentType, uploadBase, bucket, objKey, uploadID, authInfo, taskID, pre["callback"], parts); err != nil {
+		return err
+	}
+	_, err = c.requestJSON(ctx, http.MethodPost, "/1/clouddrive/file/upload/finish", nil, map[string]any{
+		"task_id": taskID,
+		"obj_key": objKey,
+	})
+	if err != nil {
+		return fmt.Errorf("确认夸克上传失败: %w", err)
+	}
+	if err := c.waitForUploadedFile(ctx, parentFid, fileID, fileName, info.Size()); err != nil {
+		return err
+	}
+	if progress != nil {
+		progress(info.Size(), info.Size())
+	}
+	return nil
+}
+
+func (c *Client) waitForUploadedFile(ctx context.Context, parentFid, expectedFid, fileName string, size int64) error {
+	for attempt := 0; attempt < 12; attempt++ {
+		items, err := c.ListAll(ctx, parentFid)
+		if err == nil {
+			for _, item := range items {
+				if item.IsDir {
+					continue
+				}
+				if (expectedFid != "" && item.Fid == expectedFid) || (expectedFid == "" && item.Name == fileName && item.Size == size) {
+					return nil
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("夸克已接收上传数据，但文件尚未出现在目标目录，请稍后刷新重试")
+}
+
+type uploadedPart struct {
+	Number int
+	ETag   string
+}
+
+func (c *Client) uploadParts(ctx context.Context, file *os.File, total int64, contentType, uploadBase, bucket, objKey, uploadID, authInfo, taskID string, partSize int64, progress UploadProgress) ([]uploadedPart, error) {
+	partCount := int64(1)
+	if total > 0 {
+		partCount = (total + partSize - 1) / partSize
+	}
+	parts := make([]uploadedPart, 0, partCount)
+	var done int64
+	for number := int64(1); number <= partCount; number++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		length := partSize
+		if remaining := total - done; remaining >= 0 && remaining < length {
+			length = remaining
+		}
+		data := make([]byte, length)
+		if length > 0 {
+			if _, err := io.ReadFull(file, data); err != nil {
+				return nil, fmt.Errorf("读取上传分片失败: %w", err)
+			}
+		}
+		date := time.Now().UTC().Format(http.TimeFormat)
+		resource := fmt.Sprintf("/%s/%s?partNumber=%d&uploadId=%s", bucket, objKey, number, url.QueryEscape(uploadID))
+		auth, err := c.uploadAuth(ctx, authInfo, taskID, fmt.Sprintf("PUT\n\n%s\n%s\nx-oss-date:%s\nx-oss-user-agent:%s\n%s", contentType, date, date, quarkUploadUserAgent, resource))
+		if err != nil {
+			return nil, fmt.Errorf("获取上传分片授权失败: %w", err)
+		}
+		requestURL, err := objectURL(uploadBase, objKey, map[string]string{"partNumber": strconv.FormatInt(number, 10), "uploadId": uploadID})
+		if err != nil {
+			return nil, err
+		}
+		response, err := c.ossRequest(ctx, http.MethodPut, requestURL, auth, contentType, date, "", "", bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			return nil, fmt.Errorf("上传第 %d 个分片失败: %w", number, err)
+		}
+		etag := strings.Trim(response.Header.Get("ETag"), "\"")
+		response.Body.Close()
+		if etag == "" {
+			return nil, fmt.Errorf("上传第 %d 个分片未返回 ETag", number)
+		}
+		done += int64(len(data))
+		parts = append(parts, uploadedPart{Number: int(number), ETag: etag})
+		if progress != nil {
+			progress(done, total)
+		}
+	}
+	return parts, nil
+}
+
+func (c *Client) completeUpload(ctx context.Context, contentType, uploadBase, bucket, objKey, uploadID, authInfo, taskID string, callback any, parts []uploadedPart) error {
+	type part struct {
+		PartNumber int    `xml:"PartNumber"`
+		ETag       string `xml:"ETag"`
+	}
+	type complete struct {
+		XMLName xml.Name `xml:"CompleteMultipartUpload"`
+		Parts   []part   `xml:"Part"`
+	}
+	payload := complete{Parts: make([]part, 0, len(parts))}
+	for _, item := range parts {
+		payload.Parts = append(payload.Parts, part{PartNumber: item.Number, ETag: item.ETag})
+	}
+	body, err := xml.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("构造上传完成请求失败: %w", err)
+	}
+	contentMD5 := md5.Sum(body)
+	contentMD5Base64 := base64.StdEncoding.EncodeToString(contentMD5[:])
+	callbackBytes, err := json.Marshal(callback)
+	if err != nil {
+		return fmt.Errorf("构造上传回调失败: %w", err)
+	}
+	callbackBase64 := base64.StdEncoding.EncodeToString(callbackBytes)
+	date := time.Now().UTC().Format(http.TimeFormat)
+	resource := fmt.Sprintf("/%s/%s?uploadId=%s", bucket, objKey, url.QueryEscape(uploadID))
+	auth, err := c.uploadAuth(ctx, authInfo, taskID, fmt.Sprintf("POST\n%s\napplication/xml\n%s\nx-oss-callback:%s\nx-oss-date:%s\nx-oss-user-agent:%s\n%s", contentMD5Base64, date, callbackBase64, date, quarkUploadUserAgent, resource))
+	if err != nil {
+		return fmt.Errorf("获取上传合并授权失败: %w", err)
+	}
+	requestURL, err := objectURL(uploadBase, objKey, map[string]string{"uploadId": uploadID})
+	if err != nil {
+		return err
+	}
+	response, err := c.ossRequest(ctx, http.MethodPost, requestURL, auth, "application/xml", date, callbackBase64, contentMD5Base64, bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		return fmt.Errorf("合并上传分片失败: %w", err)
+	}
+	response.Body.Close()
+	return nil
+}
+
+func (c *Client) uploadAuth(ctx context.Context, authInfo, taskID, authMeta string) (string, error) {
+	raw, err := c.requestJSON(ctx, http.MethodPost, "/1/clouddrive/file/upload/auth", nil, map[string]any{
+		"auth_info": authInfo,
+		"auth_meta": authMeta,
+		"task_id":   taskID,
+	})
+	if err != nil {
+		return "", err
+	}
+	data, ok := firstDataObject(raw)
+	if !ok {
+		return "", fmt.Errorf("授权响应格式无效")
+	}
+	key := stringValue(data, "auth_key", "authKey", "authorization")
+	if key == "" {
+		return "", fmt.Errorf("授权响应缺少签名")
+	}
+	return key, nil
+}
+
+func (c *Client) ossRequest(ctx context.Context, method, rawURL, authorization, contentType, date, callback, contentMD5 string, body io.Reader, contentLength int64) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, method, rawURL, body)
+	if err != nil {
+		return nil, fmt.Errorf("创建对象存储请求失败: %w", err)
+	}
+	request.ContentLength = contentLength
+	request.Header.Set("Authorization", authorization)
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Referer", "https://pan.quark.cn/")
+	request.Header.Set("User-Agent", quarkUserAgent)
+	request.Header.Set("x-oss-date", date)
+	request.Header.Set("x-oss-user-agent", quarkUploadUserAgent)
+	if contentMD5 != "" {
+		request.Header.Set("Content-MD5", contentMD5)
+	}
+	if callback != "" {
+		request.Header.Set("x-oss-callback", callback)
+	}
+	client := *c.httpClient
+	client.Timeout = 0
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		defer response.Body.Close()
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+		return nil, fmt.Errorf("对象存储返回 HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(message)))
+	}
+	return response, nil
+}
+
+func fileHashes(localPath string) (string, string, error) {
+	file, err := os.Open(localPath)
+	if err != nil {
+		return "", "", fmt.Errorf("打开待上传文件失败: %w", err)
+	}
+	defer file.Close()
+	md5Hash, sha1Hash := md5.New(), sha1.New()
+	if _, err := io.Copy(io.MultiWriter(md5Hash, sha1Hash), file); err != nil {
+		return "", "", fmt.Errorf("计算上传文件哈希失败: %w", err)
+	}
+	return fmt.Sprintf("%x", md5Hash.Sum(nil)), fmt.Sprintf("%x", sha1Hash.Sum(nil)), nil
+}
+
+func objectURL(baseURL, objKey string, query map[string]string) (string, error) {
+	parsed, err := url.Parse(strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(objKey, "/"))
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return "", fmt.Errorf("夸克对象存储地址无效")
+	}
+	values := parsed.Query()
+	for key, value := range query {
+		values.Set(key, value)
+	}
+	parsed.RawQuery = values.Encode()
+	return parsed.String(), nil
+}
+
+func normalizeUploadBase(raw, bucket string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "https://pds.quark.cn"
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" {
+		return "", fmt.Errorf("夸克上传地址无效")
+	}
+	if parsed.Scheme == "http" {
+		parsed.Scheme = "https"
+	}
+	if parsed.Scheme != "https" {
+		return "", fmt.Errorf("夸克上传地址无效")
+	}
+	host := parsed.Hostname()
+	if !strings.HasSuffix(strings.ToLower(host), ".quark.cn") && !strings.EqualFold(host, "quark.cn") {
+		return "", fmt.Errorf("夸克上传地址无效")
+	}
+	if bucket != "" && !strings.HasPrefix(strings.ToLower(host), strings.ToLower(bucket)+".") {
+		host = bucket + "." + host
+	}
+	parsed.Host = host
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func validateHTTPSURL(raw, label string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("%s无效", label)
+	}
+	return nil
 }
 
 func (c *Client) listPage(ctx context.Context, parentFid string, page, size int) ([]File, bool, error) {
@@ -243,6 +637,10 @@ func (c *Client) listPage(ctx context.Context, parentFid string, page, size int)
 }
 
 func (c *Client) requestJSON(ctx context.Context, method, endpoint string, query url.Values, payload any) (any, error) {
+	return c.requestJSONWithUserAgent(ctx, method, endpoint, query, payload, quarkUserAgent)
+}
+
+func (c *Client) requestJSONWithUserAgent(ctx context.Context, method, endpoint string, query url.Values, payload any, userAgent string) (any, error) {
 	requestURL, err := url.Parse(c.baseURL + endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("构造夸克请求失败")
@@ -275,7 +673,7 @@ func (c *Client) requestJSON(ctx context.Context, method, endpoint string, query
 	request.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 	request.Header.Set("Origin", "https://pan.quark.cn")
 	request.Header.Set("Referer", "https://pan.quark.cn/")
-	request.Header.Set("User-Agent", quarkUserAgent)
+	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Cookie", c.cookie)
 	if payload != nil {
 		request.Header.Set("Content-Type", "application/json")
@@ -293,12 +691,18 @@ func (c *Client) requestJSON(ctx context.Context, method, endpoint string, query
 	if len(data) > maxJSONResponse {
 		return nil, fmt.Errorf("夸克响应过大")
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("夸克服务返回 HTTP %d", response.StatusCode)
-	}
 	var decoded any
 	if err := json.Unmarshal(data, &decoded); err != nil {
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			return nil, fmt.Errorf("夸克服务返回 HTTP %d", response.StatusCode)
+		}
 		return nil, fmt.Errorf("解析夸克响应失败")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if message := responseError(decoded); message != "" {
+			return nil, fmt.Errorf("夸克接口返回错误: %s", message)
+		}
+		return nil, fmt.Errorf("夸克服务返回 HTTP %d", response.StatusCode)
 	}
 	if message := responseError(decoded); message != "" {
 		return nil, fmt.Errorf("夸克接口返回错误: %s", message)
@@ -310,6 +714,18 @@ func validateFid(fid string) error {
 	fid = strings.TrimSpace(fid)
 	if fid == "" || len(fid) > 256 || strings.IndexFunc(fid, unicode.IsControl) >= 0 || strings.ContainsAny(fid, "/\\") {
 		return fmt.Errorf("云端文件标识无效")
+	}
+	return nil
+}
+
+func validateFids(fids []string, operation string) error {
+	if len(fids) == 0 || len(fids) > 100 {
+		return fmt.Errorf("一次最多%s 100 个云端项目", operation)
+	}
+	for _, fid := range fids {
+		if err := validateFid(fid); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -457,6 +873,18 @@ func responseError(raw any) string {
 		}
 	}
 	return ""
+}
+
+func responseFinish(raw any) bool {
+	if object, ok := asMap(raw); ok {
+		if boolValue(object, "finish", "finished") {
+			return true
+		}
+		if data, ok := asMap(object["data"]); ok {
+			return boolValue(data, "finish", "finished")
+		}
+	}
+	return false
 }
 
 func extractTotal(raw any) int64 {

@@ -1,38 +1,39 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Archive, Check, FolderArchive, X } from 'lucide-react';
 import { FileItem } from '../../../types';
+import { ConflictPolicy } from './TransferDestinationModal';
 
 type ArchiveOperation = 'compress' | 'extract';
-type ArchiveFormat = 'zip' | 'rar' | '7z';
+type ArchiveFormat = 'zip';
 
 interface ArchiveModalProps {
   item: FileItem | null;
   currentPath: string;
   defaultOperation?: ArchiveOperation;
   onClose: () => void;
-  onConfirm: (operation: ArchiveOperation, format: ArchiveFormat, destination: string) => Promise<void>;
+  onConfirm: (operation: ArchiveOperation, format: ArchiveFormat, destination: string, conflictPolicy: ConflictPolicy) => Promise<void>;
 }
 
-const archiveBaseName = (name: string) => name.replace(/\.(zip|rar|7z)$/i, '');
+const archiveBaseName = (name: string) => name.replace(/\.zip$/i, '');
 
 export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, defaultOperation, onClose, onConfirm }) => {
   const initialExtension = item?.ext?.toLowerCase() || '';
-  const initialOperation = defaultOperation || (['zip', 'rar', '7z'].includes(initialExtension) ? 'extract' : 'compress');
+  const initialOperation = defaultOperation || (initialExtension === 'zip' ? 'extract' : 'compress');
   const [operation, setOperation] = useState<ArchiveOperation>(initialOperation);
-  const [format, setFormat] = useState<ArchiveFormat>('zip');
   const [destinationName, setDestinationName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [conflictPolicy, setConflictPolicy] = useState<ConflictPolicy>('rename');
 
   useEffect(() => {
     if (!item) return;
     const base = archiveBaseName(item.name);
-    setOperation(defaultOperation || (item.ext && ['zip', 'rar', '7z'].includes(item.ext.toLowerCase()) ? 'extract' : 'compress'));
-    setFormat(['zip', 'rar', '7z'].includes(item.ext.toLowerCase()) ? item.ext.toLowerCase() as ArchiveFormat : 'zip');
-    setDestinationName(item.ext && ['zip', 'rar', '7z'].includes(item.ext.toLowerCase())
+    setOperation(defaultOperation || (item.ext?.toLowerCase() === 'zip' ? 'extract' : 'compress'));
+    setDestinationName(item.ext?.toLowerCase() === 'zip'
       ? base
       : `${base}.zip`);
     setError(null);
+    setConflictPolicy('rename');
   }, [defaultOperation, item]);
 
   const destination = useMemo(() => {
@@ -52,7 +53,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
     setSubmitting(true);
     setError(null);
     try {
-      await onConfirm(operation, format, destination);
+      await onConfirm(operation, 'zip', destination, conflictPolicy);
     } catch (err: any) {
       setError(err.message || '操作失败');
     } finally {
@@ -81,7 +82,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1 dark:bg-slate-800">
             {(['compress', 'extract'] as ArchiveOperation[]).map((value) => (
-              <button key={value} type="button" onClick={() => { setOperation(value); setError(null); }} className={`rounded-xl px-3 py-2.5 text-xs font-bold transition ${operation === value ? 'bg-white text-violet-700 shadow-sm dark:bg-slate-700 dark:text-violet-300' : 'text-slate-500 dark:text-slate-400'}`}>
+              <button key={value} type="button" onClick={() => { setOperation(value); setDestinationName(value === 'compress' ? `${archiveBaseName(item.name)}.zip` : archiveBaseName(item.name)); setError(null); }} className={`rounded-xl px-3 py-2.5 text-xs font-bold transition ${operation === value ? 'bg-white text-violet-700 shadow-sm dark:bg-slate-700 dark:text-violet-300' : 'text-slate-500 dark:text-slate-400'}`}>
                 {value === 'compress' ? '创建压缩包' : '解压到文件夹'}
               </button>
             ))}
@@ -89,14 +90,10 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
 
           <div>
             <label className="mb-2 block text-xs font-bold text-slate-600 dark:text-slate-300">压缩格式</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['zip', '7z', 'rar'] as ArchiveFormat[]).map((value) => (
-                <button key={value} type="button" onClick={() => { setFormat(value); if (operation === 'compress' && value !== 'zip') setDestinationName(`${archiveBaseName(item.name)}.${value}`); }} className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-bold uppercase transition ${format === value ? 'border-violet-400 bg-violet-50 text-violet-700 dark:border-violet-500 dark:bg-violet-500/10 dark:text-violet-300' : 'border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400'}`}>
-                  {format === value && <Check className="h-3.5 w-3.5" />}{value}
-                </button>
-              ))}
+            <div className="flex items-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-3 py-2.5 text-xs font-bold uppercase text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-300">
+              <Check className="h-3.5 w-3.5" />ZIP
             </div>
-            {format !== 'zip' && <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-300">7z/RAR 需要虚拟机已安装对应命令行工具；ZIP 可直接使用。</p>}
+            <p className="mt-2 text-[11px] text-slate-400">使用系统内置 ZIP，无需额外安装压缩工具。</p>
           </div>
 
           <div>
@@ -104,6 +101,13 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
             <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 px-3 dark:border-slate-700 dark:bg-slate-950/60">
               <span className="shrink-0 text-xs text-slate-400">{currentPath}/</span>
               <input id="archive-destination" value={destinationName} onChange={(event) => setDestinationName(event.target.value)} className="min-w-0 flex-1 bg-transparent px-1 py-3 text-sm text-slate-900 outline-none dark:text-white" autoFocus />
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-bold text-slate-600 dark:text-slate-300">遇到同名项目时</p>
+            <div className="grid grid-cols-2 gap-2">
+              {([['rename', '保留两份'], ['overwrite', '覆盖'], ['skip', '跳过'], ['error', '停止']] as Array<[ConflictPolicy, string]>).map(([value, label]) => <button key={value} type="button" onClick={() => setConflictPolicy(value)} className={`rounded-xl border px-3 py-2 text-xs font-bold ${conflictPolicy === value ? 'border-violet-400 bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}>{conflictPolicy === value ? '✓ ' : ''}{label}</button>)}
             </div>
           </div>
 

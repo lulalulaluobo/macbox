@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Cloud, Folder, HardDrive, MoreHorizontal, Pencil, ShieldCheck, Star, Trash2, Upload, AlertTriangle, X } from 'lucide-react';
 import { CloudMount, DiskInfo, FileItem, LocalMount, TrashItem } from '../../types';
 import { api } from '../../api';
-import { ClipboardState, TextPreviewState, getFileType } from './filemanager/types';
+import { TextPreviewState, getFileType } from './filemanager/types';
 import { FileToolbar } from './filemanager/FileToolbar';
 import { FileGridView } from './filemanager/FileGridView';
 import { FileListView } from './filemanager/FileListView';
@@ -16,6 +16,7 @@ import type { DriveDetailInfo } from './filemanager/DriveDetailModal';
 import { CloudDriveView } from './filemanager/CloudDriveView';
 import { CloudMountModal } from './filemanager/CloudMountModal';
 import { ArchiveModal } from './filemanager/ArchiveModal';
+import { ConflictPolicy, TransferDestinationModal, TransferOperation } from './filemanager/TransferDestinationModal';
 
 interface FileManagerProps {
   initialPath?: string;
@@ -40,8 +41,8 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const [selectionMode, setSelectionMode] = useState(false);
   const [actionItem, setActionItem] = useState<FileItem | null>(null);
 
-  // Clipboard State (Copy / Cut)
-  const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
+  // Copy/move destination picker
+  const [transferRequest, setTransferRequest] = useState<{ operation: TransferOperation; paths: string[]; initialPath: string } | null>(null);
 
   // Favorites State (Stored in localStorage)
   const [favorites, setFavorites] = useState<string[]>(() => {
@@ -92,6 +93,12 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const [uploadProgress, setUploadProgress] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const fileListRef = useRef<HTMLDivElement>(null);
+  const [marquee, setMarquee] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
+  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const marqueeActiveRef = useRef(false);
+  const marqueeJustFinishedRef = useRef(false);
+  const draggedPathsRef = useRef<string[]>([]);
 
   // Preview Modals
   const [videoPreview, setVideoPreview] = useState<FileItem | null>(null);
@@ -272,10 +279,10 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
   };
 
-  const handleArchiveConfirm = async (operation: 'compress' | 'extract', format: 'zip' | 'rar' | '7z', destination: string) => {
+  const handleArchiveConfirm = async (operation: 'compress' | 'extract', format: 'zip', destination: string, conflictPolicy: ConflictPolicy) => {
     if (!archiveItem) return;
     const sourcePath = archiveItem.path;
-    const res = await api.archiveFiles([sourcePath], operation, format, destination);
+    const res = await api.archiveFiles([sourcePath], operation, format, destination, conflictPolicy);
     setArchiveItem(null);
     setAlertMsg({ type: 'success', text: res.message });
     loadFiles(currentPath);
@@ -346,14 +353,23 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
   };
 
-  // Clipboard (Copy / Cut / Paste)
-  const handleCopy = (paths: string[], e?: React.MouseEvent) => {
+  // Copy / move destination picker
+  const openTransfer = (operation: TransferOperation, paths: string[], initialPath = currentPath, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (paths.length === 0) return;
-    setClipboard({ action: 'copy', items: paths });
+    setTransferRequest({ operation, paths, initialPath });
+  };
+
+  const handleTransferConfirm = async (destination: string, conflictPolicy: ConflictPolicy) => {
+    if (!transferRequest) return;
+    const result = transferRequest.operation === 'copy'
+      ? await api.copyFiles(transferRequest.paths, destination, conflictPolicy)
+      : await api.moveFiles(transferRequest.paths, destination, conflictPolicy);
+    setTransferRequest(null);
     setSelectedPaths(new Set());
     setSelectionMode(false);
-    setAlertMsg({ type: 'success', text: `已复制 ${paths.length} 个项目到剪贴板，请前往目标文件夹点击粘贴` });
+    setAlertMsg({ type: 'success', text: result.message });
+    loadFiles(currentPath);
   };
 
   const handleCopyPath = async (path: string) => {
@@ -365,30 +381,15 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     }
   };
 
-  const handleCut = (paths: string[], e?: React.MouseEvent) => {
-    e?.stopPropagation();
+  const handleBatchDownload = () => {
+    const paths = Array.from(selectedPaths);
     if (paths.length === 0) return;
-    setClipboard({ action: 'cut', items: paths });
-    setSelectedPaths(new Set());
-    setSelectionMode(false);
-    setAlertMsg({ type: 'success', text: `已剪切 ${paths.length} 个项目到剪贴板，请前往目标文件夹点击粘贴` });
-  };
-
-  const handlePaste = async () => {
-    if (!clipboard || clipboard.items.length === 0) return;
-    try {
-      if (clipboard.action === 'copy') {
-        const res = await api.copyFiles(clipboard.items, currentPath);
-        setAlertMsg({ type: 'success', text: res.message });
-      } else {
-        const res = await api.moveFiles(clipboard.items, currentPath);
-        setAlertMsg({ type: 'success', text: res.message });
-      }
-      setClipboard(null);
-      loadFiles(currentPath);
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `粘贴失败: ${err.message}` });
-    }
+    const link = document.createElement('a');
+    link.href = api.getBatchDownloadUrl(paths);
+    link.download = 'MacNAS-批量下载.zip';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   };
 
   // Favorites
@@ -411,9 +412,21 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         parts.pop();
         return `/${parts.join('/')}` || '/';
       })));
-      const listings = await Promise.all(parentPaths.map((path) => api.listFiles(path).catch(() => ({ items: [] as FileItem[] }))));
-      const itemMap = new Map(listings.flatMap((listing) => listing.items || []).map((item) => [item.path, item]));
-      setFavoriteItems(favorites.map((path) => itemMap.get(path)).filter((item): item is FileItem => Boolean(item)));
+      const listings = await Promise.all(parentPaths.map(async (path) => {
+        try { return { ok: true, items: (await api.listFiles(path)).items || [] }; }
+        catch { return { ok: false, items: [] as FileItem[] }; }
+      }));
+      const itemMap = new Map(listings.flatMap((listing) => listing.items).map((item) => [item.path, item]));
+      if (listings.every((listing) => listing.ok)) {
+        const validPaths = favorites.filter((path) => itemMap.get(path)?.isDir === true);
+        if (validPaths.length !== favorites.length) {
+          setFavorites(validPaths);
+          try { localStorage.setItem('macnas_file_favorites', JSON.stringify(validPaths)); } catch {}
+        }
+        setFavoriteItems(validPaths.map((path) => itemMap.get(path)).filter((item): item is FileItem => Boolean(item)));
+        return;
+      }
+      setFavoriteItems(favorites.map((path) => itemMap.get(path)).filter((item): item is FileItem => Boolean(item && item.isDir)));
     } finally {
       setFavoritesLoading(false);
     }
@@ -430,6 +443,10 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   useEffect(() => {
     if (viewingFavorites) loadFavoriteItems();
   }, [favorites]);
+
+  useEffect(() => {
+    if (favorites.length > 0) loadFavoriteItems();
+  }, []);
 
   // Trash Handlers
   const loadTrash = async () => {
@@ -590,19 +607,91 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   // Drag & Drop
   const handleDragOver = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
     e.preventDefault();
     setIsDragging(true);
   };
   const handleDragLeave = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
     e.preventDefault();
     setIsDragging(false);
   };
   const handleDrop = async (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       await doUploadFiles(Array.from(e.dataTransfer.files));
     }
+  };
+
+  const handleLongPress = (item: FileItem) => {
+    setSelectionMode(true);
+    setSelectedPaths((current) => new Set(current).add(item.path));
+  };
+
+  const handleItemDragStart = (item: FileItem, event: React.DragEvent<HTMLDivElement>) => {
+    const paths = selectedPaths.has(item.path) ? Array.from(selectedPaths) : [item.path];
+    draggedPathsRef.current = paths;
+    setSelectionMode(true);
+    setSelectedPaths(new Set(paths));
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', JSON.stringify(paths));
+  };
+
+  const handleItemDragOver = (item: FileItem, event: React.DragEvent<HTMLDivElement>) => {
+    if (!item.isDir || draggedPathsRef.current.length === 0) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDropTargetPath(item.path);
+  };
+
+  const handleItemDrop = (item: FileItem, event: React.DragEvent<HTMLDivElement>) => {
+    if (!item.isDir || draggedPathsRef.current.length === 0) return;
+    event.preventDefault();
+    const paths = draggedPathsRef.current;
+    draggedPathsRef.current = [];
+    setDropTargetPath(null);
+    openTransfer('move', paths, item.path);
+  };
+
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
+
+  const finishMarquee = () => {
+    if (!marqueeActiveRef.current || !fileListRef.current || !marquee) return;
+    const left = Math.min(marquee.startX, marquee.currentX);
+    const right = Math.max(marquee.startX, marquee.currentX);
+    const top = Math.min(marquee.startY, marquee.currentY);
+    const bottom = Math.max(marquee.startY, marquee.currentY);
+    const selected = Array.from(fileListRef.current.querySelectorAll<HTMLElement>('[data-file-item]')).filter((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top;
+    }).map((element) => element.dataset.filePath).filter((path): path is string => Boolean(path));
+    setSelectionMode(true);
+    setSelectedPaths(new Set(selected));
+    marqueeJustFinishedRef.current = true;
+    marqueeActiveRef.current = false;
+    marqueeStartRef.current = null;
+    setMarquee(null);
+  };
+
+  useEffect(() => {
+    if (!marquee) return;
+    const handlePointerMove = (event: PointerEvent) => setMarquee((current) => current ? { ...current, currentX: event.clientX, currentY: event.clientY } : current);
+    const handlePointerUp = () => finishMarquee();
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => { window.removeEventListener('pointermove', handlePointerMove); window.removeEventListener('pointerup', handlePointerUp); };
+  }, [marquee]);
+
+  const handleFileListPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('[data-file-item]') || target.closest('button')) return;
+    marqueeActiveRef.current = true;
+    marqueeStartRef.current = { x: event.clientX, y: event.clientY };
+    setMarquee({ startX: event.clientX, startY: event.clientY, currentX: event.clientX, currentY: event.clientY });
+    event.preventDefault();
   };
 
   const primaryDisk = storageDisks.find((disk) => disk.isSelected);
@@ -691,12 +780,12 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   return (
     <div
       className="flex h-full min-h-0 flex-col gap-2.5 overflow-hidden"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      onDragOver={activeCloudMount ? undefined : handleDragOver}
+      onDragLeave={activeCloudMount ? undefined : handleDragLeave}
+      onDrop={activeCloudMount ? undefined : handleDrop}
     >
       {/* Dragging Overlay */}
-      {isDragging && (
+      {isDragging && !activeCloudMount && (
         <div className="fixed inset-0 z-50 bg-sky-500/20 backdrop-blur-sm border-4 border-dashed border-sky-400 flex flex-col items-center justify-center pointer-events-none">
           <Upload className="w-16 h-16 text-sky-400 animate-bounce mb-3" />
           <p className="text-xl font-bold text-white">松开鼠标将文件上传到当前目录</p>
@@ -722,6 +811,11 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           {cloudMounts.map((mount) => {
             const active = !viewingTrash && !viewingFavorites && activeCloudMountId === mount.id;
             return <button key={mount.id} type="button" onClick={() => { setActiveCloudMountId(mount.id); setViewingTrash(false); setViewingFavorites(false); }} className={`flex min-h-12 min-w-[150px] shrink-0 items-center gap-2 rounded-2xl border px-3 text-left transition ${active ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/15' : 'border-transparent bg-slate-50 dark:bg-slate-800/50'}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-white text-sky-500 dark:bg-slate-800' : 'bg-white text-slate-400 dark:bg-slate-800'}`}><Cloud className="h-4 w-4" /></span><span className={`truncate text-xs font-bold ${active ? 'text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200'}`}>{mount.name}</span></button>;
+          })}
+          {favorites.map((favoritePath) => {
+            const favoriteName = favoritePath.split('/').filter(Boolean).pop() || favoritePath;
+            const active = !viewingTrash && !viewingFavorites && (currentPath === favoritePath || currentPath.startsWith(`${favoritePath}/`));
+            return <button key={favoritePath} type="button" onClick={() => { setActiveCloudMountId(null); setViewingTrash(false); setViewingFavorites(false); setCurrentPath(favoritePath); }} className={`flex min-h-12 min-w-[140px] shrink-0 items-center gap-2 rounded-2xl border px-3 text-left transition ${active ? 'border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10' : 'border-transparent bg-slate-50 dark:bg-slate-800/50'}`} title={favoritePath}><Star className="h-4 w-4 shrink-0 fill-amber-400 text-amber-400" /><span className={`truncate text-xs font-bold ${active ? 'text-amber-700 dark:text-amber-300' : 'text-slate-700 dark:text-slate-200'}`}>{favoriteName}</span></button>;
           })}
         </div>
 
@@ -775,7 +869,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           <section className="flex min-h-14 shrink-0 items-center gap-3 rounded-[22px] border border-slate-200/80 bg-white px-3 dark:border-slate-800 dark:bg-slate-900/80">
             <button type="button" onClick={() => setViewingFavorites(false)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" aria-label="返回文件列表"><ArrowLeft className="h-4 w-4" /></button>
             <Star className="h-5 w-5 shrink-0 fill-amber-400 text-amber-400" />
-            <div className="min-w-0 flex-1"><h2 className="text-sm font-bold text-slate-900 dark:text-white">收藏</h2><p className="text-[11px] text-slate-400">{favoriteItems.length} 个文件与文件夹</p></div>
+            <div className="min-w-0 flex-1"><h2 className="text-sm font-bold text-slate-900 dark:text-white">收藏的文件夹</h2><p className="text-[11px] text-slate-400">{favoriteItems.length} 个文件夹</p></div>
           </section>
         ) : <FileToolbar
           currentPath={currentPath}
@@ -789,7 +883,6 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           loading={loading}
           uploading={uploading}
           uploadProgress={uploadProgress}
-          clipboard={clipboard}
           fileInputRef={fileInputRef}
           onGoUp={handleGoUp}
           onSearchChange={setSearchQuery}
@@ -806,12 +899,11 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           onOpenMkdir={() => setShowMkdirModal(true)}
           onFileChange={handleFileChange}
           onRefresh={() => loadFiles(currentPath)}
-          onPaste={handlePaste}
-          onClearClipboard={() => setClipboard(null)}
         />}
 
         {/* File View Container */}
-        <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain rounded-[22px] border border-slate-200/80 bg-white p-3 [-webkit-overflow-scrolling:touch] [contain:strict] dark:border-slate-800/80 dark:bg-slate-900/60 sm:p-4">
+        <div ref={fileListRef} onPointerDown={handleFileListPointerDown} onClick={(event) => { if (event.target === event.currentTarget) { if (marqueeJustFinishedRef.current) { marqueeJustFinishedRef.current = false; return; } setSelectedPaths(new Set()); } }} className={`relative min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain rounded-[22px] border border-slate-200/80 bg-white p-3 [-webkit-overflow-scrolling:touch] [contain:strict] dark:border-slate-800/80 dark:bg-slate-900/60 sm:p-4 ${marquee ? 'select-none' : ''}`}>
+          {marquee && <div className="pointer-events-none fixed z-[70] border border-sky-500 bg-sky-400/20" style={{ left: Math.min(marquee.startX, marquee.currentX), top: Math.min(marquee.startY, marquee.currentY), width: Math.abs(marquee.currentX - marquee.startX), height: Math.abs(marquee.currentY - marquee.startY) }} />}
           {viewingTrash ? (
             <TrashView
               trashItems={trashItems}
@@ -840,11 +932,11 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
             favoritesLoading ? (
               <div className="flex flex-col items-center justify-center space-y-3 py-24 text-slate-400"><div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" /><p className="text-xs">正在读取收藏…</p></div>
             ) : favoriteItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center space-y-3 py-24 text-center text-slate-400"><Star className="h-12 w-12" /><p className="text-sm font-semibold text-slate-700 dark:text-slate-300">还没有收藏</p><p className="text-xs">在文件或文件夹的三点菜单中添加收藏</p></div>
+              <div className="flex flex-col items-center justify-center space-y-3 py-24 text-center text-slate-400"><Star className="h-12 w-12" /><p className="text-sm font-semibold text-slate-700 dark:text-slate-300">还没有收藏文件夹</p><p className="text-xs">只能在文件夹的三点菜单中添加收藏</p></div>
             ) : viewMode === 'grid' ? (
-              <FileGridView files={favoriteItems} selectionMode={false} selectedPaths={selectedPaths} onItemClick={handleItemClick} onToggleSelect={toggleSelectItem} onOpenActions={(item, event) => { event.stopPropagation(); setActionItem(item); }} />
+              <FileGridView files={favoriteItems} selectionMode={false} selectedPaths={selectedPaths} onItemClick={handleItemClick} onToggleSelect={toggleSelectItem} onOpenActions={(item, event) => { event.stopPropagation(); setActionItem(item); }} onLongPress={handleLongPress} onDragStart={handleItemDragStart} onDragOver={handleItemDragOver} onDrop={handleItemDrop} dropTargetPath={dropTargetPath} />
             ) : (
-              <FileListView files={favoriteItems} selectionMode={false} selectedPaths={selectedPaths} onItemClick={handleItemClick} onToggleSelect={toggleSelectItem} onOpenActions={(item, event) => { event.stopPropagation(); setActionItem(item); }} />
+              <FileListView files={favoriteItems} selectionMode={false} selectedPaths={selectedPaths} onItemClick={handleItemClick} onToggleSelect={toggleSelectItem} onOpenActions={(item, event) => { event.stopPropagation(); setActionItem(item); }} onLongPress={handleLongPress} onDragStart={handleItemDragStart} onDragOver={handleItemDragOver} onDrop={handleItemDrop} dropTargetPath={dropTargetPath} />
             )
           ) : loading ? (
             <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3">
@@ -878,6 +970,11 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                 event.stopPropagation();
                 setActionItem(item);
               }}
+              onLongPress={handleLongPress}
+              onDragStart={handleItemDragStart}
+              onDragOver={handleItemDragOver}
+              onDrop={handleItemDrop}
+              dropTargetPath={dropTargetPath}
             />
           ) : (
             <FileListView
@@ -890,6 +987,11 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
                 event.stopPropagation();
                 setActionItem(item);
               }}
+              onLongPress={handleLongPress}
+              onDragStart={handleItemDragStart}
+              onDragOver={handleItemDragOver}
+              onDrop={handleItemDrop}
+              dropTargetPath={dropTargetPath}
             />
           )}
           {!viewingTrash && !viewingFavorites && hasMoreFiles && !loading && (
@@ -908,8 +1010,9 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         <BatchActionBar
           visible={selectionMode && !viewingTrash}
           selectedCount={!viewingTrash ? selectedPaths.size : 0}
-          onCopy={() => handleCopy(Array.from(selectedPaths))}
-          onCut={() => handleCut(Array.from(selectedPaths))}
+          onCopy={() => openTransfer('copy', Array.from(selectedPaths))}
+          onCut={() => openTransfer('move', Array.from(selectedPaths))}
+          onDownload={handleBatchDownload}
           onDelete={() => {
             setDeleteTarget(null);
             setShowDeleteModal(true);
@@ -927,13 +1030,14 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       <FileActionSheet
         item={actionItem}
         isFavorite={!!actionItem && favorites.includes(actionItem.path)}
+        allowFavorite={Boolean(actionItem?.isDir)}
         onClose={() => setActionItem(null)}
         onToggleFavorite={() => {
           if (actionItem) toggleFavorite(actionItem.path);
           setActionItem(null);
         }}
         onCopy={() => {
-          if (actionItem) handleCopy([actionItem.path]);
+          if (actionItem) openTransfer('copy', [actionItem.path]);
           setActionItem(null);
         }}
         onCopyPath={() => {
@@ -941,7 +1045,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           setActionItem(null);
         }}
         onCut={() => {
-          if (actionItem) handleCut([actionItem.path]);
+          if (actionItem) openTransfer('move', [actionItem.path]);
           setActionItem(null);
         }}
         onRename={() => {
@@ -1047,6 +1151,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         onClose={() => setArchiveItem(null)}
         onConfirm={handleArchiveConfirm}
       />
+      {transferRequest && <TransferDestinationModal operation={transferRequest.operation} sourcePaths={transferRequest.paths} initialPath={transferRequest.initialPath} onClose={() => setTransferRequest(null)} onConfirm={handleTransferConfirm} />}
     </div>
   );
 };

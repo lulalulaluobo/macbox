@@ -1,11 +1,12 @@
 import React from 'react';
-import { Archive, Copy, Download, Edit3, FileText, Folder, Scissors, Star, Trash2, X } from 'lucide-react';
+import { Archive, Copy, Download, Edit3, FileArchive, FileText, Folder, Scissors, Star, Trash2, X } from 'lucide-react';
 import { FileItem } from '../../../types';
 import { api } from '../../../api';
 
 interface FileActionSheetProps {
   item: FileItem | null;
   isFavorite: boolean;
+  allowFavorite: boolean;
   onClose: () => void;
   onToggleFavorite: () => void;
   onCopy: () => void;
@@ -19,6 +20,7 @@ interface FileActionSheetProps {
 export const FileActionSheet: React.FC<FileActionSheetProps> = ({
   item,
   isFavorite,
+  allowFavorite,
   onClose,
   onToggleFavorite,
   onCopy,
@@ -31,7 +33,7 @@ export const FileActionSheet: React.FC<FileActionSheetProps> = ({
   if (!item) return null;
 
   const actions = [
-    { label: isFavorite ? '取消收藏' : '收藏', icon: Star, onClick: onToggleFavorite, active: isFavorite },
+    ...(allowFavorite ? [{ label: isFavorite ? '取消收藏' : '收藏', icon: Star, onClick: onToggleFavorite, active: isFavorite }] : []),
     { label: '移动', icon: Scissors, onClick: onCut },
     { label: '复制', icon: Copy, onClick: onCopy },
     { label: '重命名', icon: Edit3, onClick: onRename },
@@ -45,7 +47,7 @@ export const FileActionSheet: React.FC<FileActionSheetProps> = ({
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-200 dark:bg-slate-700" />
         <div className="flex min-w-0 items-center gap-3">
           <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${item.isDir ? 'bg-sky-50 text-sky-500 dark:bg-sky-500/10' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`}>
-            {item.isDir ? <Folder className="h-6 w-6 fill-sky-500/15" /> : <FileText className="h-5 w-5" />}
+            {item.isDir ? <Folder className="h-6 w-6 fill-sky-500/15" /> : item.ext.toLowerCase() === 'zip' ? <FileArchive className="h-5 w-5 text-amber-500" /> : <FileText className="h-5 w-5" />}
           </span>
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-sm font-bold text-slate-900 dark:text-white">{item.name}</h3>
@@ -56,7 +58,7 @@ export const FileActionSheet: React.FC<FileActionSheetProps> = ({
           </button>
         </div>
 
-        <div className="mt-4 grid grid-cols-5 gap-2">
+        <div className={`mt-4 grid gap-2 ${allowFavorite ? 'grid-cols-5' : 'grid-cols-4'}`}>
           {actions.map(({ label, icon: Icon, onClick, active, danger }) => (
             <button key={label} type="button" onClick={onClick} className={`flex min-w-0 flex-col items-center gap-2 rounded-2xl bg-slate-50 px-1 py-3 text-[11px] font-medium dark:bg-slate-800/70 ${danger ? 'text-rose-500' : active ? 'text-amber-500' : 'text-slate-700 dark:text-slate-200'}`}>
               <Icon className={`h-5 w-5 ${active ? 'fill-amber-500' : ''}`} />
@@ -72,7 +74,7 @@ export const FileActionSheet: React.FC<FileActionSheetProps> = ({
 
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button type="button" onClick={onArchive} className="flex min-h-12 items-center justify-between rounded-2xl bg-violet-50 px-4 text-sm font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
-            <span>{item.isDir || !['zip', 'rar', '7z'].includes(item.ext.toLowerCase()) ? '压缩' : '解压'}</span>
+            <span>{item.isDir || item.ext.toLowerCase() !== 'zip' ? '压缩' : '解压'}</span>
             <Archive className="h-5 w-5" />
           </button>
           <a href={api.getFileDownloadUrl(item.path)} download onClick={onClose} className="flex min-h-12 items-center justify-between rounded-2xl bg-slate-50 px-4 text-sm font-medium text-slate-700 dark:bg-slate-800/70 dark:text-slate-200">

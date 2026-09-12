@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowLeft, CheckSquare, ChevronRight, Cloud, Download, Folder, ListChecks, MoreHorizontal, Pencil, Plus, RefreshCw, Square, Trash2, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, CheckSquare, ChevronRight, Cloud, Copy, Download, Folder, ListChecks, MoreHorizontal, Move, Pencil, Plus, RefreshCw, Square, Trash2, Upload, X } from 'lucide-react';
 import { api } from '../../../api';
 import { BackgroundJob, CloudFile, CloudMount } from '../../../types';
 import { CloudDownloadModal } from './CloudDownloadModal';
+import { CloudDestinationModal } from './CloudDestinationModal';
 import { CloudTransferTasksModal } from './CloudTransferTasksModal';
 
 interface CloudDriveViewProps {
@@ -34,6 +35,12 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
   const [showTransferTasks, setShowTransferTasks] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedFids, setSelectedFids] = useState<Set<string>>(new Set());
+  const [cloudTransfer, setCloudTransfer] = useState<{ operation: 'copy' | 'move'; files: CloudFile[] } | null>(null);
+  const [isDraggingUpload, setIsDraggingUpload] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const lastCompletedUploadRef = useRef('');
+
+  const isTransferJob = (job: BackgroundJob) => job.kind === 'cloud.download' || job.kind === 'cloud.upload';
 
   const loadFiles = async (fid = parentFid) => {
     setLoading(true);
@@ -54,6 +61,7 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
     setSelectionMode(false);
     setSelectedFids(new Set());
     setDownloadTargets([]);
+    setCloudTransfer(null);
   }, [mount.id, mount.rootFid, mount.name]);
 
   useEffect(() => { loadFiles(parentFid); }, [mount.id, parentFid]);
@@ -61,12 +69,21 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
   useEffect(() => {
     let active = true;
     const refreshJobs = () => api.getJobs().then((result) => {
-      if (active) setJobs((result.jobs || []).filter((job) => job.kind === 'cloud.download').slice(0, 50));
+      if (active) setJobs((result.jobs || []).filter(isTransferJob).slice(0, 50));
     }).catch(() => {});
     refreshJobs();
     const timer = window.setInterval(refreshJobs, 1500);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
+
+  useEffect(() => {
+    const latest = jobs
+      .filter((job) => job.kind === 'cloud.upload' && job.status === 'succeeded')
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0];
+    if (!latest || latest.id === lastCompletedUploadRef.current) return;
+    lastCompletedUploadRef.current = latest.id;
+    void loadFiles();
+  }, [jobs, parentFid, mount.id]);
 
   const openFolder = (file: CloudFile) => {
     setParentFid(file.fid);
@@ -108,7 +125,7 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
 
   async function refreshJobs() {
     const result = await api.getJobs();
-    setJobs((result.jobs || []).filter((job) => job.kind === 'cloud.download').slice(0, 50));
+    setJobs((result.jobs || []).filter(isTransferJob).slice(0, 50));
   }
 
   const clearTransferJobs = async () => {
@@ -127,6 +144,53 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
     } catch (err: any) {
       throw new Error(err.message || '创建下载任务失败');
     }
+  };
+
+  const uploadFiles = async (selected: File[]) => {
+    if (!selected.length) return;
+    setError('');
+    try {
+      for (const file of selected) await api.uploadCloudFile(mount.id, parentFid, file);
+      await refreshJobs();
+      await loadFiles();
+    } catch (err: any) {
+      setError(err.message || '创建云盘上传任务失败');
+    }
+  };
+
+  const handleUploadDragOver = (event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDraggingUpload(true);
+  };
+
+  const handleUploadDragLeave = (event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setIsDraggingUpload(false);
+  };
+
+  const handleUploadDrop = (event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes('Files')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDraggingUpload(false);
+    const selected = Array.from(event.dataTransfer.files || []);
+    void uploadFiles(selected);
+  };
+
+  const transferFiles = async (targetFid: string) => {
+    if (!cloudTransfer) return;
+    const fids = cloudTransfer.files.map((file) => file.fid);
+    if (cloudTransfer.operation === 'copy') await api.copyCloudFiles(mount.id, fids, targetFid);
+    else await api.moveCloudFiles(mount.id, fids, targetFid);
+    setCloudTransfer(null);
+    setSelectionMode(false);
+    setSelectedFids(new Set());
+    await loadFiles();
   };
 
   const createFolder = async () => {
@@ -164,7 +228,19 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+    <div
+      className="relative flex min-h-0 flex-1 flex-col gap-2.5"
+      onDragOver={handleUploadDragOver}
+      onDragLeave={handleUploadDragLeave}
+      onDrop={handleUploadDrop}
+    >
+      {isDraggingUpload && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center border-4 border-dashed border-sky-400 bg-sky-500/20 backdrop-blur-sm">
+          <Upload className="mb-3 h-16 w-16 animate-bounce text-sky-500" />
+          <p className="text-xl font-bold text-slate-900 dark:text-white">松开鼠标上传到夸克网盘</p>
+          <p className="mt-1 text-sm text-sky-700 dark:text-sky-200">{breadcrumbs[breadcrumbs.length - 1]?.name || mount.name}</p>
+        </div>
+      )}
       <section className="shrink-0 rounded-[22px] border border-slate-200/80 bg-white p-3 dark:border-slate-800 dark:bg-slate-900/80">
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={onBack} className="flex h-10 items-center gap-2 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200"><ArrowLeft className="h-4 w-4" />返回</button>
@@ -172,12 +248,16 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
             <Cloud className="h-4 w-4 shrink-0 text-sky-500" />
             {breadcrumbs.map((crumb, index) => <React.Fragment key={crumb.fid}><button type="button" onClick={() => jumpTo(index)} className="max-w-[140px] truncate hover:text-sky-600">{crumb.name}</button>{index < breadcrumbs.length - 1 && <ChevronRight className="h-3.5 w-3.5 shrink-0" />}</React.Fragment>)}
           </div>
+          <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={(event) => { const selected = Array.from(event.target.files || []); event.target.value = ''; void uploadFiles(selected); }} />
+          <button type="button" onClick={() => uploadInputRef.current?.click()} className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-semibold text-white shadow-sm"><Upload className="h-4 w-4" />上传</button>
           <button type="button" onClick={createFolder} className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-semibold text-white shadow-sm"><Plus className="h-4 w-4" />新建</button>
           <button type="button" onClick={() => loadFiles()} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-slate-800" aria-label="刷新云盘"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
           <button type="button" onClick={toggleSelectionMode} className={`flex h-10 items-center gap-1.5 rounded-xl px-3 text-xs font-semibold ${selectionMode ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800'}`} aria-label="选择云端文件"><CheckSquare className="h-4 w-4" /><span className="hidden sm:inline">选择</span></button>
           {selectionMode && <>
             <button type="button" onClick={selectAllFiles} disabled={!files.length} className="flex h-10 items-center rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-600 disabled:opacity-40 dark:bg-slate-800 dark:text-slate-300">{selectedFids.size === files.length && files.length ? '取消全选' : '全选'}</button>
             <button type="button" onClick={() => setDownloadTargets(selectedFiles)} disabled={!selectedFiles.length} className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-semibold text-white disabled:opacity-40"><Download className="h-4 w-4" />下载{selectedFiles.length ? ` (${selectedFiles.length})` : ''}</button>
+            <button type="button" onClick={() => setCloudTransfer({ operation: 'copy', files: selectedFiles })} disabled={!selectedFiles.length} className="flex h-10 items-center gap-1.5 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-600 disabled:opacity-40 dark:bg-slate-800 dark:text-slate-300"><Copy className="h-4 w-4" />复制</button>
+            <button type="button" onClick={() => setCloudTransfer({ operation: 'move', files: selectedFiles })} disabled={!selectedFiles.length} className="flex h-10 items-center gap-1.5 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-600 disabled:opacity-40 dark:bg-slate-800 dark:text-slate-300"><Move className="h-4 w-4" />移动</button>
           </>}
           <details className="relative">
             <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-slate-800"><MoreHorizontal className="h-4 w-4" /></summary>
@@ -201,6 +281,7 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
         </div>)}</div>}
       </section>
       <CloudDownloadModal files={downloadTargets} onClose={() => setDownloadTargets([])} onConfirm={(destination) => download(downloadTargets, destination)} />
+      {cloudTransfer && <CloudDestinationModal mount={mount} operation={cloudTransfer.operation} count={cloudTransfer.files.length} initialFid={parentFid} initialName={breadcrumbs[breadcrumbs.length - 1]?.name || mount.name} onClose={() => setCloudTransfer(null)} onConfirm={transferFiles} />}
       {showTransferTasks && <CloudTransferTasksModal jobs={jobs} onClose={() => setShowTransferTasks(false)} onRefresh={refreshJobs} onCancel={async (id) => { await api.cancelJob(id); await refreshJobs(); }} onClear={clearTransferJobs} />}
     </div>
   );

@@ -53,25 +53,19 @@ func ScanLocalMountCandidates(cfg *config.Config) []LocalMountCandidate {
 	}
 	type candidateSpec struct {
 		path, name, category, description string
+		trustedKnownPath                  bool
 	}
 	specs := []candidateSpec{
-		{filepath.Join(home, "Downloads"), "Downloads", "downloads", "Mac 下载目录，可映射到 /data/downloads"},
-		{filepath.Join(home, "Movies"), "Movies", "media", "Mac 影音目录，可映射到 /data/media"},
-		{filepath.Join(home, "Pictures"), "Pictures", "pictures", "Mac 照片目录，可映射到 /data/photos"},
-		{filepath.Join(home, "Documents"), "Documents", "custom", "Mac 文档目录，可映射到 /data/shared"},
-		{filepath.Join(home, "Desktop"), "Desktop", "custom", "Mac 桌面目录，可映射到 /data/shared"},
-		{filepath.Join(home, "Public"), "Public", "custom", "Mac 公共目录，可映射到 /data/shared"},
+		{filepath.Join(home, "Downloads"), "Downloads", "downloads", "Mac 下载目录，可映射到 /data/downloads", true},
+		{filepath.Join(home, "Movies"), "Movies", "media", "Mac 影音目录，可映射到 /data/media", true},
+		{filepath.Join(home, "Pictures"), "Pictures", "pictures", "Mac 照片目录，可映射到 /data/photos", true},
+		{filepath.Join(home, "Documents"), "Documents", "custom", "Mac 文档目录，可映射到 /data/shared", true},
+		{filepath.Join(home, "Desktop"), "Desktop", "custom", "Mac 桌面目录，可映射到 /data/shared", true},
+		{filepath.Join(home, "Public"), "Public", "custom", "Mac 公共目录，可映射到 /data/shared", true},
 	}
-	if entries, readErr := os.ReadDir("/Volumes"); readErr == nil {
-		for _, entry := range entries {
-			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
-				specs = append(specs, candidateSpec{
-					path: filepath.Join("/Volumes", entry.Name()), name: entry.Name(), category: "custom",
-					description: "已挂载的外部卷，可选择其中的具体数据目录",
-				})
-			}
-		}
-	}
+	// Do not enumerate /Volumes here. On macOS this includes network volumes
+	// and causes a privacy prompt every time the storage page refreshes. A user
+	// can still add an external or network volume by entering its absolute path.
 
 	configured := make(map[string]config.LocalMount)
 	if cfg != nil {
@@ -99,6 +93,14 @@ func ScanLocalMountCandidates(cfg *config.Config) []LocalMountCandidate {
 		if mount, ok := configured[cleanPath]; ok {
 			candidate.Configured = true
 			candidate.Enabled = mount.Enabled
+		}
+		// Do not probe macOS privacy-protected home folders while merely loading
+		// the storage page. The actual add operation validates the user-selected
+		// path and macOS can then request access once, in clear user context.
+		if spec.trustedKnownPath {
+			candidate.Available = true
+			result = append(result, candidate)
+			continue
 		}
 		info, statErr := os.Stat(cleanPath)
 		if statErr != nil {
@@ -160,18 +162,16 @@ func GetDefaultMacMounts() []config.LocalMount {
 	var defaults []config.LocalMount
 	for _, c := range candidates {
 		fullPath := filepath.Join(home, c.folderName)
-		if fi, err := os.Stat(fullPath); err == nil && fi.IsDir() {
-			defaults = append(defaults, config.LocalMount{
-				ID:          c.id,
-				Name:        c.name,
-				HostPath:    fullPath,
-				GuestTarget: c.guestTarget,
-				Writable:    false, // Default read-only for security
-				Enabled:     false,
-				Category:    c.category,
-				Description: c.description,
-			})
-		}
+		defaults = append(defaults, config.LocalMount{
+			ID:          c.id,
+			Name:        c.name,
+			HostPath:    fullPath,
+			GuestTarget: c.guestTarget,
+			Writable:    false, // Default read-only for security
+			Enabled:     false,
+			Category:    c.category,
+			Description: c.description,
+		})
 	}
 
 	return defaults
@@ -255,6 +255,18 @@ func upsertLocalMount(cfg *config.Config, mount config.LocalMount) error {
 	mount.GuestTarget = target
 	if err := config.ValidateLocalMount(mount); err != nil {
 		return err
+	}
+	for _, existing := range cfg.Storage.LocalMounts {
+		if existing.ID == mount.ID {
+			continue
+		}
+		existingTarget, targetErr := config.NormalizeGuestTarget(existing.GuestTarget)
+		if targetErr != nil {
+			continue
+		}
+		if target == existingTarget || strings.HasPrefix(target, existingTarget+"/") || strings.HasPrefix(existingTarget, target+"/") {
+			return fmt.Errorf("VM 目标目录与已有挂载 %q 重叠: /data/%s", existing.Name, existingTarget)
+		}
 	}
 
 	// Update if ID exists, or append

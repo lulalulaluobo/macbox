@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 INSTALL_ROOT="${HOME}/.local/share/macnas"
 COMMAND_PATH="${HOME}/.local/bin/macnas"
+MENU_APP="${HOME}/Applications/MacNASMenu.app"
 PLIST_PATH="${HOME}/Library/LaunchAgents/com.macnas.server.plist"
 LIMA_INSTANCE_DIR="${HOME}/.lima/macnas"
 LIMA_DISK_DIR="${HOME}/.lima/_disks/macnas-data"
@@ -94,6 +95,9 @@ elif [[ -f "$COMMAND_PATH" ]]; then
 fi
 
 rm -rf -- "$INSTALL_ROOT"
+if [[ "$MENU_APP" == "$HOME/Applications/MacNASMenu.app" ]]; then
+  rm -rf -- "$MENU_APP"
+fi
 
 if (( PURGE )); then
   # The explicit paths are MacNAS-owned fallbacks for a machine where

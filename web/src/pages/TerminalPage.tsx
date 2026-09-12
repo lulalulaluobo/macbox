@@ -413,7 +413,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
     if (['mp3', 'flac', 'wav', 'aac', 'm4a'].includes(ext)) {
       return <Music className="w-4 h-4 text-pink-400 shrink-0" />;
     }
-    if (['zip', 'tar', 'gz', 'rar', '7z'].includes(ext)) {
+    if (ext === 'zip') {
       return <Archive className="w-4 h-4 text-amber-400 shrink-0" />;
     }
     if (['sh', 'py', 'go', 'js', 'ts', 'yaml', 'yml', 'json', 'conf'].includes(ext)) {

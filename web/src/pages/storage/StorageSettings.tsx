@@ -49,6 +49,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
   const [newMountPath, setNewMountPath] = useState('');
   const [newMountName, setNewMountName] = useState('');
   const [newMountCategory, setNewMountCategory] = useState<'media' | 'downloads' | 'pictures' | 'custom'>('media');
+  const [newMountGuestTarget, setNewMountGuestTarget] = useState('media/MacMedia');
   const [newMountWritable, setNewMountWritable] = useState(false);
   const [mountsLoading, setMountsLoading] = useState(false);
 
@@ -270,6 +271,8 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
     setNewMountName(candidate.name);
     if (candidate.category === 'media' || candidate.category === 'downloads' || candidate.category === 'pictures' || candidate.category === 'custom') {
       setNewMountCategory(candidate.category);
+      const targetName = candidate.name || '本机直通';
+      setNewMountGuestTarget(candidate.category === 'media' ? `media/${targetName}` : candidate.category === 'downloads' ? `downloads/${targetName}` : candidate.category === 'pictures' ? `photos/${targetName}` : `shared/${targetName}`);
     }
   };
 
@@ -281,10 +284,10 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
     }
     setMountsLoading(true);
     try {
-      let targetSub = 'shared/' + (newMountName.trim() || 'Folder');
-      if (newMountCategory === 'media') targetSub = 'media/' + (newMountName.trim() || 'MacMedia');
-      else if (newMountCategory === 'downloads') targetSub = 'downloads/' + (newMountName.trim() || 'MacDownloads');
-      else if (newMountCategory === 'pictures') targetSub = 'photos/' + (newMountName.trim() || 'MacPhotos');
+      let targetSub = newMountGuestTarget.trim().replace(/^\/data\/?/, '').replace(/^\/+/, '');
+      if (!targetSub) {
+        targetSub = newMountCategory === 'media' ? `media/${newMountName.trim() || 'MacMedia'}` : newMountCategory === 'downloads' ? `downloads/${newMountName.trim() || 'MacDownloads'}` : newMountCategory === 'pictures' ? `photos/${newMountName.trim() || 'MacPhotos'}` : `shared/${newMountName.trim() || 'Folder'}`;
+      }
 
       const res = await api.addLocalMount({
         name: newMountName.trim() || newMountPath.split('/').pop() || '本地直通',
@@ -300,6 +303,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       setShowAddMountModal(false);
       setNewMountPath('');
       setNewMountName('');
+      setNewMountGuestTarget('media/MacMedia');
       setRestartPrompt(true);
       setAlertMsg({ type: 'success', text: `已成功添加本地直通目录，请重启 VM 生效！` });
     } catch (err: any) {
@@ -820,7 +824,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
             <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-slate-100 px-4 dark:border-slate-800">
               <button type="button" onClick={() => setShowMountManager(false)} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" aria-label="关闭"><X className="h-5 w-5" /></button>
               <div className="min-w-0 flex-1"><h3 className="text-base font-bold text-slate-900 dark:text-white">本机目录直通</h3><p className="text-[11px] text-slate-500">将 Mac 文件夹映射到 NAS，不复制或删除原目录</p></div>
-              <button type="button" onClick={() => { setShowMountManager(false); setShowAddMountModal(true); }} className="flex min-h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-bold text-white"><Plus className="h-4 w-4" />添加</button>
+              <button type="button" onClick={() => { setShowMountManager(false); setNewMountGuestTarget('media/MacMedia'); setShowAddMountModal(true); }} className="flex min-h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-bold text-white"><Plus className="h-4 w-4" />添加</button>
             </header>
             <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
               {localMounts.length === 0 ? (
@@ -1351,7 +1355,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <p className="font-bold text-slate-800 dark:text-slate-100">选择本机目录</p>
-                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">MacNAS 已扫描常用目录和已挂载外部卷</p>
+                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">显示常用本机目录；外接盘或网络盘请在下方填写路径</p>
                   </div>
                   <FolderOpen className="h-4 w-4 text-sky-500" />
                 </div>
@@ -1408,7 +1412,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button
                     type="button"
-                    onClick={() => setNewMountCategory('media')}
+                    onClick={() => { setNewMountCategory('media'); setNewMountGuestTarget(`media/${newMountName.trim() || 'MacMedia'}`); }}
                     className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center space-y-1 ${
                       newMountCategory === 'media'
                         ? 'bg-sky-50 dark:bg-sky-500/20 border-sky-400 text-sky-700 dark:text-sky-300 font-bold'
@@ -1420,7 +1424,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   </button>
                   <button
                     type="button"
-                    onClick={() => setNewMountCategory('downloads')}
+                    onClick={() => { setNewMountCategory('downloads'); setNewMountGuestTarget(`downloads/${newMountName.trim() || 'MacDownloads'}`); }}
                     className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center space-y-1 ${
                       newMountCategory === 'downloads'
                         ? 'bg-sky-50 dark:bg-sky-500/20 border-sky-400 text-sky-700 dark:text-sky-300 font-bold'
@@ -1432,7 +1436,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   </button>
                   <button
                     type="button"
-                    onClick={() => setNewMountCategory('pictures')}
+                    onClick={() => { setNewMountCategory('pictures'); setNewMountGuestTarget(`photos/${newMountName.trim() || 'MacPhotos'}`); }}
                     className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center space-y-1 ${
                       newMountCategory === 'pictures'
                         ? 'bg-sky-50 dark:bg-sky-500/20 border-sky-400 text-sky-700 dark:text-sky-300 font-bold'
@@ -1444,7 +1448,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                   </button>
                   <button
                     type="button"
-                    onClick={() => setNewMountCategory('custom')}
+                    onClick={() => { setNewMountCategory('custom'); setNewMountGuestTarget(`shared/${newMountName.trim() || 'Folder'}`); }}
                     className={`p-2.5 rounded-xl border text-center transition flex flex-col items-center space-y-1 ${
                       newMountCategory === 'custom'
                         ? 'bg-sky-50 dark:bg-sky-500/20 border-sky-400 text-sky-700 dark:text-sky-300 font-bold'
@@ -1455,6 +1459,12 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
                     <span className="text-[11px]">通用 (/shared)</span>
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">NAS 目标目录（VM 内） <span className="text-rose-500">*</span></label>
+                <input type="text" value={newMountGuestTarget} onChange={(e) => setNewMountGuestTarget(e.target.value)} placeholder="例如：/data/macdownload/download" className="w-full rounded-xl border border-violet-300 bg-violet-50 px-4 py-3 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-white" />
+                <p className="mt-1.5 text-[11px] leading-5 text-slate-500 dark:text-slate-400">可填写 /data 下任意自定义目录；例如 /data/macdownload/download。系统会拒绝 /data 之外的路径。</p>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">

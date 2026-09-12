@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/luluen/mac-nas/pkg/terminal"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Web Terminal Handlers
@@ -174,12 +176,33 @@ func (s *Server) handleTerminalFileDownload(w http.ResponseWriter, r *http.Reque
 	terminal.DownloadFile(w, r, s.vmMgr.InstanceName(), targetPath)
 }
 
+func (s *Server) handleTerminalFilesBatchDownload(w http.ResponseWriter, r *http.Request) {
+	paths := r.URL.Query()["path"]
+	if len(paths) == 0 {
+		paths = r.URL.Query()["paths"]
+	}
+	if len(paths) == 0 {
+		writeError(w, http.StatusBadRequest, "至少选择一个文件或文件夹")
+		return
+	}
+	if err := terminal.DownloadPathsAsZip(w, r, s.vmMgr.InstanceName(), paths); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+func (s *Server) handleTerminalArchiveCapabilities(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, terminal.ArchiveCapabilitiesContext(ctx, s.vmMgr.InstanceName()))
+}
+
 func (s *Server) handleTerminalArchive(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Operation   string   `json:"operation"`
-		Format      string   `json:"format"`
-		Destination string   `json:"destination"`
-		SourcePaths []string `json:"sourcePaths"`
+		Operation      string   `json:"operation"`
+		Format         string   `json:"format"`
+		Destination    string   `json:"destination"`
+		SourcePaths    []string `json:"sourcePaths"`
+		ConflictPolicy string   `json:"conflictPolicy"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "参数解析错误")
@@ -190,7 +213,10 @@ func (s *Server) handleTerminalArchive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := terminal.ArchivePathsContext(r.Context(), s.vmMgr.InstanceName(), req.Operation, req.Format, req.Destination, req.SourcePaths); err != nil {
+	if req.ConflictPolicy == "" {
+		req.ConflictPolicy = "error"
+	}
+	if err := terminal.ArchivePathsWithPolicyContext(r.Context(), s.vmMgr.InstanceName(), req.Operation, req.Format, req.Destination, req.SourcePaths, req.ConflictPolicy); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -238,8 +264,9 @@ func (s *Server) handleTerminalFileRaw(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTerminalFilesCopy(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SrcPaths []string `json:"srcPaths"`
-		DestDir  string   `json:"destDir"`
+		SrcPaths       []string `json:"srcPaths"`
+		DestDir        string   `json:"destDir"`
+		ConflictPolicy string   `json:"conflictPolicy"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "参数解析错误")
@@ -250,7 +277,10 @@ func (s *Server) handleTerminalFilesCopy(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := terminal.CopyPathsContext(r.Context(), s.vmMgr.InstanceName(), req.SrcPaths, req.DestDir); err != nil {
+	if req.ConflictPolicy == "" {
+		req.ConflictPolicy = "error"
+	}
+	if err := terminal.CopyPathsWithPolicyContext(r.Context(), s.vmMgr.InstanceName(), req.SrcPaths, req.DestDir, req.ConflictPolicy); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -262,8 +292,9 @@ func (s *Server) handleTerminalFilesCopy(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleTerminalFilesMove(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SrcPaths []string `json:"srcPaths"`
-		DestDir  string   `json:"destDir"`
+		SrcPaths       []string `json:"srcPaths"`
+		DestDir        string   `json:"destDir"`
+		ConflictPolicy string   `json:"conflictPolicy"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "参数解析错误")
@@ -274,7 +305,10 @@ func (s *Server) handleTerminalFilesMove(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := terminal.MovePathsContext(r.Context(), s.vmMgr.InstanceName(), req.SrcPaths, req.DestDir); err != nil {
+	if req.ConflictPolicy == "" {
+		req.ConflictPolicy = "error"
+	}
+	if err := terminal.MovePathsWithPolicyContext(r.Context(), s.vmMgr.InstanceName(), req.SrcPaths, req.DestDir, req.ConflictPolicy); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
