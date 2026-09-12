@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Cloud, Folder, HardDrive, MoreHorizontal, Pencil, ShieldCheck, Star, Trash2, Upload, AlertTriangle, X } from 'lucide-react';
+import { ArrowLeft, Folder, Star, Upload, AlertTriangle, X } from 'lucide-react';
 import { CloudMount, DiskInfo, FileItem, LocalMount } from '../../types';
 import { api } from '../../api';
 import { TextPreviewState, getFileType } from './filemanager/types';
@@ -12,9 +12,10 @@ import { FilePreviewModal } from './filemanager/FilePreviewModal';
 import { FileModals } from './filemanager/FileModals';
 import { FileActionSheet } from './filemanager/FileActionSheet';
 import { DriveDetailModal } from './filemanager/DriveDetailModal';
-import type { DriveDetailInfo } from './filemanager/DriveDetailModal';
 import { CloudDriveView } from './filemanager/CloudDriveView';
 import { CloudMountModal } from './filemanager/CloudMountModal';
+import { FileDriveSwitcher } from './filemanager/FileDriveSwitcher';
+import { useStorageDriveOptions } from './filemanager/useStorageDriveOptions';
 import { ArchiveModal } from './filemanager/ArchiveModal';
 import { ConflictPolicy, TransferDestinationModal } from './filemanager/TransferDestinationModal';
 import { useFileSelection } from './filemanager/useFileSelection';
@@ -423,71 +424,12 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     event.preventDefault();
   };
 
-  const primaryDisk = storageDisks.find((disk) => disk.isSelected);
-  const secondaryDisks = storageDisks.filter((disk) => disk.isSecondary && !disk.isSelected);
-  // 后端的 secondaryTarget 可能已是绝对路径（/data/...），也可能是 guest 内相对路径，
-  // 统一成 VM 内绝对路径，避免出现 /data//data/... 这类非法路径导致去重失效。
-  const toGuestPath = (target?: string | null, fallback = 'volume2-ssd') => {
-    const t = (target || '').trim() || fallback;
-    return t.startsWith('/') ? t : `/data/${t}`;
-  };
-  const secondaryDiskOptions = secondaryDisks.map((disk) => ({
-    id: disk.identifier,
-    path: toGuestPath(disk.secondaryTarget),
-  }));
-  const secondaryMountOptions = localMounts
-    .filter((mount) => mount.enabled && mount.category === 'volume2')
-    .map((mount) => ({ id: `mount-${mount.id}`, path: `/data/${mount.guestTarget}` }))
-    .filter((mount) => !secondaryDiskOptions.some((disk) => disk.path === mount.path));
-  const discoveredOptions = discoveredDrivePaths
-    .map((path) => ({ id: `folder-${path}`, path }))
-    .filter((drive) => !secondaryDiskOptions.some((disk) => disk.path === drive.path) && !secondaryMountOptions.some((mount) => mount.path === drive.path));
-  // Ordinary host-folder passthroughs are directories inside the owning NAS
-  // volume, not additional disks. Keep only the dedicated secondary volume
-  // and discovered storage roots in the drive switcher; the regular mapped
-  // folder remains visible at its configured /data path.
-  const secondaryOptions = [...secondaryDiskOptions, ...secondaryMountOptions, ...discoveredOptions]
-    .filter((drive, index, all) => all.findIndex((candidate) => candidate.path === drive.path) === index);
-  const driveOptions = [
-    {
-      id: primaryDisk?.identifier || 'primary',
-      defaultName: '硬盘 1',
-      path: '/data',
-      detail: {
-        kind: '主存储',
-        // 不拼接 Mac 侧挂载点：APFS 系统卷挂载点（如 /System/Volumes/*）对用户是噪音
-        source: primaryDisk?.name,
-        total: primaryDisk?.totalSizeString,
-        used: primaryDisk?.usedSpaceString,
-        free: primaryDisk?.freeSpaceString,
-        usedPercent: primaryDisk?.usedPercent,
-        fileSystem: primaryDisk?.fileSystem,
-      } as DriveDetailInfo,
-    },
-    ...secondaryOptions.map((disk, index) => {
-      const matchedDisk = secondaryDisks.find((d) => toGuestPath(d.secondaryTarget) === disk.path);
-      const matchedMount = localMounts.find((m) => m.enabled && toGuestPath(m.guestTarget) === disk.path);
-      return {
-        id: disk.id,
-        defaultName: matchedMount?.name || `硬盘 ${index + 2}`,
-        path: disk.path,
-        detail: {
-          kind: matchedDisk ? '扩展存储' : matchedMount ? '本机目录直通' : '已发现目录',
-          source: matchedDisk?.name ?? matchedMount?.hostPath,
-          total: matchedDisk?.totalSizeString,
-          used: matchedDisk?.usedSpaceString,
-          free: matchedDisk?.freeSpaceString,
-          usedPercent: matchedDisk?.usedPercent,
-          fileSystem: matchedDisk?.fileSystem,
-          writable: matchedMount?.writable,
-          description: matchedMount?.description,
-        } as DriveDetailInfo,
-      };
-    }),
-  ];
-  const activeDriveId = [...driveOptions]
-    .sort((a, b) => b.path.length - a.path.length)
-    .find((drive) => currentPath === drive.path || currentPath.startsWith(`${drive.path}/`))?.id;
+  const { driveOptions, activeDriveId, secondaryOptions } = useStorageDriveOptions({
+    storageDisks,
+    localMounts,
+    discoveredDrivePaths,
+    currentPath,
+  });
   const activeCloudMount = cloudMounts.find((mount) => mount.id === activeCloudMountId) || null;
 
   // 硬盘详情弹窗：铅笔按钮展示容量/映射路径等信息，名称可顺带修改
@@ -522,43 +464,54 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         </div>
       )}
 
-      <section className={`${selectionMode ? 'hidden' : 'flex'} relative shrink-0 items-stretch gap-2 rounded-[22px] border border-slate-200/80 bg-white p-2 dark:border-slate-800 dark:bg-slate-900/80`}>
-        <div className="mobile-chip-row flex min-w-0 flex-1 gap-2 overflow-x-auto">
-          {driveOptions.map((drive) => {
-            const name = diskNames[drive.id] || drive.defaultName;
-            const active = !viewingTrash && !viewingFavorites && activeDriveId === drive.id;
-            return (
-              <div key={drive.id} className={`flex min-w-[128px] shrink-0 items-center rounded-2xl border px-2 transition sm:min-w-[150px] ${active ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/15' : 'border-transparent bg-slate-50 dark:bg-slate-800/50'}`}>
-                <button type="button" onClick={() => { setActiveCloudMountId(null); setViewingTrash(false); setViewingFavorites(false); setCurrentPath(drive.path); }} className="flex min-h-12 min-w-0 flex-1 items-center gap-2 text-left">
-                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-white text-sky-500 dark:bg-slate-800' : 'bg-white text-slate-400 dark:bg-slate-800'}`}><HardDrive className="h-4 w-4" /></span>
-                  <span className={`truncate text-xs font-bold ${active ? 'text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200'}`}>{name}</span>
-                </button>
-                <button type="button" onClick={() => openDriveDetail(drive.id)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white hover:text-sky-500 dark:hover:bg-slate-800" aria-label={`查看${name}详情`}><Pencil className="h-3.5 w-3.5" /></button>
-              </div>
-            );
-          })}
-          {cloudMounts.map((mount) => {
-            const active = !viewingTrash && !viewingFavorites && activeCloudMountId === mount.id;
-            return <button key={mount.id} type="button" onClick={() => { setActiveCloudMountId(mount.id); setViewingTrash(false); setViewingFavorites(false); }} className={`flex min-h-12 min-w-[150px] shrink-0 items-center gap-2 rounded-2xl border px-3 text-left transition ${active ? 'border-sky-200 bg-sky-50 dark:border-sky-500/30 dark:bg-sky-500/15' : 'border-transparent bg-slate-50 dark:bg-slate-800/50'}`}><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-white text-sky-500 dark:bg-slate-800' : 'bg-white text-slate-400 dark:bg-slate-800'}`}><Cloud className="h-4 w-4" /></span><span className={`truncate text-xs font-bold ${active ? 'text-sky-700 dark:text-sky-300' : 'text-slate-700 dark:text-slate-200'}`}>{mount.name}</span></button>;
-          })}
-          {favorites.map((favoritePath) => {
-            const favoriteName = favoritePath.split('/').filter(Boolean).pop() || favoritePath;
-            const active = !viewingTrash && !viewingFavorites && (currentPath === favoritePath || currentPath.startsWith(`${favoritePath}/`));
-            return <button key={favoritePath} type="button" onClick={() => { setActiveCloudMountId(null); setViewingTrash(false); setViewingFavorites(false); setCurrentPath(favoritePath); }} className={`flex min-h-12 min-w-[140px] shrink-0 items-center gap-2 rounded-2xl border px-3 text-left transition ${active ? 'border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10' : 'border-transparent bg-slate-50 dark:bg-slate-800/50'}`} title={favoritePath}><Star className="h-4 w-4 shrink-0 fill-amber-400 text-amber-400" /><span className={`truncate text-xs font-bold ${active ? 'text-amber-700 dark:text-amber-300' : 'text-slate-700 dark:text-slate-200'}`}>{favoriteName}</span></button>;
-          })}
-        </div>
-
-        <details className="group relative shrink-0">
-          <summary className="flex h-full min-h-12 w-12 cursor-pointer list-none flex-col items-center justify-center rounded-2xl bg-slate-50 text-[9px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-300"><MoreHorizontal className="h-5 w-5" /><span className="mt-0.5">更多</span></summary>
-          <div className="absolute right-0 top-[calc(100%+8px)] z-40 max-h-[min(360px,55dvh)] w-[min(300px,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-            <button type="button" onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); openFavorites(); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-amber-50 hover:text-amber-700 dark:text-slate-200 dark:hover:bg-amber-500/10"><Star className="h-4 w-4 fill-amber-400 text-amber-400" /><span className="flex-1">收藏</span><span className="text-[10px] text-slate-400">{favorites.length}</span></button>
-            <button type="button" onClick={() => { setViewingFavorites(false); setViewingTrash(true); loadTrash(); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-rose-50 hover:text-rose-600 dark:text-slate-200 dark:hover:bg-rose-500/10"><Trash2 className="h-4 w-4 text-rose-500" /><span className="flex-1">回收站</span><span className="text-[10px] text-slate-400">{trashItems.length}</span></button>
-            <button type="button" onClick={() => setShowCloudMountModal(true)} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700 dark:text-slate-200 dark:hover:bg-sky-500/10"><Cloud className="h-4 w-4 text-sky-500" /><span className="flex-1">挂载云盘</span><span className="text-[10px] text-slate-400">夸克</span></button>
-            {localMounts.filter((mount) => mount.enabled && !secondaryOptions.some((drive) => drive.path === `/data/${mount.guestTarget}`)).map((mount) => <button key={mount.id} type="button" onClick={() => { setViewingTrash(false); setViewingFavorites(false); setCurrentPath(`/data/${mount.guestTarget}`); }} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"><HardDrive className="h-4 w-4 text-cyan-500" /><span className="truncate">{mount.name}</span></button>)}
-            <button type="button" onClick={() => setHideSystemFiles(!hideSystemFiles)} className="mt-1 flex min-h-11 w-full items-center gap-3 border-t border-slate-100 px-3 pt-1 text-left text-xs text-slate-700 dark:border-slate-800 dark:text-slate-200"><ShieldCheck className={`h-4 w-4 ${hideSystemFiles ? 'text-emerald-500' : 'text-amber-500'}`} /><span className="flex-1">系统目录</span><span className="text-[10px] text-slate-400">{hideSystemFiles ? '隐藏' : '显示'}</span></button>
-          </div>
-        </details>
-      </section>
+      <FileDriveSwitcher
+        selectionMode={selectionMode}
+        currentPath={currentPath}
+        driveOptions={driveOptions}
+        activeDriveId={activeDriveId}
+        activeCloudMountId={activeCloudMountId}
+        diskNames={diskNames}
+        cloudMounts={cloudMounts}
+        favorites={favorites}
+        localMounts={localMounts}
+        secondaryPaths={secondaryOptions.map((drive) => drive.path)}
+        trashCount={trashItems.length}
+        viewingTrash={viewingTrash}
+        viewingFavorites={viewingFavorites}
+        hideSystemFiles={hideSystemFiles}
+        onSelectDrive={(path) => {
+          setActiveCloudMountId(null);
+          setViewingTrash(false);
+          setViewingFavorites(false);
+          setCurrentPath(path);
+        }}
+        onSelectCloudMount={(id) => {
+          setActiveCloudMountId(id);
+          setViewingTrash(false);
+          setViewingFavorites(false);
+        }}
+        onSelectFavorite={(path) => {
+          setActiveCloudMountId(null);
+          setViewingTrash(false);
+          setViewingFavorites(false);
+          setCurrentPath(path);
+        }}
+        onOpenDriveDetail={openDriveDetail}
+        onOpenFavorites={openFavorites}
+        onOpenTrash={() => {
+          setViewingFavorites(false);
+          setViewingTrash(true);
+          loadTrash();
+        }}
+        onOpenCloudMount={() => setShowCloudMountModal(true)}
+        onSelectLocalMount={(path) => {
+          setActiveCloudMountId(null);
+          setViewingTrash(false);
+          setViewingFavorites(false);
+          setCurrentPath(path);
+        }}
+        onToggleSystemFiles={() => setHideSystemFiles((visible) => !visible)}
+      />
 
       {/* Main Content Area */}
       <div className="flex min-h-0 flex-1 flex-col gap-2.5">

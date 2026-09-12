@@ -320,6 +320,7 @@ npm audit --audit-level=low
 - FileManager 的本地文件上传/拖拽上传和回收站流程拆分为独立 hook；
 - FileManager 的新建、重命名、复制/移动和删除流程拆分为 `useFileOperations`；
 - FileManager 的夸克云盘上传、下载、复制/移动和传输任务刷新拆分为 `useTransferTasks`；
+- FileManager 的磁盘路径推导与磁盘/云盘/收藏/回收站切换栏拆分为 `useStorageDriveOptions`、`FileDriveSwitcher`；
 - Settings 的终端默认身份与 AI CLI Skill 映射区拆分为独立 section；
 - Settings 的 NAS 用户、Linux 系统用户、Root 密码和主题外观区拆分为独立 section；
 - SMB 共享区拆分为独立展示模块；
@@ -337,4 +338,4 @@ cd web
 npm run build:verify
 ```
 
-当前主入口约 80 KB raw / 21 KB gzip；终端业务代码约 30 KB raw / 10 KB gzip，xterm 单独为约 334 KB raw / 85 KB gzip；所有 JavaScript chunk 均通过 180 KB gzip 门槛。Settings、StorageSettings 和 FileManager 仍保留部分页面级状态，后续可继续按本计划逐块迁移，避免一次性重写造成线上回归。
+当前主入口约 80 KB raw / 21 KB gzip；终端业务代码约 30 KB raw / 10 KB gzip，xterm 单独为约 334 KB raw / 85 KB gzip；所有 JavaScript chunk 均通过 180 KB gzip 门槛。Settings、StorageSettings 和 FileManager 仍保留部分页面级状态与弹窗编排，后续继续逐块迁移，避免一次性重写造成线上回归。
