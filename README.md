@@ -6,7 +6,7 @@ MacBox 不追求成为一套大而全的家庭服务器系统：当前不提供 
 
 MacBox 采用 Apache License 2.0 发布，允许个人和组织商用、修改和再分发，具体条款见 [LICENSE](LICENSE)。
 
-当前版本的分发方式是“预编译二进制压缩包 + `MacBoxMemu.app` + `install.sh`”，不提供 DMG。发行包不包含开发机用户、Docker 容器、Docker 镜像、卷、Lima 实例或 MacBox 数据。
+当前版本同时提供可拖入“应用程序”的 DMG，以及用于命令行部署和故障恢复的预编译压缩包。发行产物不包含开发机用户、Docker 容器、Docker 镜像、卷、Lima 实例或 MacBox 数据。
 
 ## v0.1.0 当前版本功能（2026-09-13）
 
@@ -102,20 +102,20 @@ MacBox 采用 Apache License 2.0 发布，允许个人和组织商用、修改�
 
 本地 Agent 需要能够在运行 MacBox 的 Mac 上执行终端命令；手机端聊天或没有本机权限的云端 Agent 不能替代本地部署。部署完成后，Agent 应返回实际安装目录、服务地址、Lima 状态和失败日志，而不是只报告“已完成”。
 
-### 第二选择：直接使用 GitHub Release
+### 第二选择：直接使用 GitHub Release DMG
 
-建议将 Release 压缩包下载并解压到用户目录下的 `~/macbox`。该目录只是下载和解压工作目录，安装器会把程序安装到用户级运行目录。
+从 GitHub Release 下载并校验匹配架构的 DMG：
 
-从 GitHub Release 下载匹配架构的压缩包：
+- Apple Silicon（M1/M2/M3/M4）：`MacBox_*_macos_aarch64.dmg`
+- Intel Mac：`MacBox_*_macos_x86_64.dmg`
 
-- Apple Silicon（M1/M2/M3/M4）：`MacBox_*_macos_aarch64.tar.gz`
-- Intel Mac：`MacBox_*_macos_x86_64.tar.gz`
+打开 DMG 后，将 `MacBoxMemu.app` 拖入“Applications”。没有系统管理员权限时，也可以放入个人目录的 `~/Applications`。不要直接在只读 DMG 中运行。
 
-解压后直接双击根目录的 `MacBoxMemu.app`，然后从顶部菜单选择：
+从“应用程序”中启动后，从顶部菜单选择：
 
 1. 启动后端服务；
-2. 打开网页端；
-3. 在本机完成首次初始化。
+2. 菜单栏程序会校验并安装内嵌的用户级运行组件；
+3. 打开网页端并在本机完成首次初始化。
 
 首次初始化只允许在运行 MacBox 的 Mac 本机完成。登录页会要求现场设置管理员用户名和至少 8 个字符的强密码，不使用公开固定账号密码。
 
@@ -135,6 +135,8 @@ open "./MacBoxMemu.app"
 不要使用会全局关闭 Gatekeeper 的 `sudo spctl --master-disable`。
 
 ### 命令行备用安装
+
+Release 同时保留两个架构的 `tar.gz`。建议将压缩包下载并解压到用户目录下的 `~/macbox`，该目录只是临时工作目录：
 
 ```
 tar -xzf MacBox_*_macos_*.tar.gz
@@ -162,16 +164,21 @@ cd MacBox_*_macos_*
 ```
 git clone https://github.com/lulalulaluobo/macbox.git
 cd macbox
-make release-mac
+make dmg                 # 构建两个架构的 DMG
+make dmg-aarch64         # 只构建 Apple Silicon DMG
+make dmg-x86-64          # 只构建 Intel DMG
+make release-mac         # 构建命令行压缩包
 ```
 
-构建依赖 Go、Node.js/npm、Xcode Command Line Tools、Lima 和 macOS。构建脚本会：
+DMG 构建依赖 Go、Node.js/npm、Xcode Command Line Tools 和 macOS，不要求构建机预先启动 Lima。构建脚本会：
 
 1. 构建 React 前端；
-2. 编译当前 macOS 架构的 Go 后端；
-3. 复制 VM 模板、安装器、卸载器和备用控制器；
-4. 编译 `MacBoxMemu.app`；
-5. 生成压缩包、包内文件清单和 SHA-256 校验文件。
+2. 分别编译 Apple Silicon 与 Intel Go 后端；
+3. 将 VM 模板、安装器、卸载器和备用控制器嵌入 `MacBoxMemu.app`；
+4. 从内向外进行 ad-hoc 签名；
+5. 生成并验证 DMG 和 SHA-256 校验文件。
+
+当前公开测试包没有 Apple Developer ID 公证，首次打开可能需要在 Finder 中右键选择“打开”。构建脚本已经为后续 Developer ID 签名和 `notarytool` 公证预留环境变量，详见 [DMG_PACKAGING_PLAN.md](DMG_PACKAGING_PLAN.md)。
 
 常用开发命令：
 

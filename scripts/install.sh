@@ -7,6 +7,9 @@ MENU_APP="${HOME}/Applications/MacBoxMemu.app"
 DEFAULT_PORT=19808
 DEFAULT_HOST="0.0.0.0"
 START_AFTER_INSTALL=0
+SKIP_LIMA_CHECK=0
+SKIP_MENU_APP=0
+BACKEND_SOURCE=""
 PORT="${MACBOX_PORT:-$DEFAULT_PORT}"
 HOST="${MACBOX_HOST:-$DEFAULT_HOST}"
 
@@ -30,6 +33,11 @@ MacBox macOS Web 服务安装器
   ./install.sh --start          安装完成后以前台方式启动 Web 服务
   ./install.sh --port 19808     指定启动端口（仅影响 --start）
   ./install.sh --host 0.0.0.0   指定启动监听地址（仅影响 --start）
+  ./install.sh --skip-lima-check
+                                仅安装运行文件，由 Web 初始化向导检查 Lima
+  ./install.sh --skip-menu-app  不复制菜单栏 App（供 DMG 内的 App 调用）
+  ./install.sh --backend-source /绝对路径/macbox
+                                使用 App 内已签名的后端（供 DMG 调用）
   ./install.sh --help           显示帮助
 
 安装位置：
@@ -112,15 +120,21 @@ validate_release() {
     *) die "不支持的 macOS CPU 架构：$machine" ;;
   esac
 
-  [[ -x "$SCRIPT_DIR/bin/macbox" ]] || die "发行包不完整：缺少可执行文件 bin/macbox。"
+  if [[ -z "$BACKEND_SOURCE" ]]; then
+    BACKEND_SOURCE="$SCRIPT_DIR/bin/macbox"
+  fi
+  [[ "$BACKEND_SOURCE" == /* ]] || die "后端来源必须是绝对路径。"
+  [[ -x "$BACKEND_SOURCE" && ! -d "$BACKEND_SOURCE" ]] || die "发行包不完整：缺少可执行的 macbox 后端。"
   [[ -x "$SCRIPT_DIR/MacBox.command" ]] || die "发行包不完整：缺少可执行文件 MacBox.command。"
-  [[ -d "$SCRIPT_DIR/MacBoxMemu.app/Contents/MacOS" ]] || die "发行包不完整：缺少 MacBoxMemu.app。"
-  [[ -x "$SCRIPT_DIR/MacBoxMemu.app/Contents/MacOS/MacBoxMemu" ]] || die "发行包不完整：MacBoxMemu.app 不可执行。"
+  if (( SKIP_MENU_APP == 0 )); then
+    [[ -d "$SCRIPT_DIR/MacBoxMemu.app/Contents/MacOS" ]] || die "发行包不完整：缺少 MacBoxMemu.app。"
+    [[ -x "$SCRIPT_DIR/MacBoxMemu.app/Contents/MacOS/MacBoxMemu" ]] || die "发行包不完整：MacBoxMemu.app 不可执行。"
+  fi
   [[ -x "$SCRIPT_DIR/uninstall.sh" ]] || die "发行包不完整：缺少可执行文件 uninstall.sh。"
   [[ -d "$SCRIPT_DIR/templates/vm" ]] || die "发行包不完整：缺少 templates/vm。"
   require_command file
   require_command shasum
-  binary_info="$(file -b "$SCRIPT_DIR/bin/macbox")"
+  binary_info="$(file -b "$BACKEND_SOURCE")"
   [[ "$binary_info" == *"$expected"* ]] || die "当前发行包与本机架构不匹配。当前机器：$machine；二进制信息：$binary_info"
 
   if [[ -f "$SCRIPT_DIR/checksums.txt" ]]; then
@@ -128,43 +142,100 @@ validate_release() {
   fi
 }
 
+validate_install_targets() {
+  local command_path="${BIN_DIR}/macbox"
+  if [[ -L "$command_path" ]]; then
+    local existing_target
+    existing_target="$(readlink "$command_path" || true)"
+    [[ "$existing_target" == "${INSTALL_ROOT}/bin/macbox" ]] || die "命令入口已指向其他程序，未覆盖：$command_path -> $existing_target"
+  elif [[ -e "$command_path" ]]; then
+    die "命令入口已存在且不是 MacBox 管理的链接，未覆盖：$command_path"
+  fi
+
+  if (( SKIP_MENU_APP == 0 )) && [[ -e "$MENU_APP" || -L "$MENU_APP" ]]; then
+    local bundle_id=""
+    if [[ -f "$MENU_APP/Contents/Info.plist" && -x /usr/libexec/PlistBuddy ]]; then
+      bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$MENU_APP/Contents/Info.plist" 2>/dev/null || true)"
+    fi
+    case "$bundle_id" in
+      com.macbox.menu|io.github.lulalulaluobo.macbox.menu) ;;
+      *) die "同名菜单栏 App 不属于 MacBox，未覆盖：$MENU_APP" ;;
+    esac
+  fi
+}
+
 install_files() {
-  local stage
-  stage="$(mktemp -d "${TMPDIR:-/tmp}/macbox-install.XXXXXX")"
-  trap 'rm -rf -- "$stage"' EXIT
+  local install_parent stage previous
+  install_parent="$(dirname -- "$INSTALL_ROOT")"
+  [[ "$install_parent" == "$HOME/.local/share" ]] || die "安装目录父路径安全校验失败：$install_parent"
+  mkdir -p "$install_parent"
+  stage="$(mktemp -d "$install_parent/.macbox-install.XXXXXX")"
+  previous="$install_parent/.macbox-previous-$$"
+
+  cleanup_install_staging() {
+    if [[ -n "${stage:-}" && "$stage" == "$install_parent"/.macbox-install.* ]]; then
+      rm -rf -- "$stage"
+    fi
+  }
+  trap cleanup_install_staging EXIT
 
   mkdir -p "$stage/bin"
-  cp "$SCRIPT_DIR/bin/macbox" "$stage/bin/macbox"
+  cp "$BACKEND_SOURCE" "$stage/bin/macbox"
   cp -R "$SCRIPT_DIR/templates" "$stage/templates"
-  cp -R "$SCRIPT_DIR/MacBoxMemu.app" "$stage/MacBoxMemu.app"
+  [[ ! -d "$SCRIPT_DIR/assets" ]] || cp -R "$SCRIPT_DIR/assets" "$stage/assets"
+  if (( SKIP_MENU_APP == 0 )); then
+    cp -R "$SCRIPT_DIR/MacBoxMemu.app" "$stage/MacBoxMemu.app"
+  fi
   cp "$SCRIPT_DIR/uninstall.sh" "$stage/uninstall.sh"
   cp "$SCRIPT_DIR/MacBox.command" "$stage/MacBox.command"
+  for optional_file in LICENSE MACBOX_DEPLOYMENT_PROMPT.md README.md; do
+    [[ ! -f "$SCRIPT_DIR/$optional_file" ]] || cp "$SCRIPT_DIR/$optional_file" "$stage/$optional_file"
+  done
+  for metadata_file in VERSION BUILD_ID; do
+    [[ ! -f "$SCRIPT_DIR/$metadata_file" ]] || cp "$SCRIPT_DIR/$metadata_file" "$stage/$metadata_file"
+  done
   [[ ! -e "$SCRIPT_DIR/checksums.txt" ]] || cp "$SCRIPT_DIR/checksums.txt" "$stage/checksums.txt"
-  chmod 0755 "$stage/bin/macbox" "$stage/uninstall.sh" "$stage/MacBox.command" "$stage/MacBoxMemu.app/Contents/MacOS/MacBoxMemu"
+  chmod 0755 "$stage/bin/macbox" "$stage/uninstall.sh" "$stage/MacBox.command"
+  if (( SKIP_MENU_APP == 0 )); then
+    chmod 0755 "$stage/MacBoxMemu.app/Contents/MacOS/MacBoxMemu"
+  fi
 
-  mkdir -p "$(dirname -- "$INSTALL_ROOT")"
   if [[ -e "$INSTALL_ROOT" || -L "$INSTALL_ROOT" ]]; then
     [[ "$INSTALL_ROOT" == "$HOME/.local/share/macbox" ]] || die "拒绝覆盖非预期安装目录：$INSTALL_ROOT"
-    rm -rf -- "$INSTALL_ROOT"
+    [[ ! -e "$previous" && ! -L "$previous" ]] || die "临时升级目录已存在：$previous"
+    mv "$INSTALL_ROOT" "$previous"
   fi
-  mv "$stage" "$INSTALL_ROOT"
-  trap - EXIT
+  if ! mv "$stage" "$INSTALL_ROOT"; then
+    if [[ -e "$previous" || -L "$previous" ]]; then
+      if mv "$previous" "$INSTALL_ROOT"; then
+        previous=""
+        die "无法激活新版本运行文件，旧版本已恢复。"
+      fi
+      die "无法激活新版本，也无法自动恢复旧版本；旧版本仍保留在：$previous"
+    fi
+    die "无法激活新版本运行文件。"
+  fi
+  stage=""
+  if [[ -e "$previous" || -L "$previous" ]]; then
+    rm -rf -- "$previous"
+  fi
+  previous=""
 
-  mkdir -p "$(dirname -- "$MENU_APP")"
-  [[ "$MENU_APP" == "$HOME/Applications/MacBoxMemu.app" ]] || die "拒绝覆盖非预期菜单栏应用：$MENU_APP"
-  rm -rf -- "$MENU_APP"
-  cp -R "$INSTALL_ROOT/MacBoxMemu.app" "$MENU_APP"
-  chmod 0755 "$MENU_APP/Contents/MacOS/MacBoxMemu"
+  if (( SKIP_MENU_APP == 0 )); then
+    mkdir -p "$(dirname -- "$MENU_APP")"
+    [[ "$MENU_APP" == "$HOME/Applications/MacBoxMemu.app" ]] || die "拒绝覆盖非预期菜单栏应用：$MENU_APP"
+    rm -rf -- "$MENU_APP"
+    cp -R "$INSTALL_ROOT/MacBoxMemu.app" "$MENU_APP"
+    chmod 0755 "$MENU_APP/Contents/MacOS/MacBoxMemu"
+  fi
 
   mkdir -p "$BIN_DIR"
   local command_path="${BIN_DIR}/macbox"
-  if [[ -e "$command_path" || -L "$command_path" ]]; then
-    if [[ -d "$command_path" && ! -L "$command_path" ]]; then
-      die "命令入口路径是目录，未覆盖：$command_path"
-    fi
+  if [[ -L "$command_path" ]]; then
     rm -f -- "$command_path"
   fi
   ln -s "${INSTALL_ROOT}/bin/macbox" "$command_path"
+  trap - EXIT
 }
 
 print_next_steps() {
@@ -176,7 +247,11 @@ print_next_steps() {
 
   log "安装完成。"
   printf '\n下一步：\n'
-  printf '  1. 在 Finder 中双击 ~/Applications/MacBoxMemu.app，顶部栏会出现 MacBox 图标。\n'
+  if (( SKIP_MENU_APP == 0 )); then
+    printf '  1. 在 Finder 中双击 ~/Applications/MacBoxMemu.app，顶部栏会出现 MacBox 图标。\n'
+  else
+    printf '  1. 当前 DMG 菜单栏 App 已完成运行组件安装。\n'
+  fi
   printf '  2. 从顶部栏选择“启动后端服务”，再打开网页端完成首次初始化（首次登录时现场设置管理员用户名和至少 8 个字符的强密码）：\n'
   printf '     http://127.0.0.1:%s\n' "$PORT"
   if [[ -n "$lan_ip" ]]; then
@@ -202,6 +277,19 @@ while [[ $# -gt 0 ]]; do
       HOST="$2"
       shift 2
       ;;
+    --skip-lima-check)
+      SKIP_LIMA_CHECK=1
+      shift
+      ;;
+    --skip-menu-app)
+      SKIP_MENU_APP=1
+      shift
+      ;;
+    --backend-source)
+      [[ $# -ge 2 ]] || die "--backend-source 需要一个绝对文件路径。"
+      BACKEND_SOURCE="$2"
+      shift 2
+      ;;
     --help|-h)
       usage
       exit 0
@@ -216,7 +304,10 @@ done
 [[ -n "$HOST" && "$HOST" != *[[:space:]]* ]] || die "监听地址不能为空或包含空格。"
 
 validate_release
-ensure_lima
+validate_install_targets
+if (( SKIP_LIMA_CHECK == 0 )); then
+  ensure_lima
+fi
 install_files
 
 if (( START_AFTER_INSTALL )); then

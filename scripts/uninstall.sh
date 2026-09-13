@@ -13,6 +13,7 @@ DATA_IMAGE="${HOME}/MacBox/datadisk.img"
 STATE_DIR="${HOME}/.macbox"
 PURGE=0
 UNINSTALL_LIMA=0
+KEEP_MENU_APP=0
 
 usage() {
   cat <<'USAGE'
@@ -23,6 +24,7 @@ MacBox macOS Web 服务卸载器
   ./uninstall.sh --purge                 输入 DELETE 后删除 MacBox 实例与数据
   ./uninstall.sh --purge --uninstall-lima
                                          同时卸载 Homebrew 安装的 Lima
+  ./uninstall.sh --keep-menu-app          保留当前菜单栏 App，由 App 自行移入废纸篓
   ./uninstall.sh --help                  显示帮助
 
 --purge 会删除：MacBox Lima 实例、macbox-data 管理盘、~/.macbox 配置、
@@ -44,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --uninstall-lima)
       UNINSTALL_LIMA=1
+      shift
+      ;;
+    --keep-menu-app)
+      KEEP_MENU_APP=1
       shift
       ;;
     --help|-h)
@@ -122,7 +128,7 @@ elif [[ -f "$COMMAND_PATH" ]]; then
 fi
 
 rm -rf -- "$INSTALL_ROOT"
-if [[ "$MENU_APP" == "$HOME/Applications/MacBoxMemu.app" ]]; then
+if (( KEEP_MENU_APP == 0 )) && [[ "$MENU_APP" == "$HOME/Applications/MacBoxMemu.app" ]]; then
   rm -rf -- "$MENU_APP"
 fi
 

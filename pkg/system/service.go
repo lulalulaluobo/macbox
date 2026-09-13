@@ -102,6 +102,10 @@ const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <dict>
     <key>Label</key>
     <string>{{.Label}}</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>io.github.lulalulaluobo.macbox.menu</string>
+    </array>
     <key>ProgramArguments</key>
     <array>
         <string>{{.BinaryPath}}</string>

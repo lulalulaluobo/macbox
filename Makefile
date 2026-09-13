@@ -1,4 +1,4 @@
-.PHONY: all build build-web build-backend build-mac-menu release-mac release-mac-cli dev dev-backend dev-backend-lan dev-web test clean
+.PHONY: all build build-web build-backend build-mac-menu release-mac release-mac-cli dmg dmg-aarch64 dmg-x86-64 dev dev-backend dev-backend-lan dev-web test clean
 
 all: build
 
@@ -23,6 +23,18 @@ release-mac:
 	bash scripts/build-mac-release.sh
 
 release-mac-cli: release-mac
+
+dmg:
+	@echo "==> 构建 Apple Silicon 与 Intel MacBox DMG..."
+	bash scripts/build-mac-dmg.sh --all
+
+dmg-aarch64:
+	@echo "==> 构建 Apple Silicon MacBox DMG..."
+	bash scripts/build-mac-dmg.sh --arch aarch64
+
+dmg-x86-64:
+	@echo "==> 构建 Intel MacBox DMG..."
+	bash scripts/build-mac-dmg.sh --arch x86_64
 
 dev-backend:
 	@echo "==> 启动 Go 后端开发服务..."

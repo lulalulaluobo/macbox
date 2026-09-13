@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>MacBoxMemu</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.macbox.menu</string>
+	<string>io.github.lulalulaluobo.macbox.menu</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -26,5 +26,9 @@
 	<true/>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MacBox 需要连接本机虚拟机，并允许您授权的局域网设备访问控制台和已部署服务。</string>
 </dict>
 </plist>

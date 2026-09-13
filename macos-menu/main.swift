@@ -77,6 +77,17 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         buildMenu()
+        if embeddedRuntimeRoot() != nil && isRunningFromDiskImage() {
+            DispatchQueue.main.async { [weak self] in
+                self?.showAlert(
+                    title: "请先安装 MacBox",
+                    message: "MacBox 当前仍在只读 DMG 中。请退出后将 MacBoxMemu.app 拖入“应用程序”，再从“应用程序”中打开。",
+                    style: .warning
+                )
+                NSApplication.shared.terminate(nil)
+            }
+            return
+        }
         applyStatusVisual(.checking)
         refreshStatus(nil)
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -279,47 +290,59 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
 
-            guard let binary = self.locateBackendBinary() else {
-                self.actionInProgress = false
-                self.showAlert(title: "找不到 MacBox", message: "没有找到 macbox 可执行文件。请先运行发行包中的 install.sh，或从完整发行包启动菜单栏助手。", style: .warning)
-                return
+            self.installEmbeddedRuntimeIfNeeded { [weak self] installed in
+                guard let self else { return }
+                guard installed else {
+                    self.actionInProgress = false
+                    self.refreshStatus(nil)
+                    return
+                }
+                self.launchBackendProcess()
             }
+        }
+    }
 
-            do {
-                let stateURL = self.fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".macbox", isDirectory: true)
-                try self.fileManager.createDirectory(at: stateURL, withIntermediateDirectories: true)
-                let logURL = stateURL.appendingPathComponent("macbox.log")
-                if !self.fileManager.fileExists(atPath: logURL.path) {
-                    self.fileManager.createFile(atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
-                }
-                guard let logHandle = try? FileHandle(forWritingTo: logURL) else {
-                    throw NSError(domain: "MacBoxMemu", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法打开菜单栏日志文件"])
-                }
-                try logHandle.seekToEnd()
-                logHandle.write(Data("\n[MacBox Menu] 启动 Web 服务\n".utf8))
+    private func launchBackendProcess() {
+        guard let binary = locateBackendBinary() else {
+            actionInProgress = false
+            showAlert(title: "找不到 MacBox", message: "运行组件安装后仍未找到 macbox 可执行文件。请重新下载完整 DMG，或打开日志查看安装错误。", style: .warning)
+            return
+        }
 
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: binary)
-                process.arguments = ["--host", "0.0.0.0", "--port", String(self.port)]
-                process.standardOutput = logHandle
-                process.standardError = logHandle
-                process.terminationHandler = { [weak self] _ in
-                    DispatchQueue.main.async {
-                        self?.backendProcess = nil
-                        try? self?.backendLogHandle?.close()
-                        self?.backendLogHandle = nil
-                        self?.refreshStatus(nil)
-                    }
-                }
-                try process.run()
-                self.backendProcess = process
-                self.backendLogHandle = logHandle
-                self.writePID(process.processIdentifier)
-                self.waitForBackend(retries: 40)
-            } catch {
-                self.actionInProgress = false
-                self.showAlert(title: "MacBox 启动失败", message: error.localizedDescription, style: .warning)
+        do {
+            let stateURL = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".macbox", isDirectory: true)
+            try fileManager.createDirectory(at: stateURL, withIntermediateDirectories: true)
+            let logURL = stateURL.appendingPathComponent("macbox.log")
+            if !fileManager.fileExists(atPath: logURL.path) {
+                fileManager.createFile(atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
             }
+            guard let logHandle = try? FileHandle(forWritingTo: logURL) else {
+                throw NSError(domain: "MacBoxMemu", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法打开菜单栏日志文件"])
+            }
+            try logHandle.seekToEnd()
+            logHandle.write(Data("\n[MacBox Menu] 启动 Web 服务\n".utf8))
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: binary)
+            process.arguments = ["--host", "0.0.0.0", "--port", String(port)]
+            process.standardOutput = logHandle
+            process.standardError = logHandle
+            process.terminationHandler = { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.backendProcess = nil
+                    try? self?.backendLogHandle?.close()
+                    self?.backendLogHandle = nil
+                    self?.refreshStatus(nil)
+                }
+            }
+            try process.run()
+            backendProcess = process
+            backendLogHandle = logHandle
+            writePID(process.processIdentifier)
+            waitForBackend(retries: 40)
+        } catch {
+            actionInProgress = false
+            showAlert(title: "MacBox 启动失败", message: error.localizedDescription, style: .warning)
         }
     }
 
@@ -330,7 +353,8 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.actionInProgress = false
                 self.refreshStatus(nil)
                 self.openWeb(nil)
-                self.showAlert(title: "MacBox 已启动", message: "Web 服务已启动并支持局域网访问。\n\n本机：http://127.0.0.1:\(self.port)\n日志：\(self.logPath())")
+                let lanLine = self.lanAddress().map { "\n局域网：http://\($0):\(self.port)" } ?? "\n局域网：未检测到有效地址"
+                self.showAlert(title: "MacBox 已启动", message: "Web 服务已启动并支持局域网访问。\n\n本机：http://127.0.0.1:\(self.port)\(lanLine)\n日志：\(self.logPath())")
                 return
             }
             if retries <= 0 {
@@ -427,7 +451,8 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         stopBackendProcess(silent: true) { [weak self] in
-            self?.runUninstall(script: script, arguments: [])
+            guard let self else { return }
+            self.runUninstall(script: script, arguments: self.uninstallArguments([]))
         }
     }
 
@@ -438,8 +463,14 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         stopBackendProcess(silent: true) { [weak self] in
-            self?.runUninstall(script: script, arguments: ["--purge"], input: "DELETE\n")
+            guard let self else { return }
+            self.runUninstall(script: script, arguments: self.uninstallArguments(["--purge"]), input: "DELETE\n")
         }
+    }
+
+    private func uninstallArguments(_ arguments: [String]) -> [String] {
+        guard embeddedRuntimeRoot() != nil else { return arguments }
+        return arguments + ["--keep-menu-app"]
     }
 
     private func runUninstall(script: String, arguments: [String], input: String? = nil) {
@@ -448,12 +479,37 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             self.actionInProgress = false
             if status == 0 {
-                self.showAlert(title: "MacBox 已卸载", message: output.isEmpty ? "卸载操作已完成。" : String(output.suffix(1600)))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    NSApplication.shared.terminate(nil)
-                }
+                self.finishUninstall(output: output)
             } else {
                 self.showAlert(title: "卸载失败", message: self.shortOutput(output, fallback: "请在终端执行 uninstall.sh 查看详细错误。"), style: .warning)
+            }
+        }
+    }
+
+    private func finishUninstall(output: String) {
+        let message = output.isEmpty ? "卸载操作已完成。" : String(output.suffix(1600))
+        guard embeddedRuntimeRoot() != nil else {
+            showAlert(title: "MacBox 已卸载", message: message)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                NSApplication.shared.terminate(nil)
+            }
+            return
+        }
+
+        let appURL = Bundle.main.bundleURL
+        NSWorkspace.shared.recycle([appURL]) { [weak self] _, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let error {
+                    self.showAlert(
+                        title: "运行组件已卸载",
+                        message: "\(message)\n\nmacOS 未能自动将 MacBoxMemu.app 移入废纸篓：\(error.localizedDescription)\n请在 Finder 中手动移除当前 App。",
+                        style: .warning
+                    )
+                } else {
+                    self.showAlert(title: "MacBox 已卸载", message: "\(message)\n\nMacBoxMemu.app 已移入废纸篓。")
+                }
+                NSApplication.shared.terminate(nil)
             }
         }
     }
@@ -511,6 +567,8 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func locateBackendBinary() -> String? {
         let installed = home + "/.local/share/macbox/bin/macbox"
         if fileManager.isExecutableFile(atPath: installed) { return installed }
+        if let embedded = embeddedRuntimeRoot()?.appendingPathComponent("bin/macbox").path,
+           fileManager.isExecutableFile(atPath: embedded) { return embedded }
         let release = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("bin/macbox").path
         if fileManager.isExecutableFile(atPath: release) { return release }
         return nil
@@ -519,6 +577,8 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func locateScript(_ name: String) -> String? {
         let installed = home + "/.local/share/macbox/\(name)"
         if fileManager.isExecutableFile(atPath: installed) { return installed }
+        if let embedded = embeddedRuntimeRoot()?.appendingPathComponent(name).path,
+           fileManager.isExecutableFile(atPath: embedded) { return embedded }
         let release = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(name).path
         if fileManager.isExecutableFile(atPath: release) { return release }
         return nil
@@ -556,11 +616,94 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func ownedBackendPID() -> Int32? {
         var candidates: [String] = [home + "/.macbox/macbox.menu.pid", home + "/.macbox/macbox.command.pid"]
         if let runningPID = backendProcess?.processIdentifier { candidates.insert(String(runningPID), at: 0) }
-        let binaries = [home + "/.local/share/macbox/bin/macbox", Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("bin/macbox").path]
+        var binaries = [home + "/.local/share/macbox/bin/macbox", Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("bin/macbox").path]
+        if let embedded = embeddedRuntimeRoot()?.appendingPathComponent("bin/macbox").path {
+            binaries.append(embedded)
+        }
         for value in candidates {
             guard let pid = Int32(value.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1 else { continue }
             let command = runSync("/bin/ps", arguments: ["-p", String(pid), "-o", "command="])
             if binaries.contains(where: { command.contains($0) }) { return pid }
+        }
+        return nil
+    }
+
+    private func embeddedRuntimeRoot() -> URL? {
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        let runtime = resources.appendingPathComponent("runtime", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: runtime.path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+        return runtime
+    }
+
+    private func isRunningFromDiskImage() -> Bool {
+        Bundle.main.bundleURL.standardizedFileURL.path.hasPrefix("/Volumes/")
+    }
+
+    private func installEmbeddedRuntimeIfNeeded(completion: @escaping (Bool) -> Void) {
+        guard let runtime = embeddedRuntimeRoot() else {
+            completion(true)
+            return
+        }
+        if isRunningFromDiskImage() {
+            showAlert(title: "请先安装 MacBox", message: "请将 MacBoxMemu.app 拖入“应用程序”，再从“应用程序”中启动。", style: .warning)
+            completion(false)
+            return
+        }
+
+        let installedBinary = home + "/.local/share/macbox/bin/macbox"
+        let installedBuildID = readTrimmedFile(home + "/.local/share/macbox/BUILD_ID")
+        let bundledBuildID = readTrimmedFile(runtime.appendingPathComponent("BUILD_ID").path)
+        let installedVersion = readTrimmedFile(home + "/.local/share/macbox/VERSION")
+        let bundledVersion = readTrimmedFile(runtime.appendingPathComponent("VERSION").path)
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        if fileManager.isExecutableFile(atPath: installedBinary) {
+            if let bundledBuildID, installedBuildID == bundledBuildID {
+                completion(true)
+                return
+            }
+            if bundledBuildID == nil, let bundledVersion, installedVersion == bundledVersion {
+                completion(true)
+                return
+            }
+        }
+
+        let installer = runtime.appendingPathComponent("install.sh").path
+        guard fileManager.isExecutableFile(atPath: installer) else {
+            showAlert(title: "MacBox 安装失败", message: "DMG 内缺少可执行的安装组件。请重新下载并核对 SHA-256。", style: .warning)
+            completion(false)
+            return
+        }
+
+        let embeddedBackend = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/macbox").path
+        guard fileManager.isExecutableFile(atPath: embeddedBackend) else {
+            showAlert(title: "MacBox 安装失败", message: "DMG 内缺少已签名的后端组件。请重新下载并核对 SHA-256。", style: .warning)
+            completion(false)
+            return
+        }
+
+        runAsync(installer, arguments: ["--skip-lima-check", "--skip-menu-app", "--backend-source", embeddedBackend], input: nil) { [weak self] status, output in
+            guard let self else { return }
+            guard status == 0, self.fileManager.isExecutableFile(atPath: installedBinary) else {
+                self.showAlert(title: "MacBox 安装失败", message: self.shortOutput(output, fallback: "无法安装 DMG 内的运行组件。"), style: .warning)
+                completion(false)
+                return
+            }
+            completion(true)
+        }
+    }
+
+    private func readTrimmedFile(_ path: String) -> String? {
+        guard let value = try? String(contentsOfFile: path, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return value
+    }
+
+    private func lanAddress() -> String? {
+        for interface in ["en0", "en1"] {
+            let value = runSync("/usr/sbin/ipconfig", arguments: ["getifaddr", interface])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { return value }
         }
         return nil
     }
