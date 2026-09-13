@@ -144,7 +144,7 @@ export function useLocalMountSettings({
       setNewMountName('');
       setNewMountGuestTarget('media/MacMedia');
       onRestartRequired();
-      onAlert({ type: 'success', text: '已成功添加本地直通目录，请重启 VM 生效！' });
+      onAlert({ type: 'success', text: '已保存本机目录直通配置。请重启 VM 后再访问；重启期间 Docker 服务会短暂离线并自动恢复。' });
     } catch (err: any) {
       onAlert({ type: 'error', text: `添加直通失败: ${err.message}` });
     } finally {

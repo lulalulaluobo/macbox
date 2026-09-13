@@ -415,6 +415,16 @@ func (s *Server) operationContext(timeout time.Duration) (context.Context, conte
 }
 
 func (s *Server) scheduleMountSync() {
+	// Adding, removing, or changing a VirtioFS mount rewrites the Lima
+	// configuration. Lima only exposes the new source after the VM restarts;
+	// attempting to run the guest bind script against the still-running VM
+	// waits for a source that cannot exist yet and makes Docker-backed pages
+	// look unavailable. Start/Restart performs the sync once the new VM is
+	// ready, so defer background sync while configuration is pending.
+	if s.vmMgr.IsConfigDirty() {
+		log.Printf("[MacBox API] mount sync deferred until the VM restarts")
+		return
+	}
 	s.mountSyncMu.Lock()
 	if s.mountSyncActive {
 		s.mountSyncMu.Unlock()

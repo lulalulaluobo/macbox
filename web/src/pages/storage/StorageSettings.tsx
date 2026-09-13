@@ -431,7 +431,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
         <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm flex items-center justify-between shadow-lg">
           <div className="flex items-center space-x-2.5">
             <RotateCw className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>数据盘挂载或直通配置已变更！需要重启 Linux 虚拟机以重新加载挂载生效。</span>
+            <span>数据盘挂载或直通配置已变更！需要重启 Linux 虚拟机后生效；重启期间 Docker 服务会短暂离线并在完成后自动恢复。</span>
           </div>
           <button
             onClick={handleRestartVM}
