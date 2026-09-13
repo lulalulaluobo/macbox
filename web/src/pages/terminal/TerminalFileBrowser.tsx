@@ -89,41 +89,44 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
 }) => (
   <div className="order-1 flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/80 lg:w-[320px] lg:flex-none lg:shrink-0">
     <div className="space-y-3 border-b border-slate-800/80 p-3.5 sm:p-4">
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex min-w-0 items-center justify-between gap-3 lg:flex-1 lg:justify-start">
+          <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 ring-1 ring-sky-400/20">
             <Folder className="h-4 w-4 text-sky-400" />
           </div>
           <div className="min-w-0">
             <span className="block truncate whitespace-nowrap text-[15px] font-bold text-white">虚拟机文件系统</span>
-            <span className="mt-0.5 block truncate text-[10px] text-slate-500">VM 文件浏览与目录管理</span>
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+          </div>
           <button
             onClick={onClose}
             aria-label="返回终端"
-            className="flex h-9 items-center gap-1.5 rounded-xl bg-slate-800 px-2.5 text-[11px] font-semibold text-slate-200 transition hover:bg-slate-700 lg:hidden"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-slate-800 px-2.5 text-[11px] font-semibold text-slate-200 transition hover:bg-slate-700 lg:hidden"
             title="返回终端"
           >
             <PanelLeftClose className="h-4 w-4" />
             <span>终端</span>
           </button>
+        </div>
+        <div className="grid w-full shrink-0 grid-cols-4 gap-2 lg:flex lg:w-auto lg:items-center lg:gap-1.5">
           <button
             onClick={onOpenMkdir}
             disabled={isVMSystemPath}
             aria-label="新建文件夹"
-            className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 disabled:pointer-events-none disabled:opacity-40"
+            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-slate-800 text-[11px] font-medium text-slate-300 transition hover:bg-slate-700 disabled:pointer-events-none disabled:opacity-40 lg:h-9 lg:w-9"
             title="新建文件夹"
           >
             <FolderPlus className="h-4 w-4" />
+            <span className="lg:hidden">新建</span>
           </button>
           <label
             aria-label="上传文件"
-            className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 ${isVMSystemPath ? 'pointer-events-none opacity-40' : ''}`}
+            className={`flex h-10 w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-slate-800 text-[11px] font-medium text-slate-300 transition hover:bg-slate-700 lg:h-9 lg:w-9 ${isVMSystemPath ? 'pointer-events-none opacity-40' : ''}`}
             title="上传文件"
           >
             <Upload className="h-4 w-4" />
+            <span className="lg:hidden">上传</span>
             <input
               type="file"
               multiple
@@ -136,15 +139,16 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
             onClick={onRefresh}
             disabled={filesLoading}
             aria-label="刷新列表"
-            className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 disabled:opacity-50"
+            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-slate-800 text-[11px] font-medium text-slate-300 transition hover:bg-slate-700 disabled:opacity-50 lg:h-9 lg:w-9"
             title="刷新列表"
           >
             <RefreshCw className={`h-4 w-4 ${filesLoading ? 'animate-spin' : ''}`} />
+            <span className="lg:hidden">刷新</span>
           </button>
           <button
             onClick={onToggleHidden}
             aria-pressed={showHiddenFiles}
-            className={`flex h-9 w-9 items-center justify-center rounded-xl transition ${showHiddenFiles
+            className={`flex h-10 w-full items-center justify-center gap-1.5 rounded-xl text-[11px] font-medium transition lg:h-9 lg:w-9 ${showHiddenFiles
               ? 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/30'
               : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
@@ -152,15 +156,12 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
             aria-label={showHiddenFiles ? '隐藏隐藏文件和文件夹' : '显示隐藏文件和文件夹'}
           >
             {showHiddenFiles ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            <span className="lg:hidden">{showHiddenFiles ? '隐藏' : '显示'}</span>
           </button>
         </div>
       </div>
 
       <div>
-        <div className="mb-1.5 flex items-center justify-between">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">快捷路径</span>
-          <span className="text-[10px] text-slate-600">{showHiddenFiles ? '含隐藏项' : '隐藏项已隐藏'}</span>
-        </div>
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
           {rootShortcuts.map((shortcut) => (
             <button
@@ -194,12 +195,6 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
         </div>
       </div>
 
-      {isVMSystemPath && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-200">
-          VM 根目录浏览模式：可查看系统文件，上传、新建、编辑和删除仅限 MacBox 数据目录。
-        </div>
-      )}
-
       <div className="flex items-center space-x-1 overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-950/60 p-2.5 font-mono text-xs">
         <button
           onClick={onNavigateUp}
@@ -209,7 +204,8 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
         >
           <ArrowLeft className="h-3.5 w-3.5" />
         </button>
-        <div className="flex items-center space-x-1 truncate text-slate-300">
+        <div className="min-w-0 flex-1 truncate font-semibold text-slate-200 sm:hidden">{currentPath}</div>
+        <div className="hidden min-w-0 items-center space-x-1 truncate text-slate-300 sm:flex">
           <span
             onClick={() => loginUser === 'root' && onNavigate('/')}
             className={`${loginUser === 'root' ? 'cursor-pointer hover:text-sky-400' : 'cursor-default opacity-50'} font-bold`}
