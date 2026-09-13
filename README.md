@@ -92,21 +92,15 @@ MacBox 采用 Apache License 2.0 发布，允许个人和组织商用、修改�
 
 ## 安装与分发
 
-### 首选：本地 Agent 一句话部署
+### 首选：本地 Agent 源码部署
 
-如果用户已经在这台 Mac 上安装了 Codex CLI、WorkBuddy 或其他具有本地终端权限的 Agent，推荐直接发送下面这一句话，让 Agent 完成环境检测、Release 获取、校验和部署：
-
-```text
-请在当前 macOS 主机上先阅读仓库根目录的 `MACBOX_DEPLOYMENT_PROMPT.md`，再严格按文档完成 MacBox 部署，不要跳过只读检查或未经确认的破坏性操作。
-```
-
-本地 Agent 需要能够在运行 MacBox 的 Mac 上执行终端命令；手机端聊天或没有本机权限的云端 Agent 不能替代本地部署。部署完成后，Agent 应返回实际安装目录、服务地址、Lima 状态和失败日志，而不是只报告“已完成”。
-
-如果需要从源码部署，可使用下面的一句话提示词：
+如果用户已经在这台 Mac 上安装了 Codex CLI、WorkBuddy 或其他具有本地终端权限的 Agent，发送下面这一句话，让 Agent 先获取源码再执行完整部署流程：
 
 ```text
 请先执行 `git clone https://github.com/lulalulaluobo/macbox.git` 并进入仓库根目录，阅读根目录的 `MACBOX_DEPLOYMENT_PROMPT.md`，再严格按文档完成本地构建和部署，不要跳过检查或未经确认覆盖已有数据。
 ```
+
+本地 Agent 需要能够在运行 MacBox 的 Mac 上执行终端命令；手机端聊天或没有本机权限的云端 Agent 不能替代本地部署。部署完成后，Agent 应返回实际安装目录、服务地址、Lima 状态和失败日志，而不是只报告“已完成”。
 
 ### 第二选择：直接使用 GitHub Release
 
