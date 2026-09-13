@@ -11,6 +11,7 @@ import {
   Folder,
   FolderPlus,
   RefreshCw,
+  PanelLeftClose,
   Star,
   Terminal as TerminalIcon,
   Trash2,
@@ -42,6 +43,7 @@ interface TerminalFileBrowserProps {
   favoriteShortcuts: TerminalShortcut[];
   loginUser: 'root' | 'default';
   onOpenMkdir: () => void;
+  onClose: () => void;
   onUpload: (files: FileList | null) => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
   onToggleHidden: () => void;
@@ -71,6 +73,7 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
   favoriteShortcuts,
   loginUser,
   onOpenMkdir,
+  onClose,
   onUpload,
   onRefresh,
   onToggleHidden,
@@ -84,7 +87,7 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
   onCopyPath,
   getFileIcon,
 }) => (
-  <div className="order-2 flex min-h-[420px] w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/80 lg:order-1 lg:min-h-0 lg:w-[320px] lg:shrink-0">
+  <div className="order-1 flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-900/80 lg:w-[320px] lg:flex-none lg:shrink-0">
     <div className="space-y-3 border-b border-slate-800/80 p-3.5 sm:p-4">
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -97,6 +100,15 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            onClick={onClose}
+            aria-label="返回终端"
+            className="flex h-9 items-center gap-1.5 rounded-xl bg-slate-800 px-2.5 text-[11px] font-semibold text-slate-200 transition hover:bg-slate-700 lg:hidden"
+            title="返回终端"
+          >
+            <PanelLeftClose className="h-4 w-4" />
+            <span>终端</span>
+          </button>
           <button
             onClick={onOpenMkdir}
             disabled={isVMSystemPath}

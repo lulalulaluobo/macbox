@@ -78,9 +78,9 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
   // Quick Shortcuts
   const rootShortcuts: TerminalShortcut[] = [
-    ...(loginUser === 'root' ? [{ label: 'VM 根目录', path: '/', icon: HardDrive }] : []),
-    { label: 'MacBox 数据根目录', path: '/data', icon: Folder },
-    { label: 'Docker 目录', path: '/data/appdata', icon: Code },
+    ...(loginUser === 'root' ? [{ label: '根目录', path: '/', icon: HardDrive }] : []),
+    { label: 'MacBox', path: '/data', icon: Folder },
+    { label: 'Docker', path: '/data/appdata', icon: Code },
   ];
 
   // The VM root is a browse-only view. Mutating operations continue to be
@@ -162,6 +162,9 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   // Open directory in terminal
   const handleOpenInTerminal = (path: string) => {
     sendToTerminal(`cd "${path}"\n`);
+    if (window.matchMedia('(max-width: 1023px)').matches) {
+      setShowSidebar(false);
+    }
   };
 
   // Navigate Up
@@ -304,7 +307,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   };
 
   return (
-    <div className={`terminal-page flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 ${showSidebar ? 'overflow-y-auto overscroll-contain lg:overflow-hidden' : 'overflow-hidden'} ${fullscreen ? 'fixed inset-0 z-[70] bg-[#090d16] p-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]' : 'w-full'}`}>
+    <div className={`terminal-page flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden ${fullscreen ? 'fixed inset-0 z-[70] bg-[#090d16] p-4 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))]' : 'w-full'}`}>
       {/* Alert Banner */}
       {alertMsg && (
         <div className={`p-3.5 rounded-xl text-sm flex items-center justify-between shadow ${
@@ -317,9 +320,9 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
         </div>
       )}
 
-      {/* Terminal first; file system is loaded and shown only when requested. */}
-      <div className={`flex min-h-0 flex-col gap-4 ${showSidebar ? 'flex-none lg:flex-row lg:flex-1 lg:overflow-hidden' : 'flex-1'}`}>
-        {/* Left Side: Integrated File System Explorer (mobile: stacked below; desktop: left sidebar) */}
+      {/* File system is loaded and shown only when requested. */}
+      <div className={`flex min-h-0 flex-1 flex-col gap-4 overflow-hidden ${showSidebar ? 'lg:flex-row' : ''}`}>
+        {/* Mobile: file system replaces the terminal. Desktop: file system remains a left sidebar. */}
         {showSidebar && (
           <TerminalFileBrowser
             currentPath={currentPath}
@@ -335,6 +338,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
             rootShortcuts={rootShortcuts}
             favoriteShortcuts={favoriteShortcuts}
             loginUser={loginUser}
+            onClose={() => setShowSidebar(false)}
             onOpenMkdir={() => setShowMkdirModal(true)}
             onUpload={handleFileUpload}
             onRefresh={() => loadFiles(currentPath)}
@@ -352,7 +356,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
         )}
 
         {/* Right Side: Interactive Web Terminal */}
-        <div className={`terminal-dark-preserve order-1 flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'min-h-[520px] flex-none lg:order-2 lg:min-h-0 lg:w-auto lg:flex-1' : 'min-h-0 flex-1'}`}>
+        <div className={`terminal-dark-preserve order-2 h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'hidden lg:flex lg:w-auto lg:flex-1' : 'flex flex-1'}`}>
           <TerminalToolbar
             showSidebar={showSidebar}
             connected={connected}
