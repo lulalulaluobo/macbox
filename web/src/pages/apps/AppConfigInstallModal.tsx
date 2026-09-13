@@ -35,6 +35,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
   const [customYaml, setCustomYaml] = useState('');
 
   const logsEndRef = useRef<HTMLDivElement | null>(null);
+  const configRequestIdRef = useRef(0);
   const { installStatus, installLogs, installError, startDeploy } = useAppInstallStream({
     appId: app?.id,
     portsMap,
@@ -45,13 +46,21 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
   });
 
   useEffect(() => {
-    if (!app) return;
+    const requestId = ++configRequestIdRef.current;
+    if (!app) {
+      setConfigData(null);
+      setLoadingConfig(false);
+      return;
+    }
+
     setUseYamlMode(false);
+    setConfigData(null);
+    setLoadingConfig(true);
 
     const load = async () => {
-      setLoadingConfig(true);
       try {
         const fullMeta = await api.getAppConfig(app.id);
+        if (configRequestIdRef.current !== requestId) return;
         setConfigData(fullMeta);
 
         // Initialize ports map
@@ -85,13 +94,14 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
 
         setCustomYaml(fullMeta.composeTemplate || '');
       } catch (err) {
+        if (configRequestIdRef.current !== requestId) return;
         setConfigData(app);
       } finally {
-        setLoadingConfig(false);
+        if (configRequestIdRef.current === requestId) setLoadingConfig(false);
       }
     };
 
-    load();
+    void load();
   }, [app]);
 
   useEffect(() => {

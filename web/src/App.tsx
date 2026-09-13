@@ -408,30 +408,47 @@ const PageLoadingState: React.FC = () => (
 );
 
 interface PageLoadBoundaryState {
-  hasError: boolean;
+  error: Error | null;
 }
 
 class PageLoadBoundary extends React.Component<React.PropsWithChildren, PageLoadBoundaryState> {
-  state: PageLoadBoundaryState = { hasError: false };
+  state: PageLoadBoundaryState = { error: null };
 
-  static getDerivedStateFromError(): PageLoadBoundaryState {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error): PageLoadBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('[MacNAS] 页面渲染失败', error, errorInfo);
+  }
+
+  private isChunkLoadError() {
+    const message = this.state.error?.message || '';
+    return this.state.error?.name === 'ChunkLoadError'
+      || /failed to fetch dynamically imported module|importing a module script failed|loading chunk .* failed/i.test(message);
   }
 
   render() {
-    if (this.state.hasError) {
+    if (this.state.error) {
+      const isChunkLoadError = this.isChunkLoadError();
       return (
         <div className="flex min-h-[calc(100dvh-220px)] items-center justify-center px-4">
           <section className="w-full max-w-lg rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-sm dark:border-rose-900/70 dark:bg-slate-900">
             <AlertCircle className="mx-auto h-8 w-8 text-rose-500" />
-            <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">页面资源加载失败</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">可能是版本更新后浏览器仍保留旧缓存，请刷新页面后重试。</p>
+            <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">
+              {isChunkLoadError ? '页面资源加载失败' : '页面运行异常'}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              {isChunkLoadError
+                ? '页面版本资源可能未加载完整，请刷新页面后重试。'
+                : '页面组件发生异常，请刷新页面后重试；如果问题持续，请保留控制台错误信息。'}
+            </p>
             <button
               type="button"
               onClick={() => window.location.reload()}
               className="mt-5 rounded-2xl bg-sky-500 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-sky-600"
             >
-              刷新页面
+              重新加载页面
             </button>
           </section>
         </div>
