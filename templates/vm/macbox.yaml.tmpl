@@ -1,15 +1,15 @@
-# MacNAS Lima VM 配置文件模板
+# MacBox Lima VM 配置文件模板
 # 采用 Apple Virtualization.framework (vz) 原生轻量虚拟化
 
 minimumLimaVersion: 2.0.0
 
 # Keep the internal Lima management identity independent from the macOS user.
 # This account is only used by limactl; remote administration remains root
-# key-only and the MacNAS console account remains admin.
+# key-only and the MacBox console account remains admin.
 user:
-  name: macnasctl
-  comment: MacNAS Lima management
-  home: /home/macnasctl
+  name: macboxctl
+  comment: MacBox Lima management
+  home: /home/macboxctl
   shell: /bin/bash
   passwordlessSudo: true
 
@@ -43,13 +43,13 @@ mounts:
 {{range .LocalMounts}}
 {{if .Enabled}}
 - location: {{yamlQuote .HostPath}}
-  mountPoint: {{yamlQuote (printf "/mnt/macnas-mounts/%s" .ID)}}
+  mountPoint: {{yamlQuote (printf "/mnt/macbox-mounts/%s" .ID)}}
   writable: {{.Writable}}
 {{end}}
 {{end}}
 {{if .AISkillsEnabled}}
 - location: {{yamlQuote .AISkillsHostPath}}
-  mountPoint: "/mnt/macnas-ai-skills"
+  mountPoint: "/mnt/macbox-ai-skills"
   writable: false
 {{end}}
 {{end}}
@@ -90,17 +90,17 @@ provision:
     {{end}}
 
     # Prepare the conventional per-user directory for AI CLI skills. The
-    # read-only host mapping and symlinks are finalized by MacNAS after the VM
+    # read-only host mapping and symlinks are finalized by MacBox after the VM
     # becomes reachable, so enabling this later does not require rebuilding
     # the VM image.
-    install -d -o macnasctl -g macnasctl -m 0755 /home/macnasctl/.agents
+    install -d -o macboxctl -g macboxctl -m 0755 /home/macboxctl/.agents
     install -d -m 0755 /root/.agents
 
     # 3. 创建 VirtioFS bind mount 持久化 systemd 服务 (保证 VM 每次启动自动挂载)
-    mkdir -p /mnt/macnas-mounts
-    cat <<'MOUNT_SCRIPT' > /usr/local/bin/macnas-mounts.sh
+    mkdir -p /mnt/macbox-mounts
+    cat <<'MOUNT_SCRIPT' > /usr/local/bin/macbox-mounts.sh
     #!/bin/bash
-    # MacNAS VirtioFS bind mount — 每次 VM 启动自动执行
+    # MacBox VirtioFS bind mount — 每次 VM 启动自动执行
     set -e
     for i in $(seq 1 30); do
       REAL_DATA="$(readlink -f /data || true)"
@@ -110,15 +110,15 @@ provision:
       sleep 1
     done
     if [ -z "$REAL_DATA" ] || [ ! -d "$REAL_DATA" ]; then
-      echo "[macnas-mounts] /data is not ready" >&2
+      echo "[macbox-mounts] /data is not ready" >&2
       exit 1
     fi
     MOUNT_SCRIPT
 
     {{range .LocalMounts}}
     {{if .Enabled}}
-    cat <<'ENTRY_END' >> /usr/local/bin/macnas-mounts.sh
-    SOURCE_PATH={{shellQuote (printf "/mnt/macnas-mounts/%s" .ID)}}
+    cat <<'ENTRY_END' >> /usr/local/bin/macbox-mounts.sh
+    SOURCE_PATH={{shellQuote (printf "/mnt/macbox-mounts/%s" .ID)}}
     for i in $(seq 1 60); do
       if mountpoint -q "$SOURCE_PATH"; then
         break
@@ -126,7 +126,7 @@ provision:
       sleep 1
     done
     if ! mountpoint -q "$SOURCE_PATH"; then
-      echo "[macnas-mounts] source is not ready: $SOURCE_PATH" >&2
+      echo "[macbox-mounts] source is not ready: $SOURCE_PATH" >&2
       exit 1
     fi
     mount -o remount,{{if .Writable}}rw{{else}}ro{{end}} "$SOURCE_PATH" 2>/dev/null || true
@@ -140,17 +140,17 @@ provision:
     # unmounted from inside the guest. Bind over it so the configured source
     # remains visible; a later run removes the top bind layer first.
     mount --bind "$SOURCE_PATH" "$TARGET_DIR"
-    echo "[macnas-mounts] bind mounted {{shellQuote .ID}} -> $TARGET_DIR"
+    echo "[macbox-mounts] bind mounted {{shellQuote .ID}} -> $TARGET_DIR"
     mount -o remount,{{if .Writable}}rw{{else}}ro{{end}} "$TARGET_DIR" 2>/dev/null || true
     ENTRY_END
     {{end}}
     {{end}}
 
-    chmod +x /usr/local/bin/macnas-mounts.sh
+    chmod +x /usr/local/bin/macbox-mounts.sh
 
-    cat <<'SERVICE_EOF' > /etc/systemd/system/macnas-mounts.service
+    cat <<'SERVICE_EOF' > /etc/systemd/system/macbox-mounts.service
     [Unit]
-    Description=MacNAS VirtioFS bind mounts
+    Description=MacBox VirtioFS bind mounts
     # Do not order this multi-user service after cloud-init.target/cloud-final.
     # Ubuntu's cloud-init target is itself ordered after multi-user.target;
     # adding the reverse edge creates a boot cycle and leaves limactl start
@@ -160,22 +160,22 @@ provision:
     [Service]
     Type=oneshot
     RemainAfterExit=yes
-    ExecStart=/usr/local/bin/macnas-mounts.sh
+    ExecStart=/usr/local/bin/macbox-mounts.sh
 
     [Install]
     WantedBy=multi-user.target
     SERVICE_EOF
 
     systemctl daemon-reload
-    systemctl enable macnas-mounts.service
-    systemctl start macnas-mounts.service || true
+    systemctl enable macbox-mounts.service
+    systemctl start macbox-mounts.service || true
 
 
     # 3. 配置 Samba
     cat <<'EOF' > /etc/samba/smb.conf
     [global]
        workgroup = WORKGROUP
-       server string = MacNAS
+       server string = MacBox
        server role = standalone server
        security = user
        map to guest = Never
@@ -183,8 +183,8 @@ provision:
        log file = /var/log/samba/log.%m
        max log size = 50
 
-    [MacNAS]
-       comment = MacNAS Data Share
+    [MacBox]
+       comment = MacBox Data Share
        path = /data
        browseable = yes
        writable = yes
@@ -192,25 +192,25 @@ provision:
        guest ok = no
        create mask = 0660
        directory mask = 0770
-       force user = macnas
-       force group = macnas
+       force user = macbox
+       force group = macbox
     EOF
 
-    # 4. 创建默认用户 macnas
-    if ! getent group macnas >/dev/null 2>&1; then
-      groupadd --system macnas
+    # 4. 创建默认用户 macbox
+    if ! getent group macbox >/dev/null 2>&1; then
+      groupadd --system macbox
     fi
-    id -u macnas &>/dev/null || useradd -M -g macnas -s /usr/sbin/nologin macnas
+    id -u macbox &>/dev/null || useradd -M -g macbox -s /usr/sbin/nologin macbox
 
-    # Lima executes management commands as macnasctl. Keep its supplementary
-    # groups in the provisioned image so Docker and the NAS data volume are
+    # Lima executes management commands as macboxctl. Keep its supplementary
+    # groups in the provisioned image so Docker and the MacBox data volume are
     # accessible without requiring a root terminal.
-    for group in docker macnas; do
+    for group in docker macbox; do
       if getent group "$group" >/dev/null 2>&1; then
-        usermod -aG "$group" macnasctl
+        usermod -aG "$group" macboxctl
       fi
     done
-    chown macnas:macnas /data /data/media /data/files /data/downloads /data/photos /data/appdata 2>/dev/null || true
+    chown macbox:macbox /data /data/media /data/files /data/downloads /data/photos /data/appdata 2>/dev/null || true
     chmod 0770 /data /data/media /data/files /data/downloads /data/photos /data/appdata 2>/dev/null || true
 
     systemctl restart smbd nmbd || true
@@ -221,7 +221,7 @@ provision:
     # on this sshd and must remain available to limactl shell.
     mkdir -p /etc/ssh/sshd_config.d /root/.ssh
     chmod 700 /root/.ssh
-    cat <<'SSH_EOF' > /etc/ssh/sshd_config.d/99-macnas.conf
+    cat <<'SSH_EOF' > /etc/ssh/sshd_config.d/99-macbox.conf
     Port 22
     PermitRootLogin prohibit-password
     PasswordAuthentication no

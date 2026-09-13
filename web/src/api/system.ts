@@ -46,6 +46,33 @@ export const systemApi = {  // System Overview
   cancelJob: (id: string) => fetchJSON<{ status: string }>(`${BASE_URL}/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   clearTransferJobs: () => fetchJSON<{ status: string; count: number }>(`${BASE_URL}/jobs/clear?kind=cloud.transfer`, { method: 'POST' }),
 
+  downloadBackup: async (): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(`${BASE_URL}/system/backup`, { credentials: 'same-origin' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || '创建备份失败');
+    }
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/i);
+    return { blob: await res.blob(), filename: match?.[1] || 'macbox-backup.macbox-backup.zip' };
+  },
+
+  restoreBackup: async (file: File): Promise<{ status: string; message: string }> => {
+    const form = new FormData();
+    form.append('backup', file, file.name);
+    const res = await fetch(`${BASE_URL}/system/backup/restore`, {
+      method: 'POST',
+      body: form,
+      credentials: 'same-origin',
+    });
+    if (res.status === 401) window.dispatchEvent(new CustomEvent('macbox-unauthorized'));
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || '恢复备份失败');
+    }
+    return res.json();
+  },
+
   // System Users & Security
   getUsers: () => fetchJSON<SystemUser[]>(`${BASE_URL}/system/users`),
   createUser: (req: { username: string; password?: string; isSudo?: boolean }) =>

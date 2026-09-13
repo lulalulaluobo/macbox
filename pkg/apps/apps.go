@@ -18,8 +18,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/luluen/mac-nas/pkg/docker"
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/docker"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -177,7 +177,7 @@ func NewManager(vmMgr *vm.Manager, dockerClient *docker.Client, projectRoot stri
 	}
 	if dir == "" {
 		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, "Library", "Application Support", "MacNAS")
+		dir = filepath.Join(home, "Library", "Application Support", "MacBox")
 	}
 
 	return &Manager{
@@ -204,7 +204,7 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 			}
 			// The catalog remains useful while the VM/Docker daemon is stopped;
 			// retain it, but make the degraded state observable in server logs.
-			log.Printf("[MacNAS Apps] Docker 状态暂不可用，应用状态将按未安装显示: %v", dockerErr)
+			log.Printf("[MacBox Apps] Docker 状态暂不可用，应用状态将按未安装显示: %v", dockerErr)
 		}
 	}
 	containerMap := make(map[string]docker.ContainerInfo)
@@ -258,7 +258,7 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 		}
 
 		// Check if container exists in Docker
-		containerName := "macnas-" + id
+		containerName := "macbox-" + id
 		var matchedContainer *docker.ContainerInfo
 		if c, exists := containerMap[containerName]; exists {
 			cCopy := c
@@ -268,7 +268,7 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 			matchedContainer = &cCopy
 		} else {
 			for _, c := range containers {
-				if c.Project == id || c.Project == "macnas-"+id || c.Names == containerName || strings.HasPrefix(c.Names, containerName+"-") {
+				if c.Project == id || c.Project == "macbox-"+id || c.Names == containerName || strings.HasPrefix(c.Names, containerName+"-") {
 					cCopy := c
 					matchedContainer = &cCopy
 					break
@@ -363,7 +363,7 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "🚀 [MacNAS AppStore] 开始准备部署应用: %s\n", id)
+	fmt.Fprintf(out, "🚀 [MacBox AppStore] 开始准备部署应用: %s\n", id)
 
 	meta, err := m.GetAppConfig(ctx, id)
 	if err != nil {
@@ -430,13 +430,13 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	// The Baidu Netdisk image has a known fallback VNC password. Replace the
 	// catalog marker with a fresh short secret for every guided installation,
 	// including an untouched copy submitted from advanced YAML mode.
-	if id == "baidunetdisk" && strings.Contains(finalYAML, "VNC_SERVER_PASSWD=macnas-change-me") {
+	if id == "baidunetdisk" && strings.Contains(finalYAML, "VNC_SERVER_PASSWD=macbox-change-me") {
 		secret, secretErr := generateAppSecret()
 		if secretErr != nil {
 			return secretErr
 		}
 		baiduVNCPassword = secret[:8]
-		finalYAML = strings.ReplaceAll(finalYAML, "VNC_SERVER_PASSWD=macnas-change-me", "VNC_SERVER_PASSWD="+baiduVNCPassword)
+		finalYAML = strings.ReplaceAll(finalYAML, "VNC_SERVER_PASSWD=macbox-change-me", "VNC_SERVER_PASSWD="+baiduVNCPassword)
 	}
 	if len([]byte(finalYAML)) > maxComposeYAMLBytes {
 		return fmt.Errorf("最终 Docker Compose YAML 内容不能超过 8 MB")
@@ -524,7 +524,7 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 			}
 			return ctx.Err()
 		}
-		if _, err := m.vmMgr.Exec(ctx, "docker", "exec", "macnas-alist", "./alist", "admin", "set", alistPassword); err != nil {
+		if _, err := m.vmMgr.Exec(ctx, "docker", "exec", "macbox-alist", "./alist", "admin", "set", alistPassword); err != nil {
 			return fmt.Errorf("初始化 Alist 管理员密码失败: %w", err)
 		}
 	}

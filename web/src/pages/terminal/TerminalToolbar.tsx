@@ -40,7 +40,7 @@ export const TerminalToolbar: React.FC<TerminalToolbarProps> = ({
   onClear,
   onToggleFullscreen,
 }) => (
-  <div className="flex flex-col gap-2.5 border-b border-slate-800/80 bg-[#0d121f] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-3.5">
+  <div className="flex flex-none flex-col gap-2.5 border-b border-slate-800/80 bg-[#0d121f] p-3 sm:flex-row sm:items-center sm:justify-between sm:p-3.5">
     <div className="flex min-w-0 items-center gap-2">
       <button onClick={onToggleSidebar} className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 text-[11px] font-semibold text-slate-200 transition hover:bg-slate-700" title={showSidebar ? '收起文件系统' : '展开文件系统'}>
         {showSidebar ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}<span>{showSidebar ? '收起文件' : '文件系统'}</span>

@@ -76,12 +76,12 @@ func (m *jobManager) saveLocked() {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(m.path), 0700); err != nil {
-		log.Printf("[MacNAS Jobs] create state directory: %v", err)
+		log.Printf("[MacBox Jobs] create state directory: %v", err)
 		return
 	}
 	temp := m.path + ".tmp"
 	if err := os.WriteFile(temp, data, 0600); err != nil {
-		log.Printf("[MacNAS Jobs] write state: %v", err)
+		log.Printf("[MacBox Jobs] write state: %v", err)
 		return
 	}
 	if err := os.Chmod(temp, 0600); err != nil {
@@ -90,7 +90,7 @@ func (m *jobManager) saveLocked() {
 	}
 	if err := os.Rename(temp, m.path); err != nil {
 		_ = os.Remove(temp)
-		log.Printf("[MacNAS Jobs] commit state: %v", err)
+		log.Printf("[MacBox Jobs] commit state: %v", err)
 	}
 }
 

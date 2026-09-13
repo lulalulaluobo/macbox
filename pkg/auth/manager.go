@@ -215,6 +215,54 @@ func (m *Manager) NeedsSetup() bool {
 	return len(m.users) == 0
 }
 
+// ReplaceUsersJSON replaces the persisted Web Console users with a validated
+// snapshot, revoking every existing session. Backup restore uses this method
+// so the in-memory authentication state cannot diverge from users.json.
+func (m *Manager) ReplaceUsersJSON(data []byte) error {
+	var storage userStorage
+	if err := json.Unmarshal(data, &storage); err != nil {
+		return fmt.Errorf("认证备份格式无效: %w", err)
+	}
+	if len(storage.Users) == 0 {
+		return errors.New("认证备份至少需要包含一个用户")
+	}
+
+	users := make(map[string]*storedUser, len(storage.Users))
+	userByName := make(map[string]*storedUser, len(storage.Users))
+	adminCount := 0
+	for _, user := range storage.Users {
+		if err := validateStoredUser(user); err != nil {
+			return err
+		}
+		if _, exists := users[user.ID]; exists {
+			return errors.New("认证备份包含重复用户 ID")
+		}
+		nameKey := strings.ToLower(user.Username)
+		if _, exists := userByName[nameKey]; exists {
+			return errors.New("认证备份包含重复用户名")
+		}
+		users[user.ID] = user
+		userByName[nameKey] = user
+		if user.Role == "admin" && user.Enabled {
+			adminCount++
+		}
+	}
+	if adminCount == 0 {
+		return errors.New("认证备份至少需要包含一个启用的管理员")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	oldUsers, oldUserByName := m.users, m.userByName
+	m.users, m.userByName = users, userByName
+	m.sessions = make(map[string]*Session)
+	if err := m.saveLocked(); err != nil {
+		m.users, m.userByName = oldUsers, oldUserByName
+		return fmt.Errorf("保存恢复后的认证数据失败: %w", err)
+	}
+	return nil
+}
+
 func (m *Manager) load() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

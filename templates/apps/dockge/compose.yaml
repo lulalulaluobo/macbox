@@ -1,7 +1,7 @@
 services:
   dockge:
     image: louislam/dockge:1
-    container_name: macnas-dockge
+    container_name: macbox-dockge
     restart: unless-stopped
     ports:
       - "5001:5001"

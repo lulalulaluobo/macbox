@@ -18,7 +18,7 @@ export const PRESET_COMPOSE_TEMPLATES: ComposeTemplate[] = [
 services:
   web:
     image: nginx:alpine
-    container_name: macnas-my-nginx
+    container_name: macbox-my-nginx
     restart: unless-stopped
     ports:
       - "8088:80"
@@ -36,7 +36,7 @@ services:
 services:
   redis:
     image: redis:alpine
-    container_name: macnas-my-redis
+    container_name: macbox-my-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -55,11 +55,11 @@ services:
 services:
   db:
     image: postgres:16-alpine
-    container_name: macnas-my-postgres
+    container_name: macbox-my-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: macnas
-      POSTGRES_PASSWORD: macnas_password_change_me
+      POSTGRES_USER: macbox
+      POSTGRES_PASSWORD: macbox_password_change_me
       POSTGRES_DB: defaultdb
     ports:
       - "5432:5432"
@@ -77,7 +77,7 @@ services:
 services:
   uptime-kuma:
     image: louislam/uptime-kuma:1
-    container_name: macnas-uptime-kuma
+    container_name: macbox-uptime-kuma
     restart: unless-stopped
     ports:
       - "3001:3001"
@@ -95,7 +95,7 @@ services:
 services:
   vaultwarden:
     image: vaultwarden/server:latest
-    container_name: macnas-vaultwarden
+    container_name: macbox-vaultwarden
     restart: unless-stopped
     ports:
       - "8085:80"
@@ -115,7 +115,7 @@ services:
 services:
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
-    container_name: macnas-qbittorrent
+    container_name: macbox-qbittorrent
     restart: unless-stopped
     environment:
       - PUID=1000

@@ -184,7 +184,7 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
 
       {isVMSystemPath && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-200">
-          VM 根目录浏览模式：可查看系统文件，上传、新建、编辑和删除仅限 NAS 数据目录。
+          VM 根目录浏览模式：可查看系统文件，上传、新建、编辑和删除仅限 MacBox 数据目录。
         </div>
       )}
 

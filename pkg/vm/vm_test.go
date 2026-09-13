@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/config"
 )
 
 func TestGenerateConfigFile(t *testing.T) {
 	// GenerateConfigFile mirrors an existing ~/.lima/<instance>/lima.yaml.
 	// Isolate HOME so validation never overwrites a real VM config.
-	testHome, err := os.MkdirTemp("/tmp", "macnas-home-")
+	testHome, err := os.MkdirTemp("/tmp", "macbox-home-")
 	if err != nil {
 		t.Fatalf("create short temporary home: %v", err)
 	}
@@ -24,15 +24,15 @@ func TestGenerateConfigFile(t *testing.T) {
 	cfg := config.DefaultConfig()
 	mgr := NewManager(cfg)
 
-	tmplPath := filepath.Join("..", "..", "templates", "vm", "macnas.yaml.tmpl")
+	tmplPath := filepath.Join("..", "..", "templates", "vm", "macbox.yaml.tmpl")
 	// Lima's hostSocket validation has a 104-character limit. Keep the
 	// temporary render path short enough for the template's socket path.
-	tmpDir, err := os.MkdirTemp("/tmp", "macnas-")
+	tmpDir, err := os.MkdirTemp("/tmp", "macbox-")
 	if err != nil {
 		t.Fatalf("create short temporary directory: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
-	outputPath := filepath.Join(tmpDir, "test-macnas.yaml")
+	outputPath := filepath.Join(tmpDir, "test-macbox.yaml")
 
 	err = mgr.GenerateConfigFile(tmplPath, outputPath)
 	if err != nil {
@@ -49,18 +49,18 @@ func TestGenerateConfigFile(t *testing.T) {
 	if !strings.Contains(string(content), "guestPort: 5244") {
 		t.Fatal("rendered VM config is missing the default Alist port forward")
 	}
-	if !strings.Contains(string(content), "name: macnasctl") || strings.Contains(string(content), os.Getenv("USER")+".guest") {
+	if !strings.Contains(string(content), "name: macboxctl") || strings.Contains(string(content), os.Getenv("USER")+".guest") {
 		t.Fatal("rendered VM config must use the fixed internal Lima management user")
 	}
-	if !strings.Contains(string(content), "usermod -aG \"$group\" macnasctl") {
-		t.Fatal("rendered VM config must grant the management user Docker and NAS data access")
+	if !strings.Contains(string(content), "usermod -aG \"$group\" macboxctl") {
+		t.Fatal("rendered VM config must grant the management user Docker and MacBox data access")
 	}
 	if strings.Contains(string(content), "After=cloud-init.target cloud-final.service") || strings.Contains(string(content), "Wants=cloud-final.service") {
 		t.Fatal("rendered VM config must not create a cloud-init/multi-user boot dependency cycle")
 	}
 
-	if os.Getenv("MACNAS_INTEGRATION") != "1" {
-		t.Skip("limactl validation is an integration test; set MACNAS_INTEGRATION=1 to run it")
+	if os.Getenv("MACBOX_INTEGRATION") != "1" {
+		t.Skip("limactl validation is an integration test; set MACBOX_INTEGRATION=1 to run it")
 	}
 
 	cmd := exec.Command("limactl", "validate", outputPath)
@@ -73,7 +73,7 @@ func TestGenerateConfigFile(t *testing.T) {
 func TestGenerateConfigRejectsUnsafeTemplateValues(t *testing.T) {
 	testHome := t.TempDir()
 	t.Setenv("HOME", testHome)
-	tmplPath := filepath.Join("..", "..", "templates", "vm", "macnas.yaml.tmpl")
+	tmplPath := filepath.Join("..", "..", "templates", "vm", "macbox.yaml.tmpl")
 	outputPath := filepath.Join(t.TempDir(), "unsafe.yaml")
 
 	cfg := config.DefaultConfig()
@@ -97,7 +97,7 @@ func TestGenerateConfigRejectsUnsafeTemplateValues(t *testing.T) {
 func TestGenerateConfigUsesRaceSafeLocalMountScript(t *testing.T) {
 	testHome := t.TempDir()
 	t.Setenv("HOME", testHome)
-	tmplPath := filepath.Join("..", "..", "templates", "vm", "macnas.yaml.tmpl")
+	tmplPath := filepath.Join("..", "..", "templates", "vm", "macbox.yaml.tmpl")
 	outputPath := filepath.Join(t.TempDir(), "local-mount.yaml")
 
 	cfg := config.DefaultConfig()
@@ -132,7 +132,7 @@ func TestGenerateConfigUsesRaceSafeLocalMountScript(t *testing.T) {
 func TestGenerateConfigIncludesAISkillsMapping(t *testing.T) {
 	testHome := t.TempDir()
 	t.Setenv("HOME", testHome)
-	tmplPath := filepath.Join("..", "..", "templates", "vm", "macnas.yaml.tmpl")
+	tmplPath := filepath.Join("..", "..", "templates", "vm", "macbox.yaml.tmpl")
 	outputPath := filepath.Join(t.TempDir(), "ai-skills.yaml")
 	skillsPath := filepath.Join(testHome, ".agents", "skills")
 	if err := os.MkdirAll(skillsPath, 0700); err != nil {
@@ -151,13 +151,13 @@ func TestGenerateConfigIncludesAISkillsMapping(t *testing.T) {
 		t.Fatalf("read rendered yaml error: %v", err)
 	}
 	rendered := string(content)
-	if !strings.Contains(rendered, `mountPoint: "/mnt/macnas-ai-skills"`) {
+	if !strings.Contains(rendered, `mountPoint: "/mnt/macbox-ai-skills"`) {
 		t.Fatal("rendered VM config is missing the AI skills mount point")
 	}
 	if !strings.Contains(rendered, skillsPath) {
 		t.Fatal("rendered VM config is missing the selected AI skills host path")
 	}
-	if !strings.Contains(rendered, "/home/macnasctl/.agents") || !strings.Contains(rendered, "/root/.agents") {
+	if !strings.Contains(rendered, "/home/macboxctl/.agents") || !strings.Contains(rendered, "/root/.agents") {
 		t.Fatal("rendered VM config is missing the per-user AI skills directories")
 	}
 }
@@ -172,8 +172,8 @@ func TestValidateDataDiskContext(t *testing.T) {
 		t.Fatalf("new instance should not require a data disk: %v", err)
 	}
 
-	instanceDir := filepath.Join(testHome, ".lima", "macnas")
-	diskDir := filepath.Join(testHome, ".lima", "_disks", "macnas-data")
+	instanceDir := filepath.Join(testHome, ".lima", "macbox")
+	diskDir := filepath.Join(testHome, ".lima", "_disks", "macbox-data")
 	if err := os.MkdirAll(diskDir, 0700); err != nil {
 		t.Fatalf("create fake Lima directories: %v", err)
 	}

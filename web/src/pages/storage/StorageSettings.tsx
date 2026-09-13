@@ -289,8 +289,8 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
     );
     setShareFormDiskSource((matchedTarget?.source as typeof shareFormDiskSource) || (sharePickerPath.startsWith('/data') ? 'primary' : 'custom'));
     if (!shareFormName.trim()) {
-      const leaf = sharePickerPath.split('/').filter(Boolean).pop() || 'MacNAS';
-      setShareFormName(leaf.replace(/[^a-zA-Z0-9_-]/g, '-') || 'MacNAS');
+      const leaf = sharePickerPath.split('/').filter(Boolean).pop() || 'MacBox';
+      setShareFormName(leaf.replace(/[^a-zA-Z0-9_-]/g, '-') || 'MacBox');
     }
     setShowSharePathPicker(false);
   };

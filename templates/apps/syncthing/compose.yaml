@@ -1,7 +1,7 @@
 services:
   syncthing:
     image: syncthing/syncthing:latest
-    container_name: macnas-syncthing
+    container_name: macbox-syncthing
     restart: unless-stopped
     ports:
       - "8384:8384"

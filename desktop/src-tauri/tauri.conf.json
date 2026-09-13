@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "MacNAS",
+  "productName": "MacBox",
   "version": "0.1.0",
-  "identifier": "com.macnas.desktop",
+  "identifier": "com.macbox.desktop",
   "build": {
     "frontendDist": "../src"
   },
@@ -10,7 +10,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "MacNAS",
+        "title": "MacBox",
         "width": 1280,
         "height": 860,
         "minWidth": 980,
@@ -28,7 +28,7 @@
     "active": false,
     "targets": [],
     "icon": ["icons/icon.icns", "icons/icon.png"],
-    "externalBin": ["binaries/macnas"],
+    "externalBin": ["binaries/macbox"],
     "resources": {
       "../../templates": "templates"
     },

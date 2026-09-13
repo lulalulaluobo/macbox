@@ -4,6 +4,8 @@
 node_modules/
 dist/
 references/
+# Local design notes, screenshots and development records; README images live in assets/.
+docs/
 *.db-shm
 *.db-wal
 *.log
@@ -19,7 +21,7 @@ references/
 # Go
 bin/
 desktop/src-tauri/target/
-desktop/src-tauri/binaries/macnas-*
+desktop/src-tauri/binaries/macbox-*
 desktop/src-tauri/gen/
 *.exe
 *.exe~

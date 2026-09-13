@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/websocket"
-	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/config"
 )
 
 var validContainerRef = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
@@ -24,19 +24,20 @@ type resizeMessage struct {
 	Cols uint16 `json:"cols"`
 }
 
-// managementCommand starts a fresh process for macnasctl so repaired
-// supplementary groups (docker/macnas) are visible immediately. Keep sudo -i
-// out of this path because its login-shell handling rewrites multiline -c
-// scripts passed to Python.
+// managementCommand starts a fresh process for the MacBox VM management
+// account so repaired supplementary groups are visible immediately. Keep
+// sudo -i out of this path because its login-shell handling rewrites
+// multiline -c scripts passed to Python.
 func managementCommand(ctx context.Context, instanceName string, command ...string) *exec.Cmd {
-	args := append([]string{"shell", instanceName, "sudo", "-u", "macnasctl", "--"}, command...)
+	managementUser := "macboxctl"
+	args := append([]string{"shell", instanceName, "sudo", "-u", managementUser, "--"}, command...)
 	return exec.CommandContext(ctx, "limactl", args...)
 }
 
 // privilegedCommand runs a data-plane command as VM root. File operations are
-// deliberately path-anchored in their scripts, but existing NAS data can be
+// deliberately path-anchored in their scripts, but existing MacBox data can be
 // root-owned (for example files imported by Docker or older releases), so
-// read/archive streams must not fail solely because macnasctl cannot read it.
+// read/archive streams must not fail solely because macboxctl cannot read it.
 func privilegedCommand(ctx context.Context, instanceName string, command ...string) *exec.Cmd {
 	args := append([]string{"shell", instanceName, "sudo"}, command...)
 	return exec.CommandContext(ctx, "limactl", args...)
@@ -83,7 +84,7 @@ func HandleTerminalWS(w http.ResponseWriter, r *http.Request, instanceName strin
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[MacNAS Terminal] WebSocket upgrade error: %v", err)
+		log.Printf("[MacBox Terminal] WebSocket upgrade error: %v", err)
 		return
 	}
 	defer conn.Close()
@@ -98,11 +99,11 @@ func HandleTerminalWS(w http.ResponseWriter, r *http.Request, instanceName strin
 		loginUser = "default"
 	}
 	if container != "" && !validContainerRef.MatchString(container) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[MacNAS Error] 容器名称无效\x1b[0m\r\n"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[MacBox Error] 容器名称无效\x1b[0m\r\n"))
 		return
 	}
 	if sessions == nil {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[MacNAS Error] 终端会话管理器未初始化。\x1b[0m\r\n"))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[MacBox Error] 终端会话管理器未初始化。\x1b[0m\r\n"))
 		return
 	}
 
@@ -113,8 +114,8 @@ func HandleTerminalWS(w http.ResponseWriter, r *http.Request, instanceName strin
 	}
 	session, created, err := sessions.Open(options, r.URL.Query().Get("session"))
 	if err != nil {
-		log.Printf("[MacNAS Terminal] session open error: %v", err)
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[MacNAS Error] 启动终端会话失败，请检查虚拟机状态。\x1b[0m\r\n"))
+		log.Printf("[MacBox Terminal] session open error: %v", err)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[MacBox Error] 启动终端会话失败，请检查虚拟机状态。\x1b[0m\r\n"))
 		return
 	}
 	if err := conn.WriteJSON(map[string]any{

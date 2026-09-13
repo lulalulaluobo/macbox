@@ -22,7 +22,7 @@ fn config_port() -> u16 {
         Some(value) => PathBuf::from(value),
         None => return DEFAULT_PORT,
     };
-    let contents = match fs::read_to_string(home.join(".macnas").join("config.yaml")) {
+    let contents = match fs::read_to_string(home.join(".macbox").join("config.yaml")) {
         Ok(contents) => contents,
         Err(_) => return DEFAULT_PORT,
     };
@@ -100,26 +100,26 @@ fn main() {
             if !backend_ready(port) {
                 let (mut events, spawned) = app
                     .shell()
-                    .sidecar("macnas")
-                    .map_err(|error| format!("无法定位 MacNAS 后端: {error}"))?
+                    .sidecar("macbox")
+                    .map_err(|error| format!("无法定位 MacBox 后端: {error}"))?
                     .args(["--host", "127.0.0.1"])
                     .env("PATH", desktop_command_path())
                     .spawn()
-                    .map_err(|error| format!("无法启动 MacNAS 后端: {error}"))?;
+                    .map_err(|error| format!("无法启动 MacBox 后端: {error}"))?;
                 child = Some(spawned);
 
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = events.recv().await {
                         match event {
-                            CommandEvent::Error(error) => eprintln!("[MacNAS] {error}"),
+                            CommandEvent::Error(error) => eprintln!("[MacBox] {error}"),
                             CommandEvent::Stderr(line) => {
-                                eprintln!("[MacNAS] {}", String::from_utf8_lossy(&line))
+                                eprintln!("[MacBox] {}", String::from_utf8_lossy(&line))
                             }
                             CommandEvent::Stdout(line) => {
-                                println!("[MacNAS] {}", String::from_utf8_lossy(&line))
+                                println!("[MacBox] {}", String::from_utf8_lossy(&line))
                             }
                             CommandEvent::Terminated(payload) => {
-                                eprintln!("[MacNAS] 后端已退出: {payload:?}");
+                                eprintln!("[MacBox] 后端已退出: {payload:?}");
                                 break;
                             }
                             _ => {}
@@ -131,20 +131,20 @@ fn main() {
                     if let Some(child) = child.take() {
                         let _ = child.kill();
                     }
-                    return Err("MacNAS 后端启动超时，请查看 ~/.macnas/macnas.log".into());
+                    return Err("MacBox 后端启动超时，请查看 ~/.macbox/macbox.log".into());
                 }
             }
 
             app.manage(BackendProcess(Mutex::new(child)));
             if let Some(window) = app.get_webview_window("main") {
                 let address = Url::parse(&format!("http://127.0.0.1:{port}"))
-                    .map_err(|error| format!("MacNAS 地址无效: {error}"))?;
+                    .map_err(|error| format!("MacBox 地址无效: {error}"))?;
                 window
                     .navigate(address)
-                    .map_err(|error| format!("打开 MacNAS 控制台失败: {error}"))?;
+                    .map_err(|error| format!("打开 MacBox 控制台失败: {error}"))?;
                 window
                     .show()
-                    .map_err(|error| format!("显示 MacNAS 窗口失败: {error}"))?;
+                    .map_err(|error| format!("显示 MacBox 窗口失败: {error}"))?;
             }
             Ok(())
         })
@@ -160,5 +160,5 @@ fn main() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("启动 MacNAS 桌面应用失败");
+        .expect("启动 MacBox 桌面应用失败");
 }

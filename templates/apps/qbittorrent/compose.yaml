@@ -1,7 +1,7 @@
 services:
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
-    container_name: macnas-qbittorrent
+    container_name: macbox-qbittorrent
     environment:
       - PUID=0
       - PGID=0

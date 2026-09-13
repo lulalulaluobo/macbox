@@ -11,16 +11,16 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Port != 19808 {
 		t.Errorf("expected port 19808, got %d", cfg.Port)
 	}
-	if cfg.VM.Name != "macnas" {
-		t.Errorf("expected VM name macnas, got %s", cfg.VM.Name)
+	if cfg.VM.Name != "macbox" {
+		t.Errorf("expected VM name macbox, got %s", cfg.VM.Name)
 	}
-	if cfg.Samba.ShareName != "MacNAS" {
-		t.Errorf("expected Samba share name MacNAS, got %s", cfg.Samba.ShareName)
+	if cfg.Samba.ShareName != "MacBox" {
+		t.Errorf("expected Samba share name MacBox, got %s", cfg.Samba.ShareName)
 	}
 }
 
 func TestConfigDir(t *testing.T) {
-	// Keep the test hermetic: ConfigDir creates ~/.macnas, so never point it at
+	// Keep the test hermetic: ConfigDir creates ~/.macbox, so never point it at
 	// the developer's real home directory.
 	t.Setenv("HOME", t.TempDir())
 
@@ -44,7 +44,7 @@ func TestLoadConfigRemovesLegacyPlaintextSambaPassword(t *testing.T) {
 		t.Fatalf("ConfigDir error: %v", err)
 	}
 	path := dir + "/config.yaml"
-	legacy := "port: 19808\nsamba:\n  shareName: MacNAS\n  port: 4455\n  user: admin\n  password: plaintext-admin-password\n"
+	legacy := "port: 19808\nsamba:\n  shareName: MacBox\n  port: 4455\n  user: admin\n  password: plaintext-admin-password\n"
 	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
 		t.Fatalf("write legacy config: %v", err)
 	}
@@ -132,8 +132,8 @@ func TestNormalizeGuestTarget(t *testing.T) {
 }
 
 func TestNormalizeDataDiskName(t *testing.T) {
-	if got, err := NormalizeDataDiskName(""); err != nil || got != "macnas-data" {
-		t.Fatalf("empty disk name = %q, %v; want macnas-data", got, err)
+	if got, err := NormalizeDataDiskName(""); err != nil || got != "macbox-data" {
+		t.Fatalf("empty disk name = %q, %v; want macbox-data", got, err)
 	}
 	if got, err := NormalizeDataDiskName("data_pool-1"); err != nil || got != "data_pool-1" {
 		t.Fatalf("valid disk name = %q, %v", got, err)
@@ -164,12 +164,56 @@ func TestNormalizeAISkillsHostPath(t *testing.T) {
 }
 
 func TestNormalizeListenAddressDefaultsToLoopback(t *testing.T) {
-	for _, input := range []string{"", "localhost", "nas.local", "not-an-ip"} {
+	for _, input := range []string{"", "localhost", "storage.local", "not-an-ip"} {
 		if got := NormalizeListenAddress(input); got != "127.0.0.1" {
 			t.Errorf("NormalizeListenAddress(%q) = %q, want loopback", input, got)
 		}
 	}
 	if got := NormalizeListenAddress("0.0.0.0"); got != "0.0.0.0" {
 		t.Errorf("explicit bind address normalized to %q", got)
+	}
+}
+
+func TestValidateServiceShortcut(t *testing.T) {
+	valid := ServiceShortcut{
+		ID:      "manual:piweb",
+		Source:  "manual",
+		Name:    "Pi Web",
+		URL:     "http://192.168.2.123:30141",
+		Icon:    "globe",
+		Enabled: true,
+	}
+	if err := ValidateServiceShortcut(valid); err != nil {
+		t.Fatalf("ValidateServiceShortcut rejected valid shortcut: %v", err)
+	}
+
+	invalid := []ServiceShortcut{
+		{ID: "manual:bad", Source: "manual", Name: "Bad", URL: "javascript:alert(1)", Icon: "globe"},
+		{ID: "manual:docker", Source: "manual", Name: "Bad", URL: "http://localhost", Icon: "globe", ContainerName: "alist"},
+		{ID: "manual:source", Source: "other", Name: "Bad", URL: "http://localhost", Icon: "globe"},
+		{ID: "docker:missing", Source: "docker", Name: "Docker", URL: "http://localhost", Icon: "box"},
+	}
+	for _, shortcut := range invalid {
+		if err := ValidateServiceShortcut(shortcut); err == nil {
+			t.Errorf("ValidateServiceShortcut accepted invalid shortcut %+v", shortcut)
+		}
+	}
+}
+
+func TestParseServiceNav(t *testing.T) {
+	data := []byte(`serviceNav:
+  - id: manual:piweb
+    source: manual
+    name: Pi Web
+    url: http://127.0.0.1:30141
+    icon: globe
+    enabled: true
+`)
+	cfg, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse rejected service navigation: %v", err)
+	}
+	if len(cfg.ServiceNav) != 1 || cfg.ServiceNav[0].ID != "manual:piweb" {
+		t.Fatalf("unexpected service navigation: %+v", cfg.ServiceNav)
 	}
 }

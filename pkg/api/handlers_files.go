@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/luluen/mac-nas/pkg/terminal"
+	"github.com/lulalulaluobo/macbox/pkg/terminal"
 	"net/http"
 	pathpkg "path"
 	"strconv"
@@ -42,16 +42,16 @@ func (s *Server) handleTerminalSessionClose(w http.ResponseWriter, r *http.Reque
 }
 
 // File System Handlers
-func terminalPathIsNASData(requested string) bool {
+func terminalPathIsDataRoot(requested string) bool {
 	clean := pathpkg.Clean(strings.TrimSpace(requested))
 	return clean == "/data" || strings.HasPrefix(clean, "/data/")
 }
 
-// The file browser normally exposes the NAS data root to all authenticated
+// The file browser normally exposes the MacBox data root to all authenticated
 // users. Browsing the VM root is an administrator-only capability because it
 // includes /etc, /home, /var and other system directories.
 func (s *Server) requireTerminalPathAccess(w http.ResponseWriter, r *http.Request, requested string) bool {
-	if terminalPathIsNASData(requested) {
+	if terminalPathIsDataRoot(requested) {
 		return true
 	}
 	return s.requireAdmin(w, r) != nil

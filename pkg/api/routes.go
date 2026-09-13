@@ -10,6 +10,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/system/service", s.handleSystemServiceStatus)
 	s.mux.HandleFunc("POST /api/system/service/install", s.adminOnly(s.handleSystemServiceInstall))
 	s.mux.HandleFunc("POST /api/system/service/uninstall", s.adminOnly(s.handleSystemServiceUninstall))
+	s.mux.HandleFunc("GET /api/system/backup", s.adminOnly(s.handleSystemBackupExport))
+	s.mux.HandleFunc("POST /api/system/backup/restore", s.handleSystemBackupRestore)
 
 	// 2. VM lifecycle & Specs
 	s.mux.HandleFunc("GET /api/vm/prerequisites", s.adminOnly(s.handleVMPrerequisites))
@@ -144,7 +146,14 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/system/terminal/skills", s.adminOnly(s.handleGetTerminalSkills))
 	s.mux.HandleFunc("POST /api/system/terminal/skills", s.adminOnly(s.handleUpdateTerminalSkills))
 
-	// 9. Web Console Authentication & User Management
+	// 9. Homepage service navigation
+	s.mux.HandleFunc("GET /api/service-shortcuts", s.handleServiceShortcutsList)
+	s.mux.HandleFunc("POST /api/service-shortcuts", s.adminOnly(s.handleServiceShortcutCreate))
+	s.mux.HandleFunc("PUT /api/service-shortcuts/{id}", s.adminOnly(s.handleServiceShortcutUpdate))
+	s.mux.HandleFunc("DELETE /api/service-shortcuts/{id}", s.adminOnly(s.handleServiceShortcutDelete))
+	s.mux.HandleFunc("POST /api/service-shortcuts/reorder", s.adminOnly(s.handleServiceShortcutReorder))
+
+	// 10. Web Console Authentication & User Management
 	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	s.mux.HandleFunc("POST /api/auth/setup", s.handleAuthSetup)

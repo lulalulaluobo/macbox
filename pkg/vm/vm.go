@@ -17,8 +17,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/storage"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/storage"
 	"gopkg.in/yaml.v3"
 )
 
@@ -124,7 +124,7 @@ func FindLima() (string, bool) {
 }
 
 // PrepareLimaEnvironment makes legacy direct exec.Command("limactl", ...)
-// call sites work when MacNAS was launched from Finder. The explicit resolver
+// call sites work when MacBox was launched from Finder. The explicit resolver
 // remains the source of truth for diagnostics; this environment bridge keeps
 // storage and terminal helpers compatible without duplicating path logic.
 func PrepareLimaEnvironment() {
@@ -165,7 +165,7 @@ func InstallLima(ctx context.Context) error {
 		PrepareLimaEnvironment()
 		return nil
 	}
-	return fmt.Errorf("Homebrew 已完成，但未找到 limactl，请重新打开 MacNAS 后重试")
+	return fmt.Errorf("Homebrew 已完成，但未找到 limactl，请重新打开 MacBox 后重试")
 }
 
 func (m *Manager) InvalidateCache() {
@@ -315,7 +315,7 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 	name, err := config.NormalizeVMName(cfg.VM.Name)
 	if err != nil {
-		name = "macnas"
+		name = "macbox"
 	}
 	return &Manager{
 		cfg:          cfg,
@@ -323,7 +323,30 @@ func NewManager(cfg *config.Config) *Manager {
 	}
 }
 
-// GetStatus checks Lima for the current status of the MacNAS instance (cached with 3s TTL)
+// guestProductSlug returns the canonical internal path prefix used by MacBox.
+func (m *Manager) guestProductSlug() string {
+	return "macbox"
+}
+
+func (m *Manager) guestManagementUser() string {
+	return "macboxctl"
+}
+
+func (m *Manager) guestProductGroup() string {
+	return "macbox"
+}
+
+// GuestSkillsPaths returns the effective scan locations for the current VM.
+func (m *Manager) GuestSkillsPaths() []string {
+	user := m.guestManagementUser()
+	return []string{
+		"/home/" + user + "/.agents/skills", "/root/.agents/skills",
+		"/home/" + user + "/.claude/skills", "/root/.claude/skills",
+		"/home/" + user + "/.codex/skills", "/root/.codex/skills",
+	}
+}
+
+// GetStatus checks Lima for the current status of the MacBox instance (cached with 3s TTL)
 func (m *Manager) GetStatus() (*VMStatus, error) {
 	return m.GetStatusContext(context.Background())
 }
@@ -560,14 +583,14 @@ func (m *Manager) ValidateDataDiskContext(ctx context.Context) error {
 	return nil
 }
 
-// GenerateConfig renders templates/vm/macnas.yaml.tmpl into ~/.macnas/macnas.yaml
+// GenerateConfig renders templates/vm/macbox.yaml.tmpl into ~/.macbox/macbox.yaml
 func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 	tmplData, err := os.ReadFile(tmplPath)
 	if err != nil {
 		return fmt.Errorf("read vm template error: %w", err)
 	}
 
-	tmpl, err := template.New("macnas-vm").Funcs(template.FuncMap{
+	tmpl, err := template.New("macbox-vm").Funcs(template.FuncMap{
 		"shellQuote": shellQuote,
 		"yamlQuote":  yamlQuote,
 	}).Parse(string(tmplData))
@@ -703,7 +726,7 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 
 // SyncAISkills creates the conventional per-user skill paths inside the VM.
 // The host directory is mounted read-only by Lima; only symlinks owned by
-// MacNAS are created or removed, so an existing user directory is never
+// MacBox are created or removed, so an existing user directory is never
 // overwritten.
 func (m *Manager) SyncAISkills(ctx context.Context) error {
 	if ctx == nil {
@@ -730,13 +753,15 @@ func (m *Manager) SyncAISkills(ctx context.Context) error {
 		}
 	}
 
-	const servicePath = "/etc/systemd/system/macnas-ai-skills.service"
-	const scriptPath = "/usr/local/bin/macnas-ai-skills.sh"
+	guestSlug := m.guestProductSlug()
+	guestUser := m.guestManagementUser()
+	servicePath := "/etc/systemd/system/" + guestSlug + "-ai-skills.service"
+	scriptPath := "/usr/local/bin/" + guestSlug + "-ai-skills.sh"
 	var script string
 	if enabled {
 		linkScript := `#!/bin/bash
 set -euo pipefail
-SOURCE_PATH=/mnt/macnas-ai-skills
+SOURCE_PATH=/mnt/macbox-ai-skills
 for i in $(seq 1 60); do
   if mountpoint -q "$SOURCE_PATH"; then
     break
@@ -744,7 +769,7 @@ for i in $(seq 1 60); do
   sleep 1
 done
 if ! mountpoint -q "$SOURCE_PATH" || [ ! -d "$SOURCE_PATH" ]; then
-  echo "[macnas-ai-skills] source directory is not mounted: $SOURCE_PATH" >&2
+  echo "[macbox-ai-skills] source directory is not mounted: $SOURCE_PATH" >&2
   exit 1
 fi
 
@@ -766,9 +791,9 @@ ensure_parent_dir() {
   fi
 }
 
-ensure_parent_dir /home/macnasctl/.agents macnasctl
-ensure_parent_dir /home/macnasctl/.claude macnasctl
-ensure_parent_dir /home/macnasctl/.codex macnasctl
+ensure_parent_dir /home/macboxctl/.agents macboxctl
+ensure_parent_dir /home/macboxctl/.claude macboxctl
+ensure_parent_dir /home/macboxctl/.codex macboxctl
 ensure_parent_dir /root/.agents root
 ensure_parent_dir /root/.claude root
 ensure_parent_dir /root/.codex root
@@ -776,32 +801,35 @@ ensure_parent_dir /root/.codex root
 ensure_skill_link() {
   local link_path="$1"
   if [ -e "$link_path" ] && [ ! -L "$link_path" ]; then
-    echo "[macnas-ai-skills] refusing to replace existing directory: $link_path" >&2
+    echo "[macbox-ai-skills] refusing to replace existing directory: $link_path" >&2
     return 1
   fi
   rm -f "$link_path"
   ln -s "$SKILL_ROOT" "$link_path"
 }
 
-ensure_skill_link /home/macnasctl/.agents/skills
+ensure_skill_link /home/macboxctl/.agents/skills
 ensure_skill_link /root/.agents/skills
-ensure_skill_link /home/macnasctl/.claude/skills
+ensure_skill_link /home/macboxctl/.claude/skills
 ensure_skill_link /root/.claude/skills
-ensure_skill_link /home/macnasctl/.codex/skills
+ensure_skill_link /home/macboxctl/.codex/skills
 ensure_skill_link /root/.codex/skills
 `
+		linkScript = strings.ReplaceAll(linkScript, "macboxctl", guestUser)
+		linkScript = strings.ReplaceAll(linkScript, "macbox", guestSlug)
 		serviceContent := `[Unit]
-Description=MacNAS AI CLI skills mapping
+Description=MacBox AI CLI skills mapping
 After=local-fs.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/bin/macnas-ai-skills.sh
+ExecStart=/usr/local/bin/macbox-ai-skills.sh
 
 [Install]
 WantedBy=multi-user.target
 `
+		serviceContent = strings.ReplaceAll(serviceContent, "macbox", guestSlug)
 		script = fmt.Sprintf(`
 cat <<'SKILL_SCRIPT_EOF' > %s
 %s
@@ -814,8 +842,8 @@ cat <<'SERVICE_EOF' > %s
 SERVICE_EOF
 
 systemctl daemon-reload
-systemctl enable macnas-ai-skills.service
-systemctl restart macnas-ai-skills.service
+systemctl enable macbox-ai-skills.service
+systemctl restart macbox-ai-skills.service
 `, scriptPath, linkScript, scriptPath, servicePath, serviceContent)
 	} else {
 		script = `#!/bin/bash
@@ -826,23 +854,25 @@ remove_owned_link() {
   if [ -L "$link_path" ]; then
     target="$(readlink "$link_path")"
   fi
-  if [ "$target" = "/mnt/macnas-ai-skills" ] || [ "$target" = "/mnt/macnas-ai-skills/skills" ]; then
+  if [ "$target" = "/mnt/macbox-ai-skills" ] || [ "$target" = "/mnt/macbox-ai-skills/skills" ]; then
     rm -f "$link_path"
   fi
 }
-remove_owned_link /home/macnasctl/.agents/skills
+remove_owned_link /home/macboxctl/.agents/skills
 remove_owned_link /root/.agents/skills
-remove_owned_link /home/macnasctl/.claude/skills
+remove_owned_link /home/macboxctl/.claude/skills
 remove_owned_link /root/.claude/skills
-remove_owned_link /home/macnasctl/.codex/skills
+remove_owned_link /home/macboxctl/.codex/skills
 remove_owned_link /root/.codex/skills
-if [ -f /etc/systemd/system/macnas-ai-skills.service ]; then
-  systemctl disable --now macnas-ai-skills.service 2>/dev/null || true
-  rm -f /etc/systemd/system/macnas-ai-skills.service
-  rm -f /usr/local/bin/macnas-ai-skills.sh
+if [ -f /etc/systemd/system/macbox-ai-skills.service ]; then
+  systemctl disable --now macbox-ai-skills.service 2>/dev/null || true
+  rm -f /etc/systemd/system/macbox-ai-skills.service
+  rm -f /usr/local/bin/macbox-ai-skills.sh
   systemctl daemon-reload
 fi
 `
+		script = strings.ReplaceAll(script, "macboxctl", guestUser)
+		script = strings.ReplaceAll(script, "macbox", guestSlug)
 	}
 
 	// The command content is fixed and delivered through stdin. hostPath is
@@ -854,7 +884,7 @@ fi
 }
 
 func writePrivateFileAtomically(filePath string, data []byte) error {
-	tmpFile, err := os.CreateTemp(filepath.Dir(filePath), ".macnas-private-*")
+	tmpFile, err := os.CreateTemp(filepath.Dir(filePath), ".macbox-private-*")
 	if err != nil {
 		return err
 	}
@@ -912,8 +942,8 @@ func (m *Manager) UpdateSpecs(cpus, memory, diskSize int, projectRoot string) er
 		m.restoreSpecs(previousCPUs, previousMemory, previousDiskSize)
 		return fmt.Errorf("创建配置目录失败: %w", err)
 	}
-	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
-	tmplPath := filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	renderedYAML := filepath.Join(cfgDir, "macbox.yaml")
+	tmplPath := filepath.Join(projectRoot, "templates", "vm", "macbox.yaml.tmpl")
 	if err := m.GenerateConfigFile(tmplPath, renderedYAML); err != nil {
 		m.restoreSpecs(previousCPUs, previousMemory, previousDiskSize)
 		return fmt.Errorf("重新生成虚拟机配置文件失败: %w", err)
@@ -972,11 +1002,11 @@ func (m *Manager) StartWithProgress(ctx context.Context, projectRoot string, rep
 			}
 			m.SetLastError("")
 			if syncErr := m.SyncMounts(ctx); syncErr != nil {
-				log.Printf("[MacNAS VM] mount sync failed after start: %v", syncErr)
+				log.Printf("[MacBox VM] mount sync failed after start: %v", syncErr)
 				err = syncErr
 				m.SetLastError(syncErr.Error())
 			} else if skillsErr := m.SyncAISkills(ctx); skillsErr != nil {
-				log.Printf("[MacNAS VM] AI skills sync failed after start: %v", skillsErr)
+				log.Printf("[MacBox VM] AI skills sync failed after start: %v", skillsErr)
 				err = skillsErr
 				m.SetLastError(skillsErr.Error())
 			} else if report != nil {
@@ -985,7 +1015,7 @@ func (m *Manager) StartWithProgress(ctx context.Context, projectRoot string, rep
 		}
 	}
 	if err == nil && report != nil {
-		report("completed", 100, "虚拟机和 MacNAS 服务已就绪")
+		report("completed", 100, "虚拟机和 MacBox 服务已就绪")
 	}
 	m.InvalidateCache()
 	return err
@@ -1050,7 +1080,7 @@ func (m *Manager) ProbeLocalMounts(ctx context.Context) ([]LocalMountProbe, erro
 			probes = append(probes, probe)
 			continue
 		}
-		sourcePath := "/mnt/macnas-mounts/" + mountID
+		sourcePath := "/mnt/macbox-mounts/" + mountID
 		if _, sourceErr := m.Exec(ctx, "mountpoint", "-q", sourcePath); sourceErr == nil {
 			probe.SourceMounted = true
 		}
@@ -1065,7 +1095,7 @@ func (m *Manager) ProbeLocalMounts(ctx context.Context) ([]LocalMountProbe, erro
 		switch {
 		case probe.Healthy:
 			probe.Status = "healthy"
-			probe.Message = "本机目录已挂载到 NAS 目标目录"
+			probe.Message = "本机目录已挂载到 MacBox 目标目录"
 		case !probe.SourceMounted:
 			probe.Status = "source-missing"
 			probe.Message = "Lima 未挂载本机目录，请确认配置已启用并重启虚拟机"
@@ -1086,7 +1116,7 @@ func (m *Manager) EnsureRuntimeAccess(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	out, err := m.Exec(ctx, "sudo", "usermod", "-aG", "docker,macnas", "macnasctl")
+	out, err := m.Exec(ctx, "sudo", "usermod", "-aG", "docker,"+m.guestProductGroup(), m.guestManagementUser())
 	if err != nil {
 		return fmt.Errorf("修复 Lima 管理账号权限失败: %s (%w)", strings.TrimSpace(out), err)
 	}
@@ -1110,8 +1140,8 @@ func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 	if err != nil {
 		return fmt.Errorf("创建配置目录失败: %w", err)
 	}
-	renderedYAML := filepath.Join(cfgDir, "macnas.yaml")
-	tmplPath := filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	renderedYAML := filepath.Join(cfgDir, "macbox.yaml")
+	tmplPath := filepath.Join(projectRoot, "templates", "vm", "macbox.yaml.tmpl")
 	if err := m.GenerateConfigFile(tmplPath, renderedYAML); err != nil {
 		return fmt.Errorf("生成虚拟机配置文件失败: %w", err)
 	}
@@ -1143,8 +1173,8 @@ func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
 	if err != nil {
 		return fmt.Errorf("创建配置目录失败: %w", err)
 	}
-	renderedYAML = filepath.Join(cfgDir, "macnas.yaml")
-	tmplPath = filepath.Join(projectRoot, "templates", "vm", "macnas.yaml.tmpl")
+	renderedYAML = filepath.Join(cfgDir, "macbox.yaml")
+	tmplPath = filepath.Join(projectRoot, "templates", "vm", "macbox.yaml.tmpl")
 
 	if err := m.GenerateConfigFile(tmplPath, renderedYAML); err != nil {
 		return err
@@ -1211,6 +1241,7 @@ func (m *Manager) SyncMounts(ctx context.Context) error {
 		return nil
 	}
 
+	guestMountRoot := "/mnt/" + m.guestProductSlug() + "-mounts"
 	// Build the mount script content
 	script := "#!/bin/bash\nset -e\n" +
 		"for i in $(seq 1 30); do\n" +
@@ -1221,7 +1252,7 @@ func (m *Manager) SyncMounts(ctx context.Context) error {
 		"  sleep 1\n" +
 		"done\n" +
 		"if [ -z \"$REAL_DATA\" ] || [ ! -d \"$REAL_DATA\" ]; then\n" +
-		"  echo \"[macnas-mounts] /data is not ready\" >&2\n" +
+		"  echo \"[macbox-mounts] /data is not ready\" >&2\n" +
 		"  exit 1\n" +
 		"fi\n"
 
@@ -1236,7 +1267,7 @@ func (m *Manager) SyncMounts(ctx context.Context) error {
 		if mount.Writable {
 			mode = "rw"
 		}
-		sourcePath := "/mnt/macnas-mounts/" + mount.ID
+		sourcePath := guestMountRoot + "/" + mount.ID
 		guestTarget, err := config.NormalizeGuestTarget(mount.GuestTarget)
 		if err != nil {
 			return fmt.Errorf("本地挂载 %q 配置无效: %w", mount.ID, err)
@@ -1250,7 +1281,7 @@ func (m *Manager) SyncMounts(ctx context.Context) error {
 				"  sleep 1\n"+
 				"done\n"+
 				"if ! mountpoint -q \"$SOURCE_PATH\"; then\n"+
-				"  echo \"[macnas-mounts] source is not ready: $SOURCE_PATH\" >&2\n"+
+				"  echo \"[macbox-mounts] source is not ready: $SOURCE_PATH\" >&2\n"+
 				"  exit 1\n"+
 				"fi\n"+
 				"mount -o remount,%s \"$SOURCE_PATH\" 2>/dev/null || true\n"+
@@ -1268,14 +1299,14 @@ func (m *Manager) SyncMounts(ctx context.Context) error {
 				"# If an old Lima-managed mount remains, bind over it. On the next run\n"+
 				"# the top bind layer is removed first and then recreated exactly once.\n"+
 				"mount --bind \"$SOURCE_PATH\" \"$TARGET_DIR\"\n"+
-				"echo \"[macnas-mounts] bind mounted %s -> $TARGET_DIR\"\n"+
+				"echo \"[macbox-mounts] bind mounted %s -> $TARGET_DIR\"\n"+
 				"mount -o remount,%s \"$TARGET_DIR\" 2>/dev/null || true\n",
 			shellQuote(sourcePath), mode, shellQuote(guestTarget), shellQuote(mount.ID), mode,
 		)
 	}
 
 	serviceContent := `[Unit]
-Description=MacNAS VirtioFS bind mounts
+Description=MacBox VirtioFS bind mounts
 # Keep this service independent from cloud-init's final target. On Ubuntu,
 # cloud-init.target is ordered after multi-user.target, so making a
 # multi-user service depend on it creates a boot cycle and blocks limactl.
@@ -1284,32 +1315,37 @@ After=local-fs.target docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/bin/macnas-mounts.sh
+ExecStart=/usr/local/bin/macbox-mounts.sh
 
 [Install]
 WantedBy=multi-user.target`
+	serviceContent = strings.ReplaceAll(serviceContent, "macbox", m.guestProductSlug())
+	mountScriptPath := "/usr/local/bin/" + m.guestProductSlug() + "-mounts.sh"
+	servicePath := "/etc/systemd/system/" + m.guestProductSlug() + "-mounts.service"
+	serviceName := m.guestProductSlug() + "-mounts.service"
+	script = strings.ReplaceAll(script, "macbox", m.guestProductSlug())
 
 	// Write each payload through stdin. This keeps both configuration content and
 	// mount values out of shell command interpolation.
-	if _, err := m.Exec(ctx, "sudo", "mkdir", "-p", "/mnt/macnas-mounts"); err != nil {
+	if _, err := m.Exec(ctx, "sudo", "mkdir", "-p", guestMountRoot); err != nil {
 		return fmt.Errorf("准备本地挂载目录失败: %w", err)
 	}
-	if _, err := m.ExecWithInput(ctx, strings.NewReader(script), "sudo", "tee", "/usr/local/bin/macnas-mounts.sh"); err != nil {
+	if _, err := m.ExecWithInput(ctx, strings.NewReader(script), "sudo", "tee", mountScriptPath); err != nil {
 		return fmt.Errorf("写入本地挂载脚本失败: %w", err)
 	}
-	if _, err := m.Exec(ctx, "sudo", "chmod", "+x", "/usr/local/bin/macnas-mounts.sh"); err != nil {
+	if _, err := m.Exec(ctx, "sudo", "chmod", "+x", mountScriptPath); err != nil {
 		return fmt.Errorf("设置本地挂载脚本权限失败: %w", err)
 	}
-	if _, err := m.ExecWithInput(ctx, strings.NewReader(serviceContent), "sudo", "tee", "/etc/systemd/system/macnas-mounts.service"); err != nil {
+	if _, err := m.ExecWithInput(ctx, strings.NewReader(serviceContent), "sudo", "tee", servicePath); err != nil {
 		return fmt.Errorf("写入本地挂载服务失败: %w", err)
 	}
 	if _, err := m.Exec(ctx, "sudo", "systemctl", "daemon-reload"); err != nil {
 		return fmt.Errorf("刷新本地挂载服务失败: %w", err)
 	}
-	if _, err := m.Exec(ctx, "sudo", "systemctl", "enable", "macnas-mounts.service"); err != nil {
+	if _, err := m.Exec(ctx, "sudo", "systemctl", "enable", serviceName); err != nil {
 		return fmt.Errorf("启用本地挂载服务失败: %w", err)
 	}
-	if out, err := m.Exec(ctx, "sudo", "/usr/local/bin/macnas-mounts.sh"); err != nil {
+	if out, err := m.Exec(ctx, "sudo", mountScriptPath); err != nil {
 		return fmt.Errorf("执行本地挂载脚本失败: %s (%w)", strings.TrimSpace(out), err)
 	}
 	return nil
@@ -1365,7 +1401,7 @@ func (b *cappedCommandOutput) String() string {
 	defer b.mu.Unlock()
 	output := b.buf.String()
 	if b.truncated {
-		output += fmt.Sprintf("\n[MacNAS] 命令输出已截断（超过 %d MiB）\n", maxVMCommandOutputBytes/(1<<20))
+		output += fmt.Sprintf("\n[MacBox] 命令输出已截断（超过 %d MiB）\n", maxVMCommandOutputBytes/(1<<20))
 	}
 	return output
 }
@@ -1412,7 +1448,7 @@ func limaCommandPath() string {
 
 // Exec runs a command inside the Lima VM via limactl shell
 func (m *Manager) Exec(ctx context.Context, command ...string) (string, error) {
-	return runVMCommand(ctx, m.InstanceName(), nil, managementCommandArgs(command...)...)
+	return runVMCommand(ctx, m.InstanceName(), nil, m.managementCommandArgs(command...)...)
 }
 
 // ExecAsManagementUser runs a command in a fresh process for the fixed Lima
@@ -1426,7 +1462,7 @@ func (m *Manager) ExecAsManagementUser(ctx context.Context, command ...string) (
 // stdin. This is used for passwords and file contents so they never need to
 // be interpolated into a shell command.
 func (m *Manager) ExecWithInput(ctx context.Context, stdin io.Reader, command ...string) (string, error) {
-	return runVMCommand(ctx, m.InstanceName(), stdin, managementCommandArgs(command...)...)
+	return runVMCommand(ctx, m.InstanceName(), stdin, m.managementCommandArgs(command...)...)
 }
 
 // ExecStream runs a command inside the Lima VM and streams stdout/stderr to an io.Writer
@@ -1434,7 +1470,7 @@ func (m *Manager) ExecStream(ctx context.Context, w io.Writer, command ...string
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	args := append([]string{"shell", m.InstanceName()}, managementCommandArgs(command...)...)
+	args := append([]string{"shell", m.InstanceName()}, m.managementCommandArgs(command...)...)
 	cmd := exec.CommandContext(ctx, limaCommandPath(), args...)
 	cmd.Stdout = w
 	cmd.Stderr = w
@@ -1446,7 +1482,7 @@ func (m *Manager) ExecStreamWithInput(ctx context.Context, w io.Writer, stdin io
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	args := append([]string{"shell", m.InstanceName()}, managementCommandArgs(command...)...)
+	args := append([]string{"shell", m.InstanceName()}, m.managementCommandArgs(command...)...)
 	cmd := exec.CommandContext(ctx, limaCommandPath(), args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = w
@@ -1454,6 +1490,6 @@ func (m *Manager) ExecStreamWithInput(ctx context.Context, w io.Writer, stdin io
 	return cmd.Run()
 }
 
-func managementCommandArgs(command ...string) []string {
-	return append([]string{"sudo", "-u", "macnasctl", "--"}, command...)
+func (m *Manager) managementCommandArgs(command ...string) []string {
+	return append([]string{"sudo", "-u", m.guestManagementUser(), "--"}, command...)
 }

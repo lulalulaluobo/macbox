@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
@@ -32,7 +32,7 @@ func (s *Server) handleVMPrerequisites(w http.ResponseWriter, r *http.Request) {
 				result["brewPath"] = brewPath
 				result["canInstall"] = true
 				result["installCommand"] = "brew install lima"
-				result["installHint"] = "可直接点击安装，MacNAS 将通过本机 Homebrew 安装 Lima。"
+				result["installHint"] = "可直接点击安装，MacBox 将通过本机 Homebrew 安装 Lima。"
 			} else {
 				result["brewInstalled"] = false
 				result["canInstall"] = false
@@ -81,7 +81,7 @@ func (s *Server) handleVMInstallLima(w http.ResponseWriter, _ *http.Request) {
 		s.jobs.update(job.ID, "installing", 55, "Homebrew 正在下载并安装 Lima")
 		err := vm.InstallLima(ctx)
 		if err != nil {
-			log.Printf("[MacNAS] Lima install error: %v", err)
+			log.Printf("[MacBox] Lima install error: %v", err)
 		} else {
 			s.jobs.update(job.ID, "verifying", 90, "Lima 已安装，正在验证 limactl")
 		}
@@ -110,11 +110,11 @@ func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 			s.jobs.update(job.ID, stage, progress, message)
 		})
 		if err != nil {
-			log.Printf("[MacNAS] VM Start error: %v", err)
+			log.Printf("[MacBox] VM Start error: %v", err)
 		} else {
 			s.vmMgr.SetConfigDirty(false)
 			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
-				log.Printf("[MacNAS] ensure Samba password after VM start failed: %v", err)
+				log.Printf("[MacBox] ensure Samba password after VM start failed: %v", err)
 			}
 		}
 		s.jobs.finish(job.ID, err)
@@ -140,7 +140,7 @@ func (s *Server) handleVMStop(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		err := s.vmMgr.Stop(ctx)
 		if err != nil {
-			log.Printf("[MacNAS] VM Stop error: %v", err)
+			log.Printf("[MacBox] VM Stop error: %v", err)
 		}
 		s.jobs.finish(job.ID, err)
 	}()
@@ -165,11 +165,11 @@ func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		err := s.vmMgr.Restart(ctx, s.projectRoot)
 		if err != nil {
-			log.Printf("[MacNAS] VM Restart error: %v", err)
+			log.Printf("[MacBox] VM Restart error: %v", err)
 		} else {
 			s.vmMgr.SetConfigDirty(false)
 			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
-				log.Printf("[MacNAS] ensure Samba password after VM restart failed: %v", err)
+				log.Printf("[MacBox] ensure Samba password after VM restart failed: %v", err)
 			}
 		}
 		s.jobs.finish(job.ID, err)
@@ -183,8 +183,8 @@ func (s *Server) regenerateVMConfig() error {
 	if err != nil {
 		return err
 	}
-	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macnas.yaml.tmpl")
-	return s.vmMgr.GenerateConfigFile(tmplPath, filepath.Join(cfgDir, "macnas.yaml"))
+	tmplPath := filepath.Join(s.projectRoot, "templates", "vm", "macbox.yaml.tmpl")
+	return s.vmMgr.GenerateConfigFile(tmplPath, filepath.Join(cfgDir, "macbox.yaml"))
 }
 
 func (s *Server) restoreConfigSnapshot(snapshot *config.Config) error {

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "MacNAS desktop permissions",
+  "description": "MacBox desktop permissions",
   "windows": ["main"],
   "permissions": [
     "core:default",

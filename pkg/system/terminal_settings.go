@@ -195,7 +195,7 @@ func countAISkillDirectories(path string) (int, error) {
 
 // DiscoverAISkillsCandidates returns the conventional local skill locations
 // for AI CLIs. The browser may be on another device, so these are discovered
-// by the MacNAS process on the Mac host rather than by a browser directory
+// by the MacBox process on the Mac host rather than by a browser directory
 // picker.
 func DiscoverAISkillsCandidates() []AISkillsCandidate {
 	home, err := os.UserHomeDir()

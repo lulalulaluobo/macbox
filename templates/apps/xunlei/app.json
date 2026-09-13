@@ -16,7 +16,7 @@
     {"host": "/data/downloads", "container": "/xunlei/downloads", "description": "迅雷下载文件目录"}
   ],
   "env": [
-    {"key": "XL_UID", "value": "0", "description": "下载目录用户 ID（MacNAS 数据目录默认由 root 管理）"},
+    {"key": "XL_UID", "value": "0", "description": "下载目录用户 ID（MacBox 数据目录默认由 root 管理）"},
     {"key": "XL_GID", "value": "0", "description": "下载目录用户组 ID"}
   ]
 }

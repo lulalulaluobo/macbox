@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/storage"
-	"github.com/luluen/mac-nas/pkg/system"
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/storage"
+	"github.com/lulalulaluobo/macbox/pkg/system"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 )
 
 // handleSystemMenubarStatus exposes the small read-only status payload needed

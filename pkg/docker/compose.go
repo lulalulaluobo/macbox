@@ -75,7 +75,7 @@ func publishedPortValue(value interface{}) (int, bool) {
 }
 
 // PublishedHostPorts returns the unique host ports published by a Compose
-// document. MacNAS forwards these ports through Lima so services are
+// document. MacBox forwards these ports through Lima so services are
 // reachable from other devices on the configured LAN interface.
 func PublishedHostPorts(content string) ([]int, error) {
 	var document composePortDocument
@@ -160,7 +160,7 @@ func (c *Client) listComposeProjects(ctx context.Context, containers []Container
 	}
 
 	// 2. Discover offline projects in /data/appdata/compose/
-	// A fresh NAS data volume has no user Compose projects yet. Keep the
+	// A fresh MacBox data volume has no user Compose projects yet. Keep the
 	// discovery command successful for that empty state instead of marking a
 	// healthy Docker daemon as degraded because find cannot open a missing
 	// optional directory.

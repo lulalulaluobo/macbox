@@ -6,7 +6,7 @@ type BuiltinAppDefinition struct {
 	YAML     string
 }
 
-// GetBuiltinCatalog returns all curated out-of-the-box NAS applications
+// GetBuiltinCatalog returns all curated out-of-the-box MacBox applications
 func GetBuiltinCatalog() []BuiltinAppDefinition {
 	return []BuiltinAppDefinition{
 		// 1. Jellyfin
@@ -32,7 +32,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   jellyfin:
     image: jellyfin/jellyfin:latest
-    container_name: macnas-jellyfin
+    container_name: macbox-jellyfin
     restart: unless-stopped
     ports:
       - "8096:8096"
@@ -70,7 +70,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   alist:
     image: xhofe/alist:latest
-    container_name: macnas-alist
+    container_name: macbox-alist
     restart: unless-stopped
     ports:
       - "5244:5244"
@@ -107,7 +107,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   filebrowser:
     image: filebrowser/filebrowser:latest
-    container_name: macnas-filebrowser
+    container_name: macbox-filebrowser
     restart: unless-stopped
     ports:
       - "8082:80"
@@ -146,7 +146,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
-    container_name: macnas-qbittorrent
+    container_name: macbox-qbittorrent
     restart: unless-stopped
     environment:
       - PUID=1000
@@ -168,7 +168,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "syncthing",
 				Name:        "Syncthing",
-				Description: "连续、安全且去中心化的文件同步工具，在多台电脑、手机与 NAS 之间点对点加密实时同步文件。",
+				Description: "连续、安全且去中心化的文件同步工具，在多台电脑、手机与 MacBox 之间点对点加密实时同步文件。",
 				Version:     "1.27.12",
 				Icon:        "refresh-cw",
 				Category:    "私有云盘",
@@ -187,7 +187,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   syncthing:
     image: syncthing/syncthing:latest
-    container_name: macnas-syncthing
+    container_name: macbox-syncthing
     restart: unless-stopped
     ports:
       - "8384:8384"
@@ -225,7 +225,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   vaultwarden:
     image: vaultwarden/server:latest
-    container_name: macnas-vaultwarden
+    container_name: macbox-vaultwarden
     restart: unless-stopped
     ports:
       - "8086:80"
@@ -258,7 +258,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   uptime-kuma:
     image: louislam/uptime-kuma:1
-    container_name: macnas-uptime-kuma
+    container_name: macbox-uptime-kuma
     restart: unless-stopped
     ports:
       - "3001:3001"
@@ -289,7 +289,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   navidrome:
     image: deluan/navidrome:latest
-    container_name: macnas-navidrome
+    container_name: macbox-navidrome
     restart: unless-stopped
     ports:
       - "4533:4533"
@@ -326,7 +326,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   npm:
     image: jc21/nginx-proxy-manager:latest
-    container_name: macnas-npm
+    container_name: macbox-npm
     restart: unless-stopped
     ports:
       - "81:81"
@@ -356,7 +356,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   it-tools:
     image: corentinth/it-tools:latest
-    container_name: macnas-it-tools
+    container_name: macbox-it-tools
     restart: unless-stopped
     ports:
       - "8088:80"
@@ -384,7 +384,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
-    container_name: macnas-homeassistant
+    container_name: macbox-homeassistant
     restart: unless-stopped
     privileged: true
     environment:
@@ -420,7 +420,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			YAML: `services:
   audiobookshelf:
     image: ghcr.io/advplyr/audiobookshelf:latest
-    container_name: macnas-audiobookshelf
+    container_name: macbox-audiobookshelf
     restart: unless-stopped
     ports:
       - "13378:80"
@@ -452,16 +452,16 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 				Volumes: []AppVolume{
 					{Host: "/var/run/docker.sock", Container: "/var/run/docker.sock", Description: "Docker Engine 控制套接字（高权限）"},
 					{Host: "/data/appdata/dockge/data", Container: "/app/data", Description: "Dockge 登录与界面配置"},
-					{Host: "/data", Container: "/data", Description: "Compose 堆栈目录与 NAS 数据路径（保持宿主机路径一致）"},
+					{Host: "/data", Container: "/data", Description: "Compose 堆栈目录与 MacBox 数据路径（保持宿主机路径一致）"},
 				},
 				Env: []AppEnv{
-					{Key: "DOCKGE_STACKS_DIR", Value: "/data/appdata", Description: "MacNAS Compose 堆栈目录"},
+					{Key: "DOCKGE_STACKS_DIR", Value: "/data/appdata", Description: "MacBox Compose 堆栈目录"},
 				},
 			},
 			YAML: `services:
   dockge:
     image: louislam/dockge:1
-    container_name: macnas-dockge
+    container_name: macbox-dockge
     restart: unless-stopped
     ports:
       - "5001:5001"
@@ -494,15 +494,15 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 					{Host: "/data/downloads", Container: "/xunlei/downloads", Description: "迅雷下载文件目录"},
 				},
 				Env: []AppEnv{
-					{Key: "XL_UID", Value: "0", Description: "下载目录用户 ID（MacNAS 数据目录默认由 root 管理）"},
+					{Key: "XL_UID", Value: "0", Description: "下载目录用户 ID（MacBox 数据目录默认由 root 管理）"},
 					{Key: "XL_GID", Value: "0", Description: "下载目录用户组 ID"},
 				},
 			},
 			YAML: `services:
   xunlei:
     image: cnk3x/xunlei:beta
-    container_name: macnas-xunlei
-    hostname: macnas-xunlei
+    container_name: macbox-xunlei
+    hostname: macbox-xunlei
     restart: unless-stopped
     cap_add:
       - SYS_ADMIN
@@ -540,21 +540,21 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 					{Host: "/data/downloads", Container: "/root/baidunetdiskdownload", Description: "百度网盘下载文件目录"},
 				},
 				Env: []AppEnv{
-					{Key: "VNC_SERVER_PASSWD", Value: "macnas-change-me", Description: "VNC 密码（保留默认标记时自动随机生成）"},
+					{Key: "VNC_SERVER_PASSWD", Value: "macbox-change-me", Description: "VNC 密码（保留默认标记时自动随机生成）"},
 					{Key: "TZ", Value: "Asia/Shanghai", Description: "系统时区"},
 				},
 			},
 			YAML: `services:
   baidunetdisk:
     image: tzuhsiao/baidunetdisk:latest
-    container_name: macnas-baidunetdisk
+    container_name: macbox-baidunetdisk
     restart: unless-stopped
     ports:
       - "6080:6080"
       - "5900:5900"
     environment:
       - TZ=Asia/Shanghai
-      - VNC_SERVER_PASSWD=macnas-change-me
+      - VNC_SERVER_PASSWD=macbox-change-me
     volumes:
       - /data/appdata/baidunetdisk/config:/root/baidunetdisk
       - /data/downloads:/root/baidunetdiskdownload

@@ -47,7 +47,7 @@ type ComposeProject struct {
 	WorkingDir    string   `json:"workingDir"`
 	ServicesCount int      `json:"servicesCount"`
 	Containers    []string `json:"containers"`
-	IsSystemApp   bool     `json:"isSystemApp"` // true if managed by MacNAS App Store
+	IsSystemApp   bool     `json:"isSystemApp"` // true if managed by MacBox App Store
 }
 
 // DockerOverview represents the summary dashboard for Docker

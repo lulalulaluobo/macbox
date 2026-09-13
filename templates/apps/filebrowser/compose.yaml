@@ -1,7 +1,7 @@
 services:
   filebrowser:
     image: filebrowser/filebrowser:latest
-    container_name: macnas-filebrowser
+    container_name: macbox-filebrowser
     restart: unless-stopped
     user: "0:0"
     command: ["-a", "0.0.0.0", "-p", "80", "-r", "/srv"]

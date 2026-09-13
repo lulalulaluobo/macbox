@@ -1,4 +1,4 @@
-module github.com/luluen/mac-nas
+module github.com/lulalulaluobo/macbox
 
 go 1.27.0
 

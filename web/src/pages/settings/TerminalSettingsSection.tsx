@@ -215,7 +215,7 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
         <div className="flex flex-col gap-2 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3 text-[11px] leading-relaxed text-slate-500 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div>VM 映射位置：<code className="text-slate-300">.agents/skills</code>、<code className="text-slate-300">.claude/skills</code>、<code className="text-slate-300">.codex/skills</code>（普通用户与 root 均已映射）</div>
-            <div className="mt-1">纯 Web 访问时，浏览器目录选择器只能读取手机/当前设备，不能代表运行 Mac；因此这里由 MacNAS 在服务器本机自动扫描。</div>
+            <div className="mt-1">纯 Web 访问时，浏览器目录选择器只能读取手机/当前设备，不能代表运行 Mac；因此这里由 MacBox 在服务器本机自动扫描。</div>
           </div>
           <span className="shrink-0 text-emerald-300">只读映射</span>
         </div>

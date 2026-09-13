@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 )
 
 type SystemUser struct {
@@ -68,7 +68,7 @@ func NewUserManager(vmMgr *vm.Manager) *UserManager {
 // ListUsers lists all interactive human and root users in the Linux VM
 func (um *UserManager) ListUsers(ctx context.Context) ([]SystemUser, error) {
 	// Query /etc/passwd for users with UID == 0, UID >= 1000, or common mapped UID 501
-	awkProgram := `$1 != "macnasctl" && ($3 >= 1000 || $3 == 0 || $3 == 501) && $7 !~ /nologin|false/ {print $1":"$3":"$4":"$6":"$7}`
+	awkProgram := `$1 != "macboxctl" && ($3 >= 1000 || $3 == 0 || $3 == 501) && $7 !~ /nologin|false/ {print $1":"$3":"$4":"$6":"$7}`
 	out, err := um.vmMgr.Exec(ctx, "awk", "-F:", awkProgram, "/etc/passwd")
 	if err != nil {
 		return nil, fmt.Errorf("list users failed: %w", err)

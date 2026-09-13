@@ -1,7 +1,7 @@
 // Bump this when the embedded shell changes so an older release cannot keep
 // showing stale initialization copy after the backend has been upgraded.
-const CACHE_NAME = 'macnas-shell-v2';
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/macnas-mark.svg'];
+const CACHE_NAME = 'macbox-shell-v2';
+const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/macbox-mark.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

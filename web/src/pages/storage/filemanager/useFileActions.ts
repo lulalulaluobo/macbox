@@ -21,7 +21,7 @@ export const useFileActions = ({ selectedPaths, onSuccess, onError }: UseFileAct
     if (paths.length === 0) return;
     const link = document.createElement('a');
     link.href = api.getBatchDownloadUrl(paths);
-    link.download = 'MacNAS-批量下载.zip';
+    link.download = 'MacBox-批量下载.zip';
     document.body.appendChild(link);
     link.click();
     link.remove();

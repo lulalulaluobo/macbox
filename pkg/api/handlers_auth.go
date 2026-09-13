@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luluen/mac-nas/pkg/auth"
-	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/auth"
+	"github.com/lulalulaluobo/macbox/pkg/config"
 )
 
 func (s *Server) syncInitialAdminSMBCredentials(ctx context.Context, user *auth.User, password string) error {
@@ -21,7 +21,7 @@ func (s *Server) syncInitialAdminSMBCredentials(ctx context.Context, user *auth.
 	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := s.sambaMgr.SyncCredentials(syncCtx, user.Username, password); err != nil {
-		log.Printf("[MacNAS Samba] 首位超级管理员凭据同步失败: %v", err)
+		log.Printf("[MacBox Samba] 首位超级管理员凭据同步失败: %v", err)
 		return err
 	}
 	return nil
@@ -111,7 +111,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 	if !s.isLoopbackRequest(r) {
-		writeError(w, http.StatusForbidden, "首次管理员初始化仅允许在 MacNAS 主机本机执行")
+		writeError(w, http.StatusForbidden, "首次管理员初始化仅允许在 MacBox 主机本机执行")
 		return
 	}
 	if s.authMgr == nil {

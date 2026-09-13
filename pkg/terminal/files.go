@@ -70,7 +70,7 @@ func ListFilesContext(ctx context.Context, instanceName, targetPath string) ([]F
 // paging, but only the requested window crosses the process boundary.
 func ListFilesPageContext(ctx context.Context, instanceName, targetPath string, offset, limit int) ([]FileInfo, bool, error) {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	if targetPath == "" {
 		targetPath = "/data"
@@ -105,7 +105,7 @@ try:
                     # Make standard VM links such as /bin and /lib
                     # navigable in the root browser. The resolver still
                     # canonicalizes every child and keeps /data links from
-                    # escaping the NAS data root.
+                    # escaping the MacBox data root.
                     "isDir": entry.is_dir(follow_symlinks=True),
                     "isSymlink": entry.is_symlink(),
                     "size": st.st_size,
@@ -226,7 +226,7 @@ func ReadFile(instanceName, filePath string) (string, error) {
 
 func ReadFileContext(ctx context.Context, instanceName, filePath string) (string, error) {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	var err error
 	filePath, err = resolveAllowedPathContext(ctx, instanceName, filePath)
@@ -249,7 +249,7 @@ func WriteFile(instanceName, filePath, content string) error {
 
 func WriteFileContext(ctx context.Context, instanceName, filePath, content string) error {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	var err error
 	filePath, err = resolveAllowedPathContext(ctx, instanceName, filePath)
@@ -268,7 +268,7 @@ func WriteFileContext(ctx context.Context, instanceName, filePath, content strin
 // VM. The caller owns the reader and may wrap it to report transfer progress.
 func WriteStreamContext(ctx context.Context, instanceName, filePath string, input io.Reader) error {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	if input == nil {
 		return fmt.Errorf("写入内容不能为空")
@@ -290,7 +290,7 @@ func CreateDir(instanceName, dirPath string) error {
 
 func CreateDirContext(ctx context.Context, instanceName, dirPath string) error {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	var err error
 	dirPath, err = resolveAllowedPathContext(ctx, instanceName, dirPath)
@@ -467,7 +467,7 @@ elif operation == 'mkdir':
     os.close(directory_fd)
 elif operation == 'write':
     parent_fd, name = open_parent(request['path'])
-    temp_name = '.macnas-write-' + str(os.getpid()) + '-' + str(time.time_ns())
+    temp_name = '.macbox-write-' + str(os.getpid()) + '-' + str(time.time_ns())
     try:
         fd = os.open(temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent_fd)
         try:
@@ -546,7 +546,7 @@ func normalizeRequestedPath(requested string) (string, error) {
 
 func resolveAllowedPathContext(ctx context.Context, instanceName, requested string) (string, error) {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	clean, err := normalizeRequestedPath(requested)
 	if err != nil {
@@ -584,7 +584,7 @@ func DeletePath(instanceName, targetPath string) error {
 
 func DeletePathContext(ctx context.Context, instanceName, targetPath string) error {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	var err error
 	targetPath, err = resolveAllowedPathContext(ctx, instanceName, targetPath)
@@ -610,12 +610,12 @@ func DeletePathContext(ctx context.Context, instanceName, targetPath string) err
 // DownloadFile streams a file from the VM directly to HTTP client
 func DownloadFile(w http.ResponseWriter, r *http.Request, instanceName, filePath string) {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	var err error
 	filePath, err = resolveAllowedPathContext(r.Context(), instanceName, filePath)
 	if err != nil {
-		log.Printf("[MacNAS Files] download path rejected: %v", err)
+		log.Printf("[MacBox Files] download path rejected: %v", err)
 		http.Error(w, "文件路径不允许访问", http.StatusForbidden)
 		return
 	}
@@ -633,7 +633,7 @@ func DownloadFile(w http.ResponseWriter, r *http.Request, instanceName, filePath
 	infoCmd := safeReadCommand(r.Context(), instanceName, filePath, "info", 0, 0)
 	infoOut, err := infoCmd.Output()
 	if err != nil {
-		log.Printf("[MacNAS Files] read download metadata failed: %v", err)
+		log.Printf("[MacBox Files] read download metadata failed: %v", err)
 		http.Error(w, "无法读取文件", http.StatusInternalServerError)
 		return
 	}
@@ -642,7 +642,7 @@ func DownloadFile(w http.ResponseWriter, r *http.Request, instanceName, filePath
 		IsDir bool  `json:"isDir"`
 	}
 	if err := json.Unmarshal(infoOut, &fileInfo); err != nil || fileInfo.Size < 0 {
-		log.Printf("[MacNAS Files] invalid download metadata for %s: %q", filePath, strings.TrimSpace(string(infoOut)))
+		log.Printf("[MacBox Files] invalid download metadata for %s: %q", filePath, strings.TrimSpace(string(infoOut)))
 		http.Error(w, "无法获取文件大小", http.StatusInternalServerError)
 		return
 	}
@@ -658,11 +658,11 @@ func DownloadFile(w http.ResponseWriter, r *http.Request, instanceName, filePath
 
 // DownloadPathsAsZip streams a selected set of files and folders as one ZIP.
 // The archive is created inside the VM process and never materialized on the
-// NAS data disk, which avoids the previous 0 KB browser download failure and
+// MacBox data disk, which avoids the previous 0 KB browser download failure and
 // keeps batch downloads from triggering multiple-download blocking.
 func DownloadPathsAsZip(w http.ResponseWriter, r *http.Request, instanceName string, requestedPaths []string) error {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	if len(requestedPaths) == 0 || len(requestedPaths) > 100 {
 		return fmt.Errorf("一次最多下载 100 个项目")
@@ -679,7 +679,7 @@ func DownloadPathsAsZip(w http.ResponseWriter, r *http.Request, instanceName str
 		resolved = append(resolved, filePath)
 	}
 	cmd := privilegedCommand(r.Context(), instanceName, append([]string{"python3", "-c", zipSelectedPathsStreamScript}, resolved...)...)
-	streamCommandDownload(w, cmd, "MacNAS-批量下载.zip", "application/zip", -1)
+	streamCommandDownload(w, cmd, "MacBox-批量下载.zip", "application/zip", -1)
 	return nil
 }
 
@@ -689,13 +689,13 @@ func DownloadPathsAsZip(w http.ResponseWriter, r *http.Request, instanceName str
 func streamCommandDownload(w http.ResponseWriter, cmd *exec.Cmd, fileName, contentType string, fileSize int64) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("[MacNAS Files] create download stream failed: %v", err)
+		log.Printf("[MacBox Files] create download stream failed: %v", err)
 		http.Error(w, "下载文件失败", http.StatusInternalServerError)
 		return
 	}
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("[MacNAS Files] start download failed: %v", err)
+		log.Printf("[MacBox Files] start download failed: %v", err)
 		http.Error(w, "下载文件失败", http.StatusInternalServerError)
 		return
 	}
@@ -703,7 +703,7 @@ func streamCommandDownload(w http.ResponseWriter, cmd *exec.Cmd, fileName, conte
 	defer func() {
 		if !waited {
 			if waitErr := cmd.Wait(); waitErr != nil {
-				log.Printf("[MacNAS Files] download command failed: %v", waitErr)
+				log.Printf("[MacBox Files] download command failed: %v", waitErr)
 			}
 		}
 	}()
@@ -729,21 +729,21 @@ func streamCommandDownload(w http.ResponseWriter, cmd *exec.Cmd, fileName, conte
 		waitErr := cmd.Wait()
 		waited = true
 		if waitErr != nil {
-			log.Printf("[MacNAS Files] download preflight failed: %v", waitErr)
+			log.Printf("[MacBox Files] download preflight failed: %v", waitErr)
 		} else {
-			log.Printf("[MacNAS Files] download preflight returned no data for %s", fileName)
+			log.Printf("[MacBox Files] download preflight returned no data for %s", fileName)
 		}
 		http.Error(w, "读取文件内容失败", http.StatusInternalServerError)
 		return
 	}
 
 	if _, err := w.Write(first[:n]); err != nil {
-		log.Printf("[MacNAS Files] write download preflight failed: %v", err)
+		log.Printf("[MacBox Files] write download preflight failed: %v", err)
 		return
 	}
 
 	if _, err := io.Copy(w, stdout); err != nil {
-		log.Printf("[MacNAS Files] stream download failed: %v", err)
+		log.Printf("[MacBox Files] stream download failed: %v", err)
 	}
 }
 
@@ -956,7 +956,7 @@ if not os.path.isdir(destination):
 if os.path.islink(destination):
     raise RuntimeError('解压目标不能是符号链接')
 
-temporary = tempfile.mkdtemp(prefix='.macnas-archive-', dir=destination)
+temporary = tempfile.mkdtemp(prefix='.macbox-archive-', dir=destination)
 try:
     if tool in ('unrar', 'rar'):
         command = [tool, 'x', '-o+', '-ol-', archive, temporary + os.sep]
@@ -1225,7 +1225,7 @@ func ArchivePathsContext(ctx context.Context, instanceName, operation, format, d
 
 func ArchivePathsWithPolicyContext(ctx context.Context, instanceName, operation, format, destination string, sourcePaths []string, conflictPolicy string) error {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	operation = strings.ToLower(strings.TrimSpace(operation))
 	format = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(format), "."))
@@ -1322,7 +1322,7 @@ func prepareExternalArchiveDestination(ctx context.Context, instanceName, destin
 // ArchiveCapabilities reports which optional VM-side tools are available.
 func ArchiveCapabilitiesContext(ctx context.Context, instanceName string) map[string]bool {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	capabilities := map[string]bool{"zip": true, "sevenZip": false, "rarExtract": false, "rarCompress": false}
 	if _, err := findArchiveTool(ctx, instanceName, "compress", "7z"); err == nil {
@@ -1358,7 +1358,7 @@ func findArchiveTool(ctx context.Context, instanceName, operation, format string
 		candidates = []string{"rar"}
 	}
 	for _, candidate := range candidates {
-		cmd := managementCommand(ctx, instanceName, "sh", "-lc", "command -v -- \"$1\"", "macnas-archive-tool", candidate)
+		cmd := managementCommand(ctx, instanceName, "sh", "-lc", "command -v -- \"$1\"", "macbox-archive-tool", candidate)
 		if output, err := cmd.Output(); err == nil && strings.TrimSpace(string(output)) != "" {
 			return candidate, nil
 		}
@@ -1386,7 +1386,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSizeBytes)
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	if targetDir == "" {
 		targetDir = "/data"
@@ -1424,7 +1424,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 	// Write beside the destination and rename only after the complete stream has
 	// reached the VM. This prevents a cancelled upload from exposing a partial
 	// file under its final name.
-	tempPath, err := resolveAllowedPathContext(r.Context(), instanceName, fmt.Sprintf("%s.macnas-upload-%d", destPath, time.Now().UnixNano()))
+	tempPath, err := resolveAllowedPathContext(r.Context(), instanceName, fmt.Sprintf("%s.macbox-upload-%d", destPath, time.Now().UnixNano()))
 	if err != nil {
 		return fmt.Errorf("准备上传临时文件失败: %w", err)
 	}
@@ -1436,7 +1436,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if cleanupErr := runSafeMutation(cleanupCtx, instanceName, map[string]string{"operation": "delete", "path": tempPath}, nil); cleanupErr != nil {
-			log.Printf("[MacNAS Files] cleanup interrupted upload failed: %v", cleanupErr)
+			log.Printf("[MacBox Files] cleanup interrupted upload failed: %v", cleanupErr)
 		}
 	}
 	defer cleanup()
@@ -1504,7 +1504,7 @@ func RenamePath(instanceName, oldPath, newPath string) error {
 
 func RenamePathContext(ctx context.Context, instanceName, oldPath, newPath string) error {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	var err error
 	oldPath, err = resolveAllowedPathContext(ctx, instanceName, oldPath)
@@ -1545,7 +1545,7 @@ func CopyPathsContext(ctx context.Context, instanceName string, srcPaths []strin
 
 func CopyPathsWithPolicyContext(ctx context.Context, instanceName string, srcPaths []string, destDir, conflictPolicy string) error {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	var err error
 	destDir, err = resolveAllowedPathContext(ctx, instanceName, destDir)
@@ -1583,7 +1583,7 @@ func MovePathsContext(ctx context.Context, instanceName string, srcPaths []strin
 
 func MovePathsWithPolicyContext(ctx context.Context, instanceName string, srcPaths []string, destDir, conflictPolicy string) error {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	var err error
 	destDir, err = resolveAllowedPathContext(ctx, instanceName, destDir)
@@ -1620,7 +1620,7 @@ func MoveToTrashContext(ctx context.Context, instanceName string, targetPaths []
 	defer trashOperationMu.Unlock()
 
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	if len(targetPaths) > maxTrashItemsPerOperation {
 		return fmt.Errorf("一次最多处理 %d 个文件", maxTrashItemsPerOperation)
@@ -1781,7 +1781,7 @@ func ListTrashContext(ctx context.Context, instanceName string) ([]TrashItem, er
 
 func listTrashContext(ctx context.Context, instanceName string) ([]TrashItem, error) {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 
 	pyScript := `
@@ -1868,7 +1868,7 @@ func RestoreTrashContext(ctx context.Context, instanceName string, itemIDs []str
 	defer trashOperationMu.Unlock()
 
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 
 	normalizedIDs, err := normalizeTrashIDs(itemIDs)
@@ -2012,7 +2012,7 @@ func deleteAndSendToMacTrash(instanceName string, item TrashItem) error {
 
 func deleteAndSendToMacTrashContext(ctx context.Context, instanceName string, item TrashItem) error {
 	// TrashItem stores the public /data path, while the resolver returns the
-	// VM's canonical path (for example /mnt/lima-macnas-data/.trash/...).
+	// VM's canonical path (for example /mnt/lima-macbox-data/.trash/...).
 	// Validate both forms so the canonical-path security check does not reject
 	// every legitimate item and a symlink cannot escape the trash directory.
 	requestedTrashPath, err := normalizeRequestedPath(item.TrashPath)
@@ -2027,7 +2027,7 @@ func deleteAndSendToMacTrashContext(ctx context.Context, instanceName string, it
 	if err != nil || trashPath == trashRoot || !strings.HasPrefix(trashPath, trashRoot+"/") {
 		return fmt.Errorf("回收站项目路径无效")
 	}
-	stagingDir := filepath.Join(os.TempDir(), "macnas-trash-staging")
+	stagingDir := filepath.Join(os.TempDir(), "macbox-trash-staging")
 	if err := os.MkdirAll(stagingDir, 0700); err != nil {
 		return fmt.Errorf("准备回收站暂存目录失败: %w", err)
 	}
@@ -2074,7 +2074,7 @@ func DeleteTrashItemsContext(ctx context.Context, instanceName string, itemIDs [
 	defer trashOperationMu.Unlock()
 
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	if len(itemIDs) == 0 {
 		return 0, nil
@@ -2176,7 +2176,7 @@ func EmptyTrashContext(ctx context.Context, instanceName string) (int, error) {
 	defer trashOperationMu.Unlock()
 
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 
 	items, err := listTrashContext(ctx, instanceName)
@@ -2236,12 +2236,12 @@ func parseRange(rangeHeader string, fileSize int64) (int64, int64, bool) {
 // StreamMediaFile streams media files with HTTP 206 Range support for smooth video/audio playback
 func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, filePath string) {
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	var err error
 	filePath, err = resolveAllowedPathContext(r.Context(), instanceName, filePath)
 	if err != nil {
-		log.Printf("[MacNAS Files] media path rejected: %v", err)
+		log.Printf("[MacBox Files] media path rejected: %v", err)
 		http.Error(w, "文件路径不允许访问", http.StatusForbidden)
 		return
 	}
@@ -2252,7 +2252,7 @@ func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, fileP
 	sizeCmd := safeReadCommand(r.Context(), instanceName, filePath, "stat", 0, 0)
 	sizeOut, err := sizeCmd.Output()
 	if err != nil {
-		log.Printf("[MacNAS Files] read media size failed: %v", err)
+		log.Printf("[MacBox Files] read media size failed: %v", err)
 		http.Error(w, "无法读取文件", http.StatusInternalServerError)
 		return
 	}
@@ -2275,22 +2275,22 @@ func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, fileP
 		cmd := safeReadCommand(r.Context(), instanceName, filePath, "read", 0, -1)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
-			log.Printf("[MacNAS Files] create media stream failed: %v", err)
+			log.Printf("[MacBox Files] create media stream failed: %v", err)
 			http.Error(w, "读取文件失败", http.StatusInternalServerError)
 			return
 		}
 		if err := cmd.Start(); err != nil {
-			log.Printf("[MacNAS Files] start media stream failed: %v", err)
+			log.Printf("[MacBox Files] start media stream failed: %v", err)
 			http.Error(w, "读取文件失败", http.StatusInternalServerError)
 			return
 		}
 		defer func() {
 			if waitErr := cmd.Wait(); waitErr != nil {
-				log.Printf("[MacNAS Files] media command failed: %v", waitErr)
+				log.Printf("[MacBox Files] media command failed: %v", waitErr)
 			}
 		}()
 		if _, err := io.Copy(w, stdout); err != nil {
-			log.Printf("[MacNAS Files] stream media failed: %v", err)
+			log.Printf("[MacBox Files] stream media failed: %v", err)
 		}
 		return
 	}
@@ -2312,20 +2312,20 @@ func StreamMediaFile(w http.ResponseWriter, r *http.Request, instanceName, fileP
 	cmd := safeReadCommand(r.Context(), instanceName, filePath, "read", start, length)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("[MacNAS Files] create ranged media stream failed: %v", err)
+		log.Printf("[MacBox Files] create ranged media stream failed: %v", err)
 		return
 	}
 	if err := cmd.Start(); err != nil {
-		log.Printf("[MacNAS Files] start ranged media stream failed: %v", err)
+		log.Printf("[MacBox Files] start ranged media stream failed: %v", err)
 		return
 	}
 	defer func() {
 		if waitErr := cmd.Wait(); waitErr != nil {
-			log.Printf("[MacNAS Files] ranged media command failed: %v", waitErr)
+			log.Printf("[MacBox Files] ranged media command failed: %v", waitErr)
 		}
 	}()
 	if _, err := io.Copy(w, stdout); err != nil {
-		log.Printf("[MacNAS Files] stream ranged media failed: %v", err)
+		log.Printf("[MacBox Files] stream ranged media failed: %v", err)
 	}
 }
 

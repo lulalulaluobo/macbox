@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/config"
 )
 
 type PowerStatus struct {
@@ -49,7 +49,7 @@ func (pm *PowerManager) Start() error {
 	}
 
 	pm.cmd = cmd
-	log.Printf("[MacNAS Power] ☕ 24h 防休眠守护已激活 (PID: %d, caffeinate -s -i -m)", cmd.Process.Pid)
+	log.Printf("[MacBox Power] ☕ 24h 防休眠守护已激活 (PID: %d, caffeinate -s -i -m)", cmd.Process.Pid)
 
 	// Clean up if process exits unexpectedly
 	go func() {
@@ -73,7 +73,7 @@ func (pm *PowerManager) Stop() error {
 		pid := pm.cmd.Process.Pid
 		_ = pm.cmd.Process.Kill()
 		pm.cmd = nil
-		log.Printf("[MacNAS Power] ☕ 24h 防休眠守护已停止 (原 PID: %d)", pid)
+		log.Printf("[MacBox Power] ☕ 24h 防休眠守护已停止 (原 PID: %d)", pid)
 	}
 	return nil
 }
@@ -106,11 +106,11 @@ func (pm *PowerManager) SetPreventSleep(enable bool) error {
 	}); err != nil {
 		if previous {
 			if restoreErr := pm.Start(); restoreErr != nil {
-				log.Printf("[MacNAS Power] 回滚防休眠进程失败: %v", restoreErr)
+				log.Printf("[MacBox Power] 回滚防休眠进程失败: %v", restoreErr)
 			}
 		} else {
 			if restoreErr := pm.Stop(); restoreErr != nil {
-				log.Printf("[MacNAS Power] 回滚防休眠进程失败: %v", restoreErr)
+				log.Printf("[MacBox Power] 回滚防休眠进程失败: %v", restoreErr)
 			}
 		}
 		return fmt.Errorf("保存防休眠配置失败: %w", err)

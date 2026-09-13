@@ -306,7 +306,7 @@ export const AppCard: React.FC<AppCardProps> = ({
             {/* Container Interactive Terminal */}
             {isRunning && onOpenTerminal && (
               <button
-                onClick={() => onOpenTerminal(`macnas-${app.id}`)}
+                onClick={() => onOpenTerminal(`macbox-${app.id}`)}
                 className="p-2 rounded-xl bg-slate-100 hover:bg-teal-50 text-slate-600 hover:text-teal-600 border border-slate-200 dark:bg-slate-800 dark:hover:bg-teal-950/60 dark:text-slate-300 dark:hover:text-teal-300 dark:border-slate-700 text-xs font-medium transition"
                 title="进入应用容器内部终端 (docker exec)"
               >

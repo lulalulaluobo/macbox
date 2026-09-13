@@ -105,7 +105,7 @@ export const SMBSharingSection: React.FC<SMBSharingSectionProps> = ({
             </span>
             </div>
             <div className="flex items-center space-x-3 text-slate-500 dark:text-slate-400 text-[11px] shrink-0">
-            <span>SMB 账户: <code className="text-sky-600 dark:text-sky-300 font-mono font-bold">{samba?.user || 'macnas'}</code></span>
+            <span>SMB 账户: <code className="text-sky-600 dark:text-sky-300 font-mono font-bold">{samba?.user || 'macbox'}</code></span>
             <span>•</span>
             <span>密码：首位超级管理员密码</span>
             <span>•</span>
@@ -238,7 +238,7 @@ export const SMBSharingSection: React.FC<SMBSharingSectionProps> = ({
                             访客免密
                           </span>
                         ) : (
-                          <span className="text-xs px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-700 font-semibold flex items-center space-x-1" title="必须输入 macnas 账号密码才能访问">
+                          <span className="text-xs px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 border border-slate-200 dark:border-slate-700 font-semibold flex items-center space-x-1" title="必须输入 macbox 账号密码才能访问">
                             <ShieldCheck className="w-3 h-3 text-slate-500 dark:text-slate-400" />
                             <span>需密码</span>
                           </span>

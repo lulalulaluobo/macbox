@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 )
 
 type diagnosticCheck struct {

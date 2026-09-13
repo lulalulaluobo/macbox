@@ -13,9 +13,9 @@
   "volumes": [
     {"host": "/var/run/docker.sock", "container": "/var/run/docker.sock", "description": "Docker Engine 控制套接字（高权限）"},
     {"host": "/data/appdata/dockge/data", "container": "/app/data", "description": "Dockge 登录与界面配置"},
-    {"host": "/data", "container": "/data", "description": "Compose 堆栈目录与 NAS 数据路径（保持宿主机路径一致）"}
+    {"host": "/data", "container": "/data", "description": "Compose 堆栈目录与 MacBox 数据路径（保持宿主机路径一致）"}
   ],
   "env": [
-    {"key": "DOCKGE_STACKS_DIR", "value": "/data/appdata", "description": "MacNAS Compose 堆栈目录"}
+    {"key": "DOCKGE_STACKS_DIR", "value": "/data/appdata", "description": "MacBox Compose 堆栈目录"}
   ]
 }

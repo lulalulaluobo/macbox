@@ -8,7 +8,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        nas: {
+        macbox: {
           bg: '#090d16',
           card: '#111827',
           cardHover: '#162032',

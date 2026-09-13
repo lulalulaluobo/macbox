@@ -43,7 +43,7 @@ export const useAppInstallStream = ({
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setInstallStatus('installing');
-    setInstallLogs(['🚀 正在连接 MacNAS 应用引擎并提交定制参数...']);
+    setInstallLogs(['🚀 正在连接 MacBox 应用引擎并提交定制参数...']);
     setInstallError(null);
 
     const payload: InstallCustomConfig = {

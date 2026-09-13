@@ -22,7 +22,6 @@ import { ContainerInfo, DockerServiceShortcut } from '../../types';
 import { api } from '../../api';
 import { ContainerTerminalModal } from './ContainerTerminalModal';
 import { DockerServiceShortcutModal } from './DockerServiceShortcutModal';
-import { loadDockerServiceShortcuts, removeDockerServiceShortcut, upsertDockerServiceShortcut } from '../../utils/dockerServiceShortcuts';
 
 interface DockerContainersProps {
   onOpenTerminalWithLogs?: (payload: { containerName: string; logs: string }) => void;
@@ -33,6 +32,7 @@ const MAX_LOGS_FOR_AI = 60_000;
 
 export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTerminalWithLogs, primaryIP }) => {
   const [containers, setContainers] = useState<ContainerInfo[]>([]);
+  const [serviceShortcuts, setServiceShortcuts] = useState<DockerServiceShortcut[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'all' | 'running' | 'stopped'>('all');
@@ -64,8 +64,18 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
     }
   };
 
+  const loadServiceShortcuts = async () => {
+    try {
+      const result = await api.getServiceShortcuts();
+      setServiceShortcuts((result.shortcuts || []).filter((shortcut): shortcut is DockerServiceShortcut => shortcut.source === 'docker'));
+    } catch {
+      // A navigation read failure must not block container management.
+    }
+  };
+
   useEffect(() => {
     loadContainers();
+    loadServiceShortcuts();
     const poll = () => { if (!document.hidden) loadContainers(); };
     const interval = setInterval(poll, 5000);
     document.addEventListener('visibilitychange', poll);
@@ -94,7 +104,12 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
     setActionLoading(`delete-${id}`);
     try {
       await api.removeContainer(id, forceDelete);
-      removeDockerServiceShortcut(id, deleteModalContainer.name);
+      try {
+        await api.deleteServiceShortcut(`container:${id}`);
+      } catch {
+        // The container is already deleted; a stale shortcut can be removed
+        // from the homepage manager without masking the successful action.
+      }
       setDeleteModalContainer(null);
       setAlertMsg({ type: 'success', text: `容器 ${deleteModalContainer.name} 已成功删除` });
       await loadContainers();
@@ -131,11 +146,11 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
       return;
     }
     const clipped = cleaned.length > MAX_LOGS_FOR_AI
-      ? `[MacNAS] 日志过长，已保留最后 ${MAX_LOGS_FOR_AI.toLocaleString()} 个字符。\n\n${cleaned.slice(-MAX_LOGS_FOR_AI)}`
+      ? `[MacBox] 日志过长，已保留最后 ${MAX_LOGS_FOR_AI.toLocaleString()} 个字符。\n\n${cleaned.slice(-MAX_LOGS_FOR_AI)}`
       : cleaned;
     onOpenTerminalWithLogs?.({
       containerName,
-      logs: `[MacNAS 容器日志] ${containerName}\n以下为最近容器输出，请先分析问题再提出或执行修复：\n\n${clipped}`,
+      logs: `[MacBox 容器日志] ${containerName}\n以下为最近容器输出，请先分析问题再提出或执行修复：\n\n${clipped}`,
     });
     setActiveLogContainer(null);
     setAlertMsg({ type: 'success', text: `已将 ${containerName} 的日志放入 Web 终端输入框，请选择 AI 并发送` });
@@ -171,8 +186,12 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
   const hostIP = primaryIP || window.location.hostname || 'localhost';
   const readableLogs = logs.replace(/(?:\u001b)?\[[0-9;]*m/g, '');
 
-  const handleSaveServiceShortcut = (shortcut: DockerServiceShortcut) => {
-    upsertDockerServiceShortcut(shortcut);
+  const handleSaveServiceShortcut = async (shortcut: DockerServiceShortcut) => {
+    const existing = serviceShortcuts.some((item) => item.id === shortcut.id);
+    const result = existing
+      ? await api.updateServiceShortcut(shortcut.id, shortcut)
+      : await api.createServiceShortcut(shortcut);
+    setServiceShortcuts((current) => [result.shortcut as DockerServiceShortcut, ...current.filter((item) => item.id !== shortcut.id)]);
     setServiceShortcutContainer(null);
     setAlertMsg({ type: 'success', text: `已将 ${shortcut.name} 添加到主页服务导航` });
   };
@@ -564,7 +583,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
         <DockerServiceShortcutModal
           container={serviceShortcutContainer}
           hostIP={hostIP}
-          initialShortcut={loadDockerServiceShortcuts().find((item) => item.id === `container:${serviceShortcutContainer.id}`)}
+          initialShortcut={serviceShortcuts.find((item) => item.id === `container:${serviceShortcutContainer.id}`)}
           onClose={() => setServiceShortcutContainer(null)}
           onSaved={handleSaveServiceShortcut}
         />

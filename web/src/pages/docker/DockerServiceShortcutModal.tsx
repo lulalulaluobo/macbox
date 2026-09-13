@@ -8,7 +8,7 @@ interface DockerServiceShortcutModalProps {
   hostIP: string;
   initialShortcut?: DockerServiceShortcut;
   onClose: () => void;
-  onSaved: (shortcut: DockerServiceShortcut) => void;
+  onSaved: (shortcut: DockerServiceShortcut) => void | Promise<void>;
 }
 
 export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProps> = ({
@@ -28,13 +28,14 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
   ));
   const [icon, setIcon] = useState(initialShortcut?.icon || 'box');
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const handlePortChange = (port: number) => {
     setSelectedPort(port);
     setUrl(`http://${hostIP}:${port}`);
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmedName = name.trim();
     const trimmedURL = url.trim();
@@ -54,13 +55,23 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
       return;
     }
 
-    onSaved({
-      id: `container:${container.id}`,
-      containerName: container.name || container.id,
-      name: trimmedName,
-      url: trimmedURL,
-      icon,
-    });
+    setSaving(true);
+    setError(null);
+    try {
+      await onSaved({
+        id: `container:${container.id}`,
+        source: 'docker',
+        containerId: container.id,
+        containerName: container.name || container.id,
+        name: trimmedName,
+        url: trimmedURL,
+        icon,
+        enabled: true,
+      });
+    } catch (err: any) {
+      setError(err?.message || '保存服务导航失败');
+      setSaving(false);
+    }
   };
 
   return (
@@ -76,7 +87,7 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
               <p className="mt-1 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">容器：{container.name || container.id}</p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label="关闭">
+          <button type="button" onClick={onClose} disabled={saving} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label="关闭">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -162,10 +173,10 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
           {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 dark:bg-rose-500/10 dark:text-rose-300">{error}</p>}
 
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-            <button type="button" onClick={onClose} className="min-h-11 rounded-xl bg-slate-100 px-4 text-xs font-semibold text-slate-600 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">取消</button>
-            <button type="submit" className="flex min-h-11 items-center gap-1.5 rounded-xl bg-sky-500 px-5 text-xs font-bold text-white shadow-sm transition hover:bg-sky-600">
-              <Check className="h-4 w-4" />
-              <span>确认添加</span>
+            <button type="button" onClick={onClose} disabled={saving} className="min-h-11 rounded-xl bg-slate-100 px-4 text-xs font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">取消</button>
+            <button type="submit" disabled={saving} className="flex min-h-11 items-center gap-1.5 rounded-xl bg-sky-500 px-5 text-xs font-bold text-white shadow-sm transition hover:bg-sky-600 disabled:opacity-50">
+              <Check className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
+              <span>{saving ? '保存中…' : initialShortcut ? '保存修改' : '确认添加'}</span>
             </button>
           </div>
         </form>

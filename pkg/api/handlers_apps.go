@@ -3,9 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/luluen/mac-nas/pkg/apps"
-	"github.com/luluen/mac-nas/pkg/docker"
-	"github.com/luluen/mac-nas/pkg/system"
+	"github.com/lulalulaluobo/macbox/pkg/apps"
+	"github.com/lulalulaluobo/macbox/pkg/docker"
+	"github.com/lulalulaluobo/macbox/pkg/system"
 	"log"
 	"net/http"
 	"strconv"
@@ -147,7 +147,7 @@ func (s *Server) handleAppInstallCustomStream(w http.ResponseWriter, r *http.Req
 	ctx := r.Context()
 	err := s.appMgr.InstallStreamCustom(ctx, id, cfg, sw)
 	if err != nil {
-		log.Printf("[MacNAS] custom app install stream failed for %q: %v", id, err)
+		log.Printf("[MacBox] custom app install stream failed for %q: %v", id, err)
 		_ = writeSSEEvent(w, flusher, "error", map[string]string{"error": "应用安装失败"})
 	} else {
 		_ = writeSSEEvent(w, flusher, "done", map[string]string{"status": "success", "id": id})

@@ -1,8 +1,8 @@
-# MacNAS Sora Sky UI 与移动端适配
+# MacBox Sora Sky UI 与移动端适配
 
 ## Goal
 
-将已确认的 `05 · Sora Sky` 视觉方向落到 MacNAS Web 控制台：以清爽浅色天空、粉蓝绿点缀、留白、轻量圆角和原创 NAS 伙伴感替换当前偏通用的深色/蓝色后台视觉，同时不破坏已有功能。随后补齐手机端浏览与 PWA 基础能力，让登录、首页、存储、Docker、应用、终端、设置在窄屏下可用。
+将已确认的 `05 · Sora Sky` 视觉方向落到 MacBox Web 控制台：以清爽浅色天空、粉蓝绿点缀、留白、轻量圆角和原创 NAS 伙伴感替换当前偏通用的深色/蓝色后台视觉，同时不破坏已有功能。随后补齐手机端浏览与 PWA 基础能力，让登录、首页、存储、Docker、应用、终端、设置在窄屏下可用。
 
 ## What I already know
 
@@ -63,5 +63,5 @@
 ## Technical Notes
 
 * 关键文件：`web/src/index.css`、`web/src/theme.ts`、`web/src/components/Navbar.tsx`、`web/src/App.tsx`、`web/index.html`、`web/src/main.tsx`。
-* 嵌入链路：`web/dist` → `web/embed.go` → `bin/macnas`；修改前端后必须重新构建 Go 二进制才能影响 19808 服务。
+* 嵌入链路：`web/dist` → `web/embed.go` → `bin/macbox`；修改前端后必须重新构建 Go 二进制才能影响 19808 服务。
 * 相关规范：`.trellis/spec/frontend/*`（当前模板化，未提供额外强制约束）；`CLAUDE.md` 要求保留已有脏文件并使用 Git 管理。

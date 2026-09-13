@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Key, User, ArrowRight, Sun, Moon, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Key, User, ArrowRight, Sun, Moon, AlertCircle, Eye, EyeOff, ArchiveRestore, Upload } from 'lucide-react';
 import { api } from '../api';
-import { NASUser } from '../types';
+import { ConsoleUser } from '../types';
 import { useTheme } from '../theme';
 
 interface LoginPageProps {
-	onLoginSuccess: (user: NASUser, warning?: string) => void;
+	onLoginSuccess: (user: ConsoleUser, warning?: string) => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
@@ -17,6 +17,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMessage, setRestoreMessage] = useState<string | null>(null);
+  const restoreInputRef = React.useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -64,6 +67,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
   };
 
+  const handleRestoreBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!window.confirm('恢复会覆盖当前配置和账号，但不会覆盖 /data 数据文件。确定继续吗？')) return;
+    setRestoring(true);
+    setRestoreMessage(null);
+    try {
+      const result = await api.restoreBackup(file);
+      setRestoreMessage(result.message);
+      window.setTimeout(() => window.location.reload(), 1200);
+    } catch (err: any) {
+      setRestoreMessage(err.message || '恢复备份失败');
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   return (
     <div className="sora-login-page relative flex min-h-[100dvh] flex-col items-center justify-center overflow-hidden bg-[#f8fbfd] px-4 py-8 text-slate-900 transition-colors duration-300 dark:bg-[#0b1624] dark:text-slate-100 sm:py-10">
       {/* Quiet sky shapes keep the page airy without competing with the form. */}
@@ -105,7 +126,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               🥕
             </div>
             <h1 className="text-2xl font-black tracking-tight text-[#24324a] dark:text-white">
-              MacNAS 控制台
+              MacBox 控制台
             </h1>
           </div>
 
@@ -119,7 +140,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
           {setupRequired && (
             <div className="mb-6 rounded-xl border border-sky-200 bg-sky-50 p-3.5 text-xs text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-              首次使用请现场创建管理员账号和密码。密码至少 8 个字符且不能使用常见弱密码，初始化只允许在运行 MacNAS 的 Mac 本机完成。
+              首次使用请现场创建管理员账号和密码。密码至少 8 个字符且不能使用常见弱密码，初始化只允许在运行 MacBox 的 Mac 本机完成。
             </div>
           )}
 
@@ -219,6 +240,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               )}
             </button>
           </form>
+
+          {setupRequired && (
+            <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-900/70 dark:bg-emerald-950/25">
+              <div className="flex items-start gap-3">
+                <ArchiveRestore className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold text-emerald-900 dark:text-emerald-200">已有 MacBox 配置？直接恢复</div>
+                  <p className="mt-1 text-xs leading-5 text-emerald-800/80 dark:text-emerald-300/80">如果这是重装后的 MacBox，可以上传之前下载的配置备份，不必重新创建管理员账号。首次恢复仅允许在运行 MacBox 的 Mac 本机执行。</p>
+                  <input ref={restoreInputRef} type="file" accept=".macbox-backup,.zip,application/zip" onChange={(event) => void handleRestoreBackup(event)} className="hidden" />
+                  <button type="button" onClick={() => restoreInputRef.current?.click()} disabled={restoring} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-xl bg-emerald-500 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-50"><Upload className="h-3.5 w-3.5" />{restoring ? '正在恢复…' : '选择备份文件'}</button>
+                  {restoreMessage && <div className="mt-2 break-words text-xs font-semibold text-emerald-800 dark:text-emerald-200">{restoreMessage}</div>}
+                </div>
+              </div>
+            </div>
+          )}
 
         </div>
 

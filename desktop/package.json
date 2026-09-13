@@ -1,8 +1,8 @@
 {
-  "name": "macnas-desktop",
+  "name": "macbox-desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "MacNAS macOS desktop launcher",
+  "description": "MacBox macOS desktop launcher",
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build"

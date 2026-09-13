@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -29,7 +29,7 @@ type SSHKeyGenerationResult struct {
 	KeyType     string `json:"keyType"`     // "ed25519"
 	Fingerprint string `json:"fingerprint"` // e.g. "SHA256:..."
 	Comment     string `json:"comment"`
-	Filename    string `json:"filename"` // "macnas_root_id_ed25519.txt"
+	Filename    string `json:"filename"` // "macbox_root_id_ed25519.txt"
 }
 
 type SSHManager struct {
@@ -94,8 +94,8 @@ func (sm *SSHManager) GetConfig(ctx context.Context) (*SSHConfig, error) {
 		cfg.Status = "stopped"
 	}
 
-	// 3. Read 99-macnas.conf if exists
-	confOut, err := sm.vmMgr.Exec(ctx, "sudo", "cat", "/etc/ssh/sshd_config.d/99-macnas.conf")
+	// 3. Read 99-macbox.conf if exists
+	confOut, err := sm.vmMgr.Exec(ctx, "sudo", "cat", "/etc/ssh/sshd_config.d/99-macbox.conf")
 	if err == nil && strings.TrimSpace(confOut) != "" {
 		lines := strings.Split(confOut, "\n")
 		for _, l := range lines {
@@ -159,7 +159,7 @@ func (sm *SSHManager) GetConfig(ctx context.Context) (*SSHConfig, error) {
 	return cfg, nil
 }
 
-// UpdateConfig updates the SSH configuration via /etc/ssh/sshd_config.d/99-macnas.conf
+// UpdateConfig updates the SSH configuration via /etc/ssh/sshd_config.d/99-macbox.conf
 func (sm *SSHManager) UpdateConfig(ctx context.Context, newCfg SSHConfig) error {
 	if newCfg.Port <= 0 || newCfg.Port > 65535 {
 		newCfg.Port = 22
@@ -172,7 +172,7 @@ func (sm *SSHManager) UpdateConfig(ctx context.Context, newCfg SSHConfig) error 
 		permitRoot = "prohibit-password"
 	}
 
-	// MacNAS never enables SSH password authentication. The console account
+	// MacBox never enables SSH password authentication. The console account
 	// password is not an SSH credential; remote administration is key-only.
 	passwordAuth := "no"
 
@@ -181,7 +181,7 @@ func (sm *SSHManager) UpdateConfig(ctx context.Context, newCfg SSHConfig) error 
 		pubkeyAuth = "yes"
 	}
 
-	confContent := fmt.Sprintf(`# MacNAS Managed SSH Configuration
+	confContent := fmt.Sprintf(`# MacBox Managed SSH Configuration
 Port %d
 PermitRootLogin %s
 PasswordAuthentication %s
@@ -189,7 +189,7 @@ PubkeyAuthentication %s
 AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2
 `, newCfg.Port, permitRoot, passwordAuth, pubkeyAuth)
 
-	if out, err := sm.vmMgr.ExecWithInput(ctx, strings.NewReader(confContent), "sudo", "tee", "/etc/ssh/sshd_config.d/99-macnas.conf"); err != nil {
+	if out, err := sm.vmMgr.ExecWithInput(ctx, strings.NewReader(confContent), "sudo", "tee", "/etc/ssh/sshd_config.d/99-macbox.conf"); err != nil {
 		return fmt.Errorf("写入 SSH 配置失败: %s (%w)", out, err)
 	}
 
@@ -239,13 +239,13 @@ func (sm *SSHManager) ToggleService(ctx context.Context, enable bool) error {
 // ensures SSH config enables Root login and Pubkey authentication, and returns the private key for downloading.
 func (sm *SSHManager) GenerateRootKey(ctx context.Context, comment string) (*SSHKeyGenerationResult, error) {
 	if strings.TrimSpace(comment) == "" {
-		comment = fmt.Sprintf("macnas-root-%s", time.Now().Format("20060102-150405"))
+		comment = fmt.Sprintf("macbox-root-%s", time.Now().Format("20060102-150405"))
 	}
 	if hasSSHControlChars(comment) || len(comment) > 256 {
 		return nil, fmt.Errorf("SSH 密钥备注格式无效")
 	}
 
-	keyPath := fmt.Sprintf("/tmp/macnas_root_key_%d", time.Now().UnixNano())
+	keyPath := fmt.Sprintf("/tmp/macbox_root_key_%d", time.Now().UnixNano())
 
 	// 1. Generate ED25519 keypair in VM
 	if out, err := sm.vmMgr.Exec(ctx, "ssh-keygen", "-t", "ed25519", "-N", "", "-C", comment, "-f", keyPath); err != nil {
@@ -320,7 +320,7 @@ func (sm *SSHManager) GenerateRootKey(ctx context.Context, comment string) (*SSH
 		KeyType:     "ed25519",
 		Fingerprint: fingerprint,
 		Comment:     comment,
-		Filename:    fmt.Sprintf("macnas_root_id_ed25519_%s.txt", time.Now().Format("20060102-150405")),
+		Filename:    fmt.Sprintf("macbox_root_id_ed25519_%s.txt", time.Now().Format("20060102-150405")),
 	}, nil
 }
 

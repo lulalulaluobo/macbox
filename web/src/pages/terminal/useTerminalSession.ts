@@ -72,7 +72,7 @@ export const useTerminalSession = ({ terminalRef, onSwitchToDefault }: UseTermin
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsParams = new URLSearchParams({ user: targetUser });
-    const sessionStorageKey = `macnas_terminal_session:${window.location.host}:${targetUser}`;
+    const sessionStorageKey = `macbox_terminal_session:${window.location.host}:${targetUser}`;
     const savedSessionID = window.sessionStorage.getItem(sessionStorageKey);
     if (savedSessionID) wsParams.set('session', savedSessionID);
     const ws = new WebSocket(`${protocol}//${window.location.host}/api/terminal/ws?${wsParams.toString()}`);
@@ -81,8 +81,8 @@ export const useTerminalSession = ({ terminalRef, onSwitchToDefault }: UseTermin
 
     ws.onopen = () => {
       setConnected(true);
-      const userBadge = targetUser === 'root' ? '\x1b[1;33m[👑 root 超级管理员]\x1b[0;36m' : '\x1b[1;32m[👤 普通用户 (macnas)]\x1b[0;36m';
-      term.write(`\r\n\x1b[36m[MacNAS] 已以 ${userBadge} 身份成功连接到 Linux 虚拟机交互终端！\x1b[0m\r\n\r\n`);
+      const userBadge = targetUser === 'root' ? '\x1b[1;33m[👑 root 超级管理员]\x1b[0;36m' : '\x1b[1;32m[👤 普通用户 (macbox)]\x1b[0;36m';
+      term.write(`\r\n\x1b[36m[MacBox] 已以 ${userBadge} 身份成功连接到 Linux 虚拟机交互终端！\x1b[0m\r\n\r\n`);
       const dims = fitAddon.proposeDimensions();
       if (dims) ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
     };
@@ -96,8 +96,8 @@ export const useTerminalSession = ({ terminalRef, onSwitchToDefault }: UseTermin
             sessionIdRef.current = control.id;
             setSessionId(control.id);
             term.write(control.resumed
-              ? '\r\n\x1b[32m[MacNAS] 已恢复之前的终端任务和输出记录。\x1b[0m\r\n'
-              : '\r\n\x1b[36m[MacNAS] 已创建可恢复的终端任务会话。\x1b[0m\r\n');
+              ? '\r\n\x1b[32m[MacBox] 已恢复之前的终端任务和输出记录。\x1b[0m\r\n'
+              : '\r\n\x1b[36m[MacBox] 已创建可恢复的终端任务会话。\x1b[0m\r\n');
             return;
           }
         } catch {
@@ -112,12 +112,12 @@ export const useTerminalSession = ({ terminalRef, onSwitchToDefault }: UseTermin
     ws.onclose = () => {
       if (generation !== connectionGenerationRef.current) return;
       setConnected(false);
-      term.write('\r\n\x1b[33m[MacNAS] 终端连接已断开。\x1b[0m\r\n');
+      term.write('\r\n\x1b[33m[MacBox] 终端连接已断开。\x1b[0m\r\n');
     };
     ws.onerror = () => {
       if (generation !== connectionGenerationRef.current) return;
       setConnected(false);
-      term.write('\r\n\x1b[31m[MacNAS] 终端连接异常。\x1b[0m\r\n');
+      term.write('\r\n\x1b[31m[MacBox] 终端连接异常。\x1b[0m\r\n');
     };
 
     term.onData((data) => {
@@ -140,7 +140,7 @@ export const useTerminalSession = ({ terminalRef, onSwitchToDefault }: UseTermin
   }, [loginUser, terminalRef]);
 
   const switchUser = useCallback((newUser: TerminalLoginUser) => {
-    const oldKey = `macnas_terminal_session:${window.location.host}:${loginUser}`;
+    const oldKey = `macbox_terminal_session:${window.location.host}:${loginUser}`;
     window.sessionStorage.removeItem(oldKey);
     sessionIdRef.current = null;
     setSessionId(null);
@@ -150,7 +150,7 @@ export const useTerminalSession = ({ terminalRef, onSwitchToDefault }: UseTermin
   }, [initTerminal, loginUser, onSwitchToDefault]);
 
   const reconnect = useCallback(() => {
-    const key = `macnas_terminal_session:${window.location.host}:${loginUser}`;
+    const key = `macbox_terminal_session:${window.location.host}:${loginUser}`;
     window.sessionStorage.removeItem(key);
     sessionIdRef.current = null;
     setSessionId(null);
@@ -167,7 +167,7 @@ export const useTerminalSession = ({ terminalRef, onSwitchToDefault }: UseTermin
         // still allows the next reconnect to create a fresh session.
       }
     }
-    const key = `macnas_terminal_session:${window.location.host}:${loginUser}`;
+    const key = `macbox_terminal_session:${window.location.host}:${loginUser}`;
     window.sessionStorage.removeItem(key);
     sessionIdRef.current = null;
     setSessionId(null);
@@ -176,7 +176,7 @@ export const useTerminalSession = ({ terminalRef, onSwitchToDefault }: UseTermin
     wsRef.current = null;
     setConnected(false);
     setSessionClosed(true);
-    xtermInstance.current?.write('\r\n\x1b[33m[MacNAS] 当前终端会话已关闭。点击“重连”创建新会话。\x1b[0m\r\n');
+    xtermInstance.current?.write('\r\n\x1b[33m[MacBox] 当前终端会话已关闭。点击“重连”创建新会话。\x1b[0m\r\n');
   }, [loginUser]);
 
   const sendRaw = useCallback((data: string) => {

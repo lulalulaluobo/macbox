@@ -33,7 +33,7 @@ func TestNormalizeSharePathRestrictsSharesToDataRoot(t *testing.T) {
 }
 
 func TestValidateShareName(t *testing.T) {
-	for _, name := range []string{"硬盘2", "家庭照片", "MacNAS-SSD", "共享_01"} {
+	for _, name := range []string{"硬盘2", "家庭照片", "MacBox-SSD", "共享_01"} {
 		if err := validateShareName(name); err != nil {
 			t.Errorf("validateShareName(%q) returned error: %v", name, err)
 		}

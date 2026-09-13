@@ -1,4 +1,4 @@
-export interface NASUser {
+export interface ConsoleUser {
   id: string;
   username: string;
   displayName: string;
@@ -9,18 +9,18 @@ export interface NASUser {
   enabled: boolean;
 }
 export interface AuthResponse {
-  user: NASUser;
+  user: ConsoleUser;
   warning?: string;
 }
 
-export interface CreateNASUserRequest {
+export interface CreateConsoleUserRequest {
   username: string;
   displayName?: string;
   password: string;
   role: 'admin' | 'user';
 }
 
-export interface UpdateNASUserRequest {
+export interface UpdateConsoleUserRequest {
   displayName?: string;
   role?: 'admin' | 'user';
   enabled?: boolean;

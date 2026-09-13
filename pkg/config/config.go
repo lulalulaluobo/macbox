@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -18,14 +19,15 @@ import (
 )
 
 type Config struct {
-	Port          int            `yaml:"port"`
-	ListenAddress string         `yaml:"listenAddress"`
-	VM            VMConfig       `yaml:"vm"`
-	Storage       StorageConfig  `yaml:"storage"`
-	Cloud         CloudConfig    `yaml:"cloud"`
-	Terminal      TerminalConfig `yaml:"terminal"`
-	Samba         SambaConfig    `yaml:"samba"`
-	System        SystemConfig   `yaml:"system"`
+	Port          int               `yaml:"port"`
+	ListenAddress string            `yaml:"listenAddress"`
+	VM            VMConfig          `yaml:"vm"`
+	Storage       StorageConfig     `yaml:"storage"`
+	Cloud         CloudConfig       `yaml:"cloud"`
+	Terminal      TerminalConfig    `yaml:"terminal"`
+	Samba         SambaConfig       `yaml:"samba"`
+	System        SystemConfig      `yaml:"system"`
+	ServiceNav    []ServiceShortcut `yaml:"serviceNav"`
 }
 
 type TerminalConfig struct {
@@ -37,6 +39,21 @@ type SystemConfig struct {
 	PreventSleep            bool `yaml:"preventSleep"`            // 24h keep-awake with caffeinate
 	AutoStart               bool `yaml:"autoStart"`               // macOS LaunchAgent autostart on boot
 	InitializationCompleted bool `yaml:"initializationCompleted"` // first-run VM/SSH bootstrap completed
+}
+
+// ServiceShortcut is a homepage link. Docker shortcuts carry container
+// identity so the UI can show live status; manual shortcuts are deliberately
+// independent from Docker and only open the configured URL.
+type ServiceShortcut struct {
+	ID            string `json:"id" yaml:"id"`
+	Source        string `json:"source" yaml:"source"` // docker or manual
+	ContainerID   string `json:"containerId,omitempty" yaml:"containerId,omitempty"`
+	ContainerName string `json:"containerName,omitempty" yaml:"containerName,omitempty"`
+	Name          string `json:"name" yaml:"name"`
+	URL           string `json:"url" yaml:"url"`
+	Icon          string `json:"icon" yaml:"icon"`
+	Description   string `json:"description,omitempty" yaml:"description,omitempty"`
+	Enabled       bool   `json:"enabled" yaml:"enabled"`
 }
 
 type VMConfig struct {
@@ -60,7 +77,7 @@ type LocalMount struct {
 }
 
 type StorageConfig struct {
-	SelectedDisk   string       `yaml:"selectedDisk"`   // e.g. /dev/disk4 (Primary NAS Data Disk)
+	SelectedDisk   string       `yaml:"selectedDisk"`   // e.g. /dev/disk4 (Primary MacBox Data Disk)
 	MountPoint     string       `yaml:"mountPoint"`     // Host mount point if any
 	DataPath       string       `yaml:"dataPath"`       // Host path holding data or managed disk
 	SecondaryDisk  string       `yaml:"secondaryDisk"`  // e.g. disk0 (Secondary / High-Speed SSD Pool)
@@ -69,7 +86,7 @@ type StorageConfig struct {
 }
 
 // CloudConfig stores remote-drive connections managed by the Web file
-// manager. Credentials are kept in the mode-0600 MacNAS config file and are
+// manager. Credentials are kept in the mode-0600 MacBox config file and are
 // never serialized through the JSON API.
 type CloudConfig struct {
 	Mounts []CloudMount `yaml:"mounts"`
@@ -110,11 +127,11 @@ func DefaultConfig() *Config {
 		Port:          19808,
 		ListenAddress: "127.0.0.1",
 		VM: VMConfig{
-			Name:         "macnas",
+			Name:         "macbox",
 			CPUs:         2,
 			Memory:       4,
 			DiskSize:     20,
-			DataDiskName: "macnas-data",
+			DataDiskName: "macbox-data",
 			// Only forward ports used by the built-in web applications. New
 			// application ports are added explicitly during installation.
 			ForwardedPorts: []int{5244, 8082, 8085},
@@ -126,14 +143,15 @@ func DefaultConfig() *Config {
 		},
 		Cloud: CloudConfig{Mounts: []CloudMount{}},
 		Samba: SambaConfig{
-			ShareName: "MacNAS",
+			ShareName: "MacBox",
 			Port:      4455, // default non-conflicting host port on macOS
-			User:      "macnas",
+			User:      "macbox",
 		},
 		System: SystemConfig{
-			PreventSleep: true, // Default enabled for Mac mini NAS server
+			PreventSleep: true, // Default enabled for the MacBox home server
 			AutoStart:    false,
 		},
+		ServiceNav: []ServiceShortcut{},
 	}
 }
 
@@ -166,6 +184,7 @@ var (
 	localMountIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	cloudMountIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	vmNamePattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	serviceNavIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$`)
 )
 
 // NormalizeDataDiskName validates the name that is interpolated into both
@@ -173,7 +192,7 @@ var (
 func NormalizeDataDiskName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "macnas-data", nil
+		return "macbox-data", nil
 	}
 	if !dataDiskNamePattern.MatchString(name) {
 		return "", fmt.Errorf("数据盘名称格式无效")
@@ -220,7 +239,7 @@ func ValidateCloudMount(mount CloudMount) error {
 func NormalizeVMName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "macnas", nil
+		return "macbox", nil
 	}
 	if !vmNamePattern.MatchString(name) {
 		return "", fmt.Errorf("虚拟机名称格式无效")
@@ -251,7 +270,7 @@ func NormalizeAISkillsHostPath(hostPath string) (string, error) {
 
 // NormalizeGuestTarget keeps a local mount target relative to /data. It is
 // used at the API boundary and again while rendering VM configuration so a
-// hand-edited config cannot escape the NAS data root.
+// hand-edited config cannot escape the MacBox data root.
 func NormalizeGuestTarget(target string) (string, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -330,6 +349,44 @@ func ValidateSambaUsername(username string) error {
 	return nil
 }
 
+// ValidateServiceShortcut protects the persisted homepage navigation from
+// malformed links and control characters. URLs are opened by the browser;
+// MacBox never fetches them server-side.
+func ValidateServiceShortcut(shortcut ServiceShortcut) error {
+	shortcut.ID = strings.TrimSpace(shortcut.ID)
+	if !serviceNavIDPattern.MatchString(shortcut.ID) {
+		return fmt.Errorf("服务导航 ID 无效")
+	}
+	shortcut.Source = strings.ToLower(strings.TrimSpace(shortcut.Source))
+	if shortcut.Source != "docker" && shortcut.Source != "manual" {
+		return fmt.Errorf("服务导航来源无效")
+	}
+	if strings.TrimSpace(shortcut.Name) == "" || len([]byte(shortcut.Name)) > 128 || strings.IndexFunc(shortcut.Name, unicode.IsControl) >= 0 {
+		return fmt.Errorf("服务名称无效")
+	}
+	trimmedURL := strings.TrimSpace(shortcut.URL)
+	if len([]byte(trimmedURL)) == 0 || len([]byte(trimmedURL)) > 2048 || strings.IndexFunc(trimmedURL, unicode.IsControl) >= 0 {
+		return fmt.Errorf("服务访问地址无效")
+	}
+	parsed, err := url.Parse(trimmedURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil {
+		return fmt.Errorf("服务访问地址必须是 http 或 https 地址")
+	}
+	if strings.TrimSpace(shortcut.Icon) == "" || len([]byte(shortcut.Icon)) > 64 || strings.IndexFunc(shortcut.Icon, unicode.IsControl) >= 0 {
+		return fmt.Errorf("服务图标无效")
+	}
+	if len([]byte(shortcut.Description)) > 256 || strings.IndexFunc(shortcut.Description, unicode.IsControl) >= 0 {
+		return fmt.Errorf("服务说明无效")
+	}
+	if shortcut.Source == "docker" && strings.TrimSpace(shortcut.ContainerID) == "" && strings.TrimSpace(shortcut.ContainerName) == "" {
+		return fmt.Errorf("Docker 服务缺少容器标识")
+	}
+	if shortcut.Source == "manual" && (strings.TrimSpace(shortcut.ContainerID) != "" || strings.TrimSpace(shortcut.ContainerName) != "") {
+		return fmt.Errorf("手动服务不能绑定 Docker 容器")
+	}
+	return nil
+}
+
 // NormalizeListenAddress accepts only literal IP addresses. Binding to
 // loopback is the safe default; LAN exposure must be an explicit configuration
 // choice such as 0.0.0.0 or a specific interface address.
@@ -349,7 +406,7 @@ func ConfigDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".macnas")
+	dir := filepath.Join(home, ".macbox")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
@@ -367,40 +424,15 @@ func ConfigFilePath() (string, error) {
 	return filepath.Join(dir, "config.yaml"), nil
 }
 
-func LoadConfig() (*Config, error) {
-	path, err := ConfigFilePath()
-	if err != nil {
-		return DefaultConfig(), err
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			cfg := DefaultConfig()
-			if err := SaveConfig(cfg); err != nil {
-				return cfg, fmt.Errorf("保存初始配置失败: %w", err)
-			}
-			return cfg, nil
-		}
-		return DefaultConfig(), err
-	}
-	if err := os.Chmod(path, 0600); err != nil {
-		return DefaultConfig(), fmt.Errorf("保护配置文件失败: %w", err)
-	}
-
-	// Releases before 2026-09-12 stored the SMB password in plaintext. Read
-	// only enough of the old shape to detect and remove that field on load.
-	var legacy struct {
-		Samba struct {
-			Password string `yaml:"password"`
-		} `yaml:"samba"`
-	}
-	legacyPasswordPresent := yaml.Unmarshal(data, &legacy) == nil && legacy.Samba.Password != ""
-
+// Parse validates a serialized configuration without reading or writing the
+// live configuration file. Backup restore uses this boundary before it
+// replaces the running server's configuration.
+func Parse(data []byte) (*Config, error) {
 	cfg := DefaultConfig()
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return DefaultConfig(), err
 	}
+
 	if cfg.Port < 1 || cfg.Port > 65535 {
 		cfg.Port = 19808
 	}
@@ -451,6 +483,23 @@ func LoadConfig() (*Config, error) {
 			return cfg, fmt.Errorf("云盘挂载 %q 配置无效: %w", mount.ID, err)
 		}
 	}
+	seenServiceIDs := make(map[string]struct{}, len(cfg.ServiceNav))
+	for i := range cfg.ServiceNav {
+		shortcut := &cfg.ServiceNav[i]
+		shortcut.ID = strings.TrimSpace(shortcut.ID)
+		shortcut.Source = strings.ToLower(strings.TrimSpace(shortcut.Source))
+		shortcut.Name = strings.TrimSpace(shortcut.Name)
+		shortcut.URL = strings.TrimSpace(shortcut.URL)
+		shortcut.Icon = strings.TrimSpace(shortcut.Icon)
+		shortcut.Description = strings.TrimSpace(shortcut.Description)
+		if _, exists := seenServiceIDs[shortcut.ID]; exists {
+			return cfg, fmt.Errorf("服务导航 ID 重复: %s", shortcut.ID)
+		}
+		seenServiceIDs[shortcut.ID] = struct{}{}
+		if err := ValidateServiceShortcut(*shortcut); err != nil {
+			return cfg, fmt.Errorf("服务导航 %q 配置无效: %w", shortcut.ID, err)
+		}
+	}
 	if cfg.VM.ForwardedPorts == nil {
 		cfg.VM.ForwardedPorts = append([]int(nil), DefaultConfig().VM.ForwardedPorts...)
 	}
@@ -459,10 +508,47 @@ func LoadConfig() (*Config, error) {
 		cfg.Samba.Port = 4455
 	}
 	if cfg.Samba.ShareName == "" {
-		cfg.Samba.ShareName = "MacNAS"
+		cfg.Samba.ShareName = "MacBox"
 	}
 	if cfg.Samba.User == "" {
-		cfg.Samba.User = "macnas"
+		cfg.Samba.User = "macbox"
+	}
+	return cfg, nil
+}
+
+func LoadConfig() (*Config, error) {
+	path, err := ConfigFilePath()
+	if err != nil {
+		return DefaultConfig(), err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			cfg := DefaultConfig()
+			if err := SaveConfig(cfg); err != nil {
+				return cfg, fmt.Errorf("保存初始配置失败: %w", err)
+			}
+			return cfg, nil
+		}
+		return DefaultConfig(), err
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		return DefaultConfig(), fmt.Errorf("保护配置文件失败: %w", err)
+	}
+
+	// Releases before 2026-09-12 stored the SMB password in plaintext. Read
+	// only enough of the old shape to detect and remove that field on load.
+	var legacy struct {
+		Samba struct {
+			Password string `yaml:"password"`
+		} `yaml:"samba"`
+	}
+	legacyPasswordPresent := yaml.Unmarshal(data, &legacy) == nil && legacy.Samba.Password != ""
+
+	cfg, err := Parse(data)
+	if err != nil {
+		return cfg, err
 	}
 	if legacyPasswordPresent {
 		if err := SaveConfig(cfg); err != nil {

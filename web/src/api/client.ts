@@ -14,7 +14,7 @@ export async function fetchJSON<T>(url: string, options?: RequestInit): Promise<
     },
   });
   if (res.status === 401 && !url.endsWith('/api/auth/login')) {
-    window.dispatchEvent(new CustomEvent('macnas-unauthorized'));
+    window.dispatchEvent(new CustomEvent('macbox-unauthorized'));
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));

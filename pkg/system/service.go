@@ -10,10 +10,10 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/config"
 )
 
-const ServiceLabel = "com.macnas.server"
+const ServiceLabel = "com.macbox.server"
 
 type ServiceStatus struct {
 	Installed  bool   `json:"installed"`
@@ -46,8 +46,8 @@ func (sm *ServiceManager) PlistPath() (string, error) {
 }
 
 func (sm *ServiceManager) ResolveBinaryPath() (string, error) {
-	// First check if bin/macnas exists in projectRoot
-	candidate := filepath.Join(sm.projectRoot, "bin", "macnas")
+	// First check if bin/macbox exists in projectRoot
+	candidate := filepath.Join(sm.projectRoot, "bin", "macbox")
 	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 		return candidate, nil
 	}
@@ -65,7 +65,7 @@ func (sm *ServiceManager) GetStatus() ServiceStatus {
 	plistPath, _ := sm.PlistPath()
 	binPath, _ := sm.ResolveBinaryPath()
 	home, _ := os.UserHomeDir()
-	logPath := filepath.Join(home, ".macnas", "macnas.log")
+	logPath := filepath.Join(home, ".macbox", "macbox.log")
 
 	installed := false
 	if plistPath != "" {
@@ -145,20 +145,20 @@ func (sm *ServiceManager) Install(port int) error {
 		return err
 	}
 
-	// Ensure ~/.macnas directory exists for logs
+	// Ensure ~/.macbox directory exists for logs
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	macnasDir := filepath.Join(home, ".macnas")
-	if err := os.MkdirAll(macnasDir, 0700); err != nil {
-		return fmt.Errorf("failed to create MacNAS data dir: %w", err)
+	macboxDir := filepath.Join(home, ".macbox")
+	if err := os.MkdirAll(macboxDir, 0700); err != nil {
+		return fmt.Errorf("failed to create MacBox data dir: %w", err)
 	}
-	if err := os.Chmod(macnasDir, 0700); err != nil {
-		return fmt.Errorf("failed to secure MacNAS data dir: %w", err)
+	if err := os.Chmod(macboxDir, 0700); err != nil {
+		return fmt.Errorf("failed to secure MacBox data dir: %w", err)
 	}
 
-	logPath := filepath.Join(macnasDir, "macnas.log")
+	logPath := filepath.Join(macboxDir, "macbox.log")
 	// All supported launch paths use one canonical service log. Keeping stdout
 	// and stderr together makes the menu-bar "打开日志" action useful no
 	// matter whether the service was started by LaunchAgent, the menu helper,
@@ -173,7 +173,6 @@ func (sm *ServiceManager) Install(port int) error {
 	if err := os.Chmod(logPath, 0600); err != nil {
 		return fmt.Errorf("failed to secure service log: %w", err)
 	}
-
 	tmpl, err := template.New("plist").Parse(plistTemplate)
 	if err != nil {
 		return err
@@ -203,7 +202,7 @@ func (sm *ServiceManager) Install(port int) error {
 	if err := exec.Command("launchctl", "unload", "-w", plistPath).Run(); err != nil {
 		// launchctl returns an error when the label was not loaded yet. The
 		// plist is still valid, so continue with load.
-		log.Printf("[MacNAS Service] existing LaunchAgent unload skipped: %v", err)
+		log.Printf("[MacBox Service] existing LaunchAgent unload skipped: %v", err)
 	}
 
 	// Load service
@@ -225,7 +224,7 @@ func (sm *ServiceManager) Install(port int) error {
 		return fmt.Errorf("service loaded but failed to save configuration: %w", err)
 	}
 
-	log.Printf("[MacNAS Service] 🚀 LaunchAgent 服务已安装并激活: %s", plistPath)
+	log.Printf("[MacBox Service] 🚀 LaunchAgent 服务已安装并激活: %s", plistPath)
 	return nil
 }
 
@@ -268,6 +267,6 @@ func (sm *ServiceManager) Uninstall() error {
 		return fmt.Errorf("failed to save service configuration: %w", err)
 	}
 
-	log.Printf("[MacNAS Service] LaunchAgent 服务已卸载")
+	log.Printf("[MacBox Service] LaunchAgent 服务已卸载")
 	return nil
 }

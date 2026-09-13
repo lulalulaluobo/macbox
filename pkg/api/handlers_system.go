@@ -3,11 +3,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/docker"
-	"github.com/luluen/mac-nas/pkg/storage"
-	"github.com/luluen/mac-nas/pkg/system"
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/docker"
+	"github.com/lulalulaluobo/macbox/pkg/storage"
+	"github.com/lulalulaluobo/macbox/pkg/system"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 	"log"
 	"net/http"
 	"os"
@@ -20,7 +20,7 @@ import (
 func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	cfgSnapshot, cfgErr := config.Snapshot(s.cfg)
 	if cfgErr != nil {
-		log.Printf("[MacNAS] system status config snapshot failed: %v", cfgErr)
+		log.Printf("[MacBox] system status config snapshot failed: %v", cfgErr)
 		writeError(w, http.StatusInternalServerError, "读取系统配置失败")
 		return
 	}
@@ -91,15 +91,15 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 
 	statusErrors := make(map[string]string)
 	if vmErr != nil {
-		log.Printf("[MacNAS] system status VM error: %v", vmErr)
+		log.Printf("[MacBox] system status VM error: %v", vmErr)
 		statusErrors["vm"] = "unavailable"
 	}
 	if dockerErr != nil {
-		log.Printf("[MacNAS] system status Docker error: %v", dockerErr)
+		log.Printf("[MacBox] system status Docker error: %v", dockerErr)
 		statusErrors["docker"] = "unavailable"
 	}
 	if storageErr != nil {
-		log.Printf("[MacNAS] system status storage error: %v", storageErr)
+		log.Printf("[MacBox] system status storage error: %v", storageErr)
 		statusErrors["storage"] = "unavailable"
 	}
 
@@ -382,13 +382,9 @@ func (s *Server) terminalSkillsState() (terminalSkillsResponse, error) {
 	}
 	path := cfgSnapshot.Terminal.AISkillsHostPath
 	result := terminalSkillsResponse{
-		Enabled:  cfgSnapshot.Terminal.AISkillsEnabled,
-		HostPath: path,
-		GuestPaths: []string{
-			"/home/macnasctl/.agents/skills", "/root/.agents/skills",
-			"/home/macnasctl/.claude/skills", "/root/.claude/skills",
-			"/home/macnasctl/.codex/skills", "/root/.codex/skills",
-		},
+		Enabled:    cfgSnapshot.Terminal.AISkillsEnabled,
+		HostPath:   path,
+		GuestPaths: s.vmMgr.GuestSkillsPaths(),
 		ReadOnly:   true,
 		Status:     "disabled",
 		Message:    "未启用本机 Skill 目录映射",
@@ -500,7 +496,7 @@ func (s *Server) handleUpdateTerminalSkills(w http.ResponseWriter, r *http.Reque
 	}
 	if err := s.regenerateVMConfig(); err != nil {
 		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
-			log.Printf("[MacNAS Terminal] 回滚 AI Skill 映射配置失败: %v", restoreErr)
+			log.Printf("[MacBox Terminal] 回滚 AI Skill 映射配置失败: %v", restoreErr)
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("重新生成虚拟机配置失败: %v", err))
 		return

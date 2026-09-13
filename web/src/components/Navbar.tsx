@@ -16,7 +16,7 @@ import {
   Share2,
   ChevronRight,
 } from 'lucide-react';
-import { VMStatus, NASUser } from '../types';
+import { VMStatus, ConsoleUser } from '../types';
 import { useTheme } from '../theme';
 
 interface NavbarProps {
@@ -25,7 +25,7 @@ interface NavbarProps {
   vmStatus?: VMStatus;
   dockerReady?: boolean;
   primaryIP?: string;
-  currentUser?: NASUser | null;
+  currentUser?: ConsoleUser | null;
   onLogout?: () => void;
   onOpenChangePwd?: () => void;
 }
@@ -69,10 +69,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:min-h-[68px] sm:px-6">
           <button type="button" className="group flex min-h-11 items-center gap-2.5 text-left" onClick={() => navigate('dashboard')} aria-label="返回首页">
             <span className="flex h-9 w-9 items-center justify-center rounded-[13px] bg-[#ff7d9a] shadow-sm shadow-[#ff7d9a]/20 transition-transform group-hover:-rotate-3">
-              <img src="/icons/macnas-mark.svg" alt="" className="h-7 w-7 rounded-[9px] object-cover" />
+              <img src="/icons/macbox-mark.svg" alt="" className="h-7 w-7 rounded-[9px] object-cover" />
             </span>
             <span>
-              <span className="block text-[17px] font-black leading-5 tracking-tight text-[#24324a] dark:text-white">MacNAS</span>
+              <span className="block text-[17px] font-black leading-5 tracking-tight text-[#24324a] dark:text-white">MacBox</span>
             </span>
           </button>
 

@@ -1,7 +1,7 @@
 services:
   jellyfin:
     image: jellyfin/jellyfin:latest
-    container_name: macnas-jellyfin
+    container_name: macbox-jellyfin
     restart: unless-stopped
     ports:
       - "8096:8096"

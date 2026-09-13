@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/config"
 )
 
 func TestListDisks(t *testing.T) {
-	if os.Getenv("MACNAS_INTEGRATION") != "1" {
-		t.Skip("diskutil integration test; set MACNAS_INTEGRATION=1 to run against a disposable host")
+	if os.Getenv("MACBOX_INTEGRATION") != "1" {
+		t.Skip("diskutil integration test; set MACBOX_INTEGRATION=1 to run against a disposable host")
 	}
 
 	disks, err := ListDisks("")
@@ -50,7 +50,7 @@ func TestFormatBytes(t *testing.T) {
 
 func TestLocalMounts(t *testing.T) {
 	// AddOrUpdateLocalMount and the toggle/delete helpers persist config. Use a
-	// disposable home so this test cannot modify the user's NAS configuration.
+	// disposable home so this test cannot modify the user's MacBox configuration.
 	t.Setenv("HOME", t.TempDir())
 	for _, folder := range []string{"Downloads", "Movies", "Pictures"} {
 		if err := os.MkdirAll(filepath.Join(os.Getenv("HOME"), folder), 0755); err != nil {
@@ -141,22 +141,22 @@ func TestValidateStorageTargetDir(t *testing.T) {
 	home := t.TempDir()
 	mountPoint := t.TempDir()
 
-	if err := validateStorageTargetDir(filepath.Join(mountPoint, "MacNAS-Pool"), mountPoint, home, false); err != nil {
+	if err := validateStorageTargetDir(filepath.Join(mountPoint, "MacBox-Pool"), mountPoint, home, false); err != nil {
 		t.Fatalf("expected target inside selected volume to be accepted: %v", err)
 	}
-	if err := validateStorageTargetDir(filepath.Join(home, "MacNAS-Pool"), "", home, false); err != nil {
+	if err := validateStorageTargetDir(filepath.Join(home, "MacBox-Pool"), "", home, false); err != nil {
 		t.Fatalf("expected target inside home to be accepted: %v", err)
 	}
-	if err := validateStorageTargetDir(filepath.Join(home, "MacNAS-Pool"), "/Volumes/Data", home, true); err != nil {
+	if err := validateStorageTargetDir(filepath.Join(home, "MacBox-Pool"), "/Volumes/Data", home, true); err != nil {
 		t.Fatalf("expected internal Data volume to allow the user's home directory: %v", err)
 	}
-	if err := validateStorageTargetDir(filepath.Join(home, "MacNAS-Pool"), "/Volumes/FastSSD", home, false); err == nil {
+	if err := validateStorageTargetDir(filepath.Join(home, "MacBox-Pool"), "/Volumes/FastSSD", home, false); err == nil {
 		t.Fatal("external volume unexpectedly accepted a target outside the selected volume")
 	}
 	if err := validateStorageTargetDir(filepath.Join(mountPoint, "..", "outside"), mountPoint, home, false); err == nil {
 		t.Fatal("target outside selected volume was accepted")
 	}
-	if err := validateStorageTargetDir("/etc/macnas", mountPoint, home, false); err == nil {
+	if err := validateStorageTargetDir("/etc/macbox", mountPoint, home, false); err == nil {
 		t.Fatal("system directory was accepted as storage target")
 	}
 
@@ -206,13 +206,13 @@ func TestRecommendedSecondaryTargetDir(t *testing.T) {
 	if got := recommendedSecondaryTargetDir("/System/Volumes/iSCPreboot", false); got != "" {
 		t.Fatalf("helper volume received recommendation %q", got)
 	}
-	if got, want := recommendedSecondaryTargetDir("/System/Volumes/Data", false), filepath.Join(home, "MacNAS-SSD-Pool"); got != want {
+	if got, want := recommendedSecondaryTargetDir("/System/Volumes/Data", false), filepath.Join(home, "MacBox-SSD-Pool"); got != want {
 		t.Fatalf("internal data recommendation = %q, want %q", got, want)
 	}
-	if got, want := recommendedSecondaryTargetDir("/Volumes/Data", false), filepath.Join(home, "MacNAS-SSD-Pool"); got != want {
+	if got, want := recommendedSecondaryTargetDir("/Volumes/Data", false), filepath.Join(home, "MacBox-SSD-Pool"); got != want {
 		t.Fatalf("internal /Volumes/Data recommendation = %q, want %q", got, want)
 	}
-	if got, want := recommendedSecondaryTargetDir("/Volumes/FastSSD", true), "/Volumes/FastSSD/MacNAS-SSD-Pool"; got != want {
+	if got, want := recommendedSecondaryTargetDir("/Volumes/FastSSD", true), "/Volumes/FastSSD/MacBox-SSD-Pool"; got != want {
 		t.Fatalf("external volume recommendation = %q, want %q", got, want)
 	}
 }
@@ -223,9 +223,9 @@ func TestUnbindExternalDiskRestoresBackupWhenImageIsMissing(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Storage.SelectedDisk = "disk4"
 	cfg.Storage.MountPoint = "/System/Volumes/Data"
-	cfg.Storage.DataPath = filepath.Join(testHome, "MacNAS", "datadisk.img")
+	cfg.Storage.DataPath = filepath.Join(testHome, "MacBox", "datadisk.img")
 
-	diskDir := filepath.Join(testHome, ".lima", "_disks", "macnas-data")
+	diskDir := filepath.Join(testHome, ".lima", "_disks", "macbox-data")
 	if err := os.MkdirAll(diskDir, 0700); err != nil {
 		t.Fatalf("create Lima disk directory: %v", err)
 	}

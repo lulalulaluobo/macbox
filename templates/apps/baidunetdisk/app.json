@@ -16,7 +16,7 @@
     {"host": "/data/downloads", "container": "/root/baidunetdiskdownload", "description": "百度网盘下载文件目录"}
   ],
   "env": [
-    {"key": "VNC_SERVER_PASSWD", "value": "macnas-change-me", "description": "VNC 密码，保留默认标记时自动随机生成"},
+    {"key": "VNC_SERVER_PASSWD", "value": "macbox-change-me", "description": "VNC 密码，保留默认标记时自动随机生成"},
     {"key": "TZ", "value": "Asia/Shanghai", "description": "系统时区"}
   ]
 }

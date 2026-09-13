@@ -15,10 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/luluen/mac-nas/pkg/api"
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/system"
-	"github.com/luluen/mac-nas/web"
+	"github.com/lulalulaluobo/macbox/pkg/api"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/system"
+	"github.com/lulalulaluobo/macbox/web"
 )
 
 func main() {
@@ -33,10 +33,10 @@ func main() {
 		// Do not silently run with defaults when the persisted configuration is
 		// unreadable or invalid. That can change listen/storage/auth behavior
 		// without the operator realizing it and may overwrite the wrong state.
-		log.Fatalf("[MacNAS] 无法加载安全配置，服务未启动: %v", err)
+		log.Fatalf("[MacBox] 无法加载安全配置，服务未启动: %v", err)
 	}
 
-	// Check CLI subcommand: macnas service [install|uninstall|status]
+	// Check CLI subcommand: macbox service [install|uninstall|status]
 	if len(os.Args) > 1 && os.Args[1] == "service" {
 		serviceMgr := system.NewServiceManager(cfg, projectRoot)
 		action := "status"
@@ -51,20 +51,20 @@ func main() {
 				port = 19808
 			}
 			if err := serviceMgr.Install(port); err != nil {
-				log.Fatalf("[MacNAS Service] 安装自启服务失败: %v", err)
+				log.Fatalf("[MacBox Service] 安装自启服务失败: %v", err)
 			}
-			fmt.Println("✅ MacNAS LaunchAgent 开机免登录自启服务已成功安装并启动！")
+			fmt.Println("✅ MacBox LaunchAgent 开机免登录自启服务已成功安装并启动！")
 			fmt.Printf("   配置文件: ~/Library/LaunchAgents/%s.plist\n", system.ServiceLabel)
 			return
 		case "uninstall":
 			if err := serviceMgr.Uninstall(); err != nil {
-				log.Fatalf("[MacNAS Service] 卸载自启服务失败: %v", err)
+				log.Fatalf("[MacBox Service] 卸载自启服务失败: %v", err)
 			}
-			fmt.Println("✅ MacNAS LaunchAgent 开机自启服务已成功卸载。")
+			fmt.Println("✅ MacBox LaunchAgent 开机自启服务已成功卸载。")
 			return
 		case "status":
 			status := serviceMgr.GetStatus()
-			fmt.Printf("MacNAS LaunchAgent 服务状态:\n")
+			fmt.Printf("MacBox LaunchAgent 服务状态:\n")
 			fmt.Printf("  服务标识: %s\n", status.Label)
 			fmt.Printf("  已安装:   %v\n", status.Installed)
 			fmt.Printf("  运行中:   %v\n", status.Running)
@@ -72,7 +72,7 @@ func main() {
 			fmt.Printf("  日志文件: %s\n", status.LogPath)
 			return
 		default:
-			fmt.Printf("用法: macnas service [install|uninstall|status]\n")
+			fmt.Printf("用法: macbox service [install|uninstall|status]\n")
 			os.Exit(1)
 		}
 	}
@@ -92,7 +92,7 @@ func main() {
 	}
 	listenAddress := config.NormalizeListenAddress(cfg.ListenAddress)
 	if *lanFlag && *hostFlag != "" && config.NormalizeListenAddress(*hostFlag) != "0.0.0.0" {
-		log.Fatal("[MacNAS] --lan 与 --host 不能同时指定不同监听地址")
+		log.Fatal("[MacBox] --lan 与 --host 不能同时指定不同监听地址")
 	}
 	if *hostFlag != "" {
 		listenAddress = config.NormalizeListenAddress(*hostFlag)
@@ -118,7 +118,7 @@ func main() {
 
 	server, err := api.NewServerWithPowerManagerChecked(cfg, projectRoot, powerMgr)
 	if err != nil {
-		log.Fatalf("[MacNAS] 认证服务初始化失败，服务未启动: %v", err)
+		log.Fatalf("[MacBox] 认证服务初始化失败，服务未启动: %v", err)
 	}
 	apiHandler := server.Handler()
 
@@ -174,9 +174,9 @@ func main() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
-<head><title>MacNAS Server</title></head>
+<head><title>MacBox Server</title></head>
 <body style="font-family: -apple-system, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; text-align: center;">
-  <h1 style="font-size: 32px; margin-bottom: 12px;">🍎 MacNAS 服务运行中</h1>
+  <h1 style="font-size: 32px; margin-bottom: 12px;">🍎 MacBox 服务运行中</h1>
   <p style="color: #94a3b8; font-size: 16px;">API 服务已在 <code>/api</code> 正常就绪。</p>
   <p><a href="/api/system/status" style="color: #38bdf8;">查看系统状态 API: /api/system/status</a></p>
 </body>
@@ -205,7 +205,7 @@ func main() {
 
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("[MacNAS] HTTP server error: %v", err)
+			log.Fatalf("[MacBox] HTTP server error: %v", err)
 		}
 	}()
 
@@ -214,15 +214,15 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("[MacNAS] 正在平稳关闭服务...")
+	log.Println("[MacBox] 正在平稳关闭服务...")
 	_ = powerMgr.Stop()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Printf("[MacNAS] 强制退出: %v", err)
+		log.Printf("[MacBox] 强制退出: %v", err)
 	}
 	server.Close()
-	log.Println("[MacNAS] 服务已停止。")
+	log.Println("[MacBox] 服务已停止。")
 }
 
 func detectProjectRoot(exePath string) string {
@@ -274,14 +274,14 @@ func printBanner(port int, ip string, listenAddress string) {
 	fmt.Println("     | |  | | (_| | (__| |\\  |/ ____ \\ ____) |")
 	fmt.Println("     |_|  |_|\\__,_|\\___|_| \\_/_/    \\_\\_____/ ")
 	fmt.Println("                                           ")
-	fmt.Println("  Mac mini 家庭微型服务器控制中心 (MVP v0.1)")
+	fmt.Println("  MacBox 家庭文件中心与开发工作台 (MVP v0.1)")
 	fmt.Println("===================================================================")
 	fmt.Printf("  ➜ 本地访问地址:  http://localhost:%d\n", port)
 	if parsedIP := net.ParseIP(listenAddress); parsedIP != nil && parsedIP.IsLoopback() {
 		fmt.Printf("  ➜ 当前监听范围:    仅本机 (%s)\n", listenAddress)
 	} else {
 		fmt.Printf("  ➜ 局域网访问:    http://%s:%d\n", ip, port)
-		fmt.Printf("  ➜ SMB 共享地址:  smb://%s:4455/MacNAS\n", ip)
+		fmt.Printf("  ➜ SMB 共享地址:  smb://%s:4455/MacBox\n", ip)
 	}
 	fmt.Println("===================================================================")
 	fmt.Println()

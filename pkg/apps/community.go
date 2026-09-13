@@ -138,7 +138,7 @@ func (sm *CommunityStoreManager) Sync(ctx context.Context) (int, error) {
 		if err != nil {
 			continue
 		}
-		req.Header.Set("User-Agent", "MacNAS-AppStore/1.0")
+		req.Header.Set("User-Agent", "MacBox-AppStore/1.0")
 		resp, err := client.Do(req)
 		if err != nil {
 			continue
@@ -188,7 +188,7 @@ func (sm *CommunityStoreManager) Sync(ctx context.Context) (int, error) {
 
 				desc := boundedCommunityText(item.Description, 2048)
 				if desc == "" {
-					desc = fmt.Sprintf("开源社区精选 NAS 应用: %s", displayName)
+					desc = fmt.Sprintf("开源社区精选 MacBox 应用: %s", displayName)
 				}
 
 				icon := mapFNOSIcon(boundedCommunityText(item.Category, 64), id)
@@ -198,7 +198,7 @@ func (sm *CommunityStoreManager) Sync(ctx context.Context) (int, error) {
 				composeYAML := fmt.Sprintf(`services:
   %s:
     image: %s
-    container_name: macnas-%s
+    container_name: macbox-%s
     restart: unless-stopped
     ports:
       - "%d:%d"
@@ -397,7 +397,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   vaultwarden:
     image: vaultwarden/server:latest
-    container_name: macnas-vaultwarden
+    container_name: macbox-vaultwarden
     restart: unless-stopped
     ports:
       - "8086:80"
@@ -430,7 +430,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   uptime-kuma:
     image: louislam/uptime-kuma:1
-    container_name: macnas-uptime-kuma
+    container_name: macbox-uptime-kuma
     restart: unless-stopped
     ports:
       - "3001:3001"
@@ -462,7 +462,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   adguardhome:
     image: adguard/adguardhome:latest
-    container_name: macnas-adguardhome
+    container_name: macbox-adguardhome
     restart: unless-stopped
     ports:
       - "3080:3000"
@@ -496,7 +496,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   navidrome:
     image: deluan/navidrome:latest
-    container_name: macnas-navidrome
+    container_name: macbox-navidrome
     restart: unless-stopped
     ports:
       - "4533:4533"
@@ -528,7 +528,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   it-tools:
     image: corentinth/it-tools:latest
-    container_name: macnas-it-tools
+    container_name: macbox-it-tools
     restart: unless-stopped
     ports:
       - "8088:80"
@@ -556,7 +556,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   dozzle:
     image: amir20/dozzle:latest
-    container_name: macnas-dozzle
+    container_name: macbox-dozzle
     restart: unless-stopped
     ports:
       - "8888:8080"
@@ -587,7 +587,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   portainer:
     image: portainer/portainer-ce:latest
-    container_name: macnas-portainer
+    container_name: macbox-portainer
     restart: unless-stopped
     ports:
       - "9000:9000"
@@ -619,7 +619,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   1panel:
     image: moqsien/1panel:latest
-    container_name: macnas-1panel
+    container_name: macbox-1panel
     restart: unless-stopped
     ports:
       - "10086:10086"
@@ -652,7 +652,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   transmission:
     image: linuxserver/transmission:latest
-    container_name: macnas-transmission
+    container_name: macbox-transmission
     restart: unless-stopped
     ports:
       - "9091:9091"
@@ -691,7 +691,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   aria2:
     image: p3terx/aria2-pro:latest
-    container_name: macnas-aria2
+    container_name: macbox-aria2
     restart: unless-stopped
     ports:
       - "6800:6800"
@@ -704,7 +704,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
       - LISTEN_PORT=6888
   ariang:
     image: p3terx/ariang:latest
-    container_name: macnas-ariang
+    container_name: macbox-ariang
     restart: unless-stopped
     ports:
       - "6880:6880"
@@ -733,7 +733,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   stirling-pdf:
     image: frooodle/s-pdf:latest
-    container_name: macnas-stirling-pdf
+    container_name: macbox-stirling-pdf
     restart: unless-stopped
     ports:
       - "8087:8080"
@@ -768,7 +768,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   calibre-web:
     image: linuxserver/calibre-web:latest
-    container_name: macnas-calibre-web
+    container_name: macbox-calibre-web
     restart: unless-stopped
     ports:
       - "8083:8083"
@@ -787,7 +787,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "homepage",
 				Name:        "Homepage",
-				Description: "极其现代化、高度可定制的专属 NAS 导航仪表盘，自动聚合展示各服务运行状态、系统负载、Docker 容器与天气。",
+				Description: "极其现代化、高度可定制的专属 MacBox 导航仪表盘，自动聚合展示各服务运行状态、系统负载、Docker 容器与天气。",
 				Version:     "v0.9.11",
 				Icon:        "activity",
 				Category:    "系统运维",
@@ -804,7 +804,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   homepage:
     image: ghcr.io/gethomepage/homepage:latest
-    container_name: macnas-homepage
+    container_name: macbox-homepage
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -836,7 +836,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   nextcloud:
     image: nextcloud:latest
-    container_name: macnas-nextcloud
+    container_name: macbox-nextcloud
     restart: unless-stopped
     ports:
       - "8080:80"
@@ -868,7 +868,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   cloudreve:
     image: cloudreve/cloudreve:latest
-    container_name: macnas-cloudreve
+    container_name: macbox-cloudreve
     restart: unless-stopped
     ports:
       - "5212:5212"
@@ -900,7 +900,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   ani-rss:
     image: wushang/ani-rss:latest
-    container_name: macnas-ani-rss
+    container_name: macbox-ani-rss
     restart: unless-stopped
     ports:
       - "7789:7789"
@@ -934,7 +934,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   npm:
     image: jc21/nginx-proxy-manager:latest
-    container_name: macnas-npm
+    container_name: macbox-npm
     restart: unless-stopped
     ports:
       - "80:80"
@@ -967,7 +967,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
-    container_name: macnas-homeassistant
+    container_name: macbox-homeassistant
     restart: unless-stopped
     ports:
       - "8123:8123"
@@ -1001,7 +1001,7 @@ func GetExtensiveCommunityPresets() []BuiltinAppDefinition {
 			YAML: `services:
   audiobookshelf:
     image: ghcr.io/advplyr/audiobookshelf:latest
-    container_name: macnas-audiobookshelf
+    container_name: macbox-audiobookshelf
     restart: unless-stopped
     ports:
       - "13378:80"

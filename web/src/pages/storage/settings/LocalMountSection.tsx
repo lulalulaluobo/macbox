@@ -32,7 +32,7 @@ export const LocalMountSection: React.FC<LocalMountSectionProps> = ({
       className="flex min-h-16 w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 text-left dark:border-slate-800 dark:bg-slate-900"
     >
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"><FolderSync className="h-5 w-5" /></span>
-      <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-900 dark:text-white">本机目录直通</span><span className="mt-0.5 block text-[11px] text-slate-500">{localMounts.length} 个 Mac 目录已映射到 NAS</span></span>
+      <span className="min-w-0 flex-1"><span className="block text-sm font-bold text-slate-900 dark:text-white">本机目录直通</span><span className="mt-0.5 block text-[11px] text-slate-500">{localMounts.length} 个 Mac 目录已映射到 MacBox</span></span>
       <span className="text-xs font-semibold text-sky-600 dark:text-sky-400">管理</span>
     </button>
 
@@ -41,7 +41,7 @@ export const LocalMountSection: React.FC<LocalMountSectionProps> = ({
         <section className="flex h-[100dvh] w-full flex-col bg-white dark:bg-slate-950 sm:h-auto sm:max-h-[82dvh] sm:max-w-xl sm:rounded-3xl sm:border sm:border-slate-200 sm:dark:border-slate-800">
           <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-slate-100 px-4 dark:border-slate-800">
             <button type="button" onClick={onCloseManager} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" aria-label="关闭"><X className="h-5 w-5" /></button>
-            <div className="min-w-0 flex-1"><h3 className="text-base font-bold text-slate-900 dark:text-white">本机目录直通</h3><p className="text-[11px] text-slate-500">将 Mac 文件夹映射到 NAS，不复制或删除原目录</p></div>
+            <div className="min-w-0 flex-1"><h3 className="text-base font-bold text-slate-900 dark:text-white">本机目录直通</h3><p className="text-[11px] text-slate-500">将 Mac 文件夹映射到 MacBox，不复制或删除原目录</p></div>
             <button type="button" onClick={onOpenAdd} className="flex min-h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-bold text-white"><Plus className="h-4 w-4" />添加</button>
           </header>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
@@ -78,7 +78,7 @@ export const LocalMountSection: React.FC<LocalMountSectionProps> = ({
                   </button>
                 </div>
                 <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  <span className="min-w-0 truncate" title={`/data/${mount.guestTarget}`}>NAS 目录：<code className="font-mono">/data/{mount.guestTarget}</code></span>
+                  <span className="min-w-0 truncate" title={`/data/${mount.guestTarget}`}>MacBox 目录：<code className="font-mono">/data/{mount.guestTarget}</code></span>
                   <button type="button" onClick={() => onToggleMount(mount.id)} className={`shrink-0 rounded-lg px-2 py-1 font-semibold ${mount.enabled ? 'text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-500/10' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'}`} title={mount.enabled ? '停用本机目录直通' : '启用本机目录直通'}>{mount.enabled ? '已启用 · 停用' : '已停用 · 启用'}</button>
                 </div>
               </article>

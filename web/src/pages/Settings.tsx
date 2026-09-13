@@ -1,22 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, NASUser } from '../types';
+import { SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, ConsoleUser } from '../types';
 import { api } from '../api';
 import { useTheme } from '../theme';
 import { SettingsNavigation, SettingsSubTab } from './settings/SettingsNavigation';
 import { SSHSettingsSection } from './settings/SSHSettingsSection';
 import { TerminalSettingsSection } from './settings/TerminalSettingsSection';
-import { NASUsersSection } from './settings/NASUsersSection';
+import { ConsoleUsersSection } from './settings/ConsoleUsersSection';
 import { SystemUsersSection } from './settings/SystemUsersSection';
 import { RootPasswordSection } from './settings/RootPasswordSection';
 import { AppearanceSettingsSection } from './settings/AppearanceSettingsSection';
 import { SSHKeyModals } from './settings/SSHKeyModals';
-import { useNASUserSettings } from './settings/useNASUserSettings';
+import { useConsoleUserSettings } from './settings/useConsoleUserSettings';
 import { SettingsAlert, SettingsHeader, SettingsAlertMessage } from './settings/SettingsHeader';
+import { BackupRestoreSection } from './settings/BackupRestoreSection';
 
 interface SettingsProps {
   primaryIP?: string;
-  currentUser?: NASUser | null;
-  onCurrentUserUpdated?: (u: NASUser) => void;
+  currentUser?: ConsoleUser | null;
+  onCurrentUserUpdated?: (u: ConsoleUser) => void;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
@@ -25,43 +26,43 @@ export const Settings: React.FC<SettingsProps> = ({
   onCurrentUserUpdated,
 }) => {
   const { theme, setTheme } = useTheme();
-  const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>('nas_users');
+  const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>('console_users');
   const [alertMsg, setAlertMsg] = useState<SettingsAlertMessage | null>(null);
 
   const {
-    nasUsers,
-    nasUsersLoading,
-    showAddNASModal,
-    newNASUsername,
-    newNASDisplayName,
-    newNASPassword,
-    newNASConfirmPassword,
-    newNASRole,
-    editingNASUser,
+    consoleUsers,
+    consoleUsersLoading,
+    showAddConsoleModal,
+    newConsoleUsername,
+    newConsoleDisplayName,
+    newConsolePassword,
+    newConsoleConfirmPassword,
+    newConsoleRole,
+    editingConsoleUser,
     editDisplayName,
     editRole,
     editEnabled,
     editNewPassword,
-    deletingNASUser,
-    nasActionLoading,
-    loadNASUsers,
-    setShowAddNASModal,
-    setNewNASUsername,
-    setNewNASDisplayName,
-    setNewNASPassword,
-    setNewNASConfirmPassword,
-    setNewNASRole,
-    setEditingNASUser,
+    deletingConsoleUser,
+    consoleActionLoading,
+    loadConsoleUsers,
+    setShowAddConsoleModal,
+    setNewConsoleUsername,
+    setNewConsoleDisplayName,
+    setNewConsolePassword,
+    setNewConsoleConfirmPassword,
+    setNewConsoleRole,
+    setEditingConsoleUser,
     setEditDisplayName,
     setEditRole,
     setEditEnabled,
     setEditNewPassword,
-    setDeletingNASUser,
-    handleCreateNASUser,
-    handleOpenEditNASUser,
-    handleUpdateNASUser,
-    handleDeleteNASUser,
-  } = useNASUserSettings({
+    setDeletingConsoleUser,
+    handleCreateConsoleUser,
+    handleOpenEditConsoleUser,
+    handleUpdateConsoleUser,
+    handleDeleteConsoleUser,
+  } = useConsoleUserSettings({
     currentUser,
     onCurrentUserUpdated,
     onAlert: (alert) => setAlertMsg(alert),
@@ -120,9 +121,9 @@ export const Settings: React.FC<SettingsProps> = ({
     enabled: false,
     hostPath: '',
     guestPaths: [
-      '/home/macnasctl/.agents/skills', '/root/.agents/skills',
-      '/home/macnasctl/.claude/skills', '/root/.claude/skills',
-      '/home/macnasctl/.codex/skills', '/root/.codex/skills',
+      '/home/macboxctl/.agents/skills', '/root/.agents/skills',
+      '/home/macboxctl/.claude/skills', '/root/.claude/skills',
+      '/home/macboxctl/.codex/skills', '/root/.codex/skills',
     ],
     readOnly: true,
     status: 'disabled',
@@ -144,7 +145,7 @@ export const Settings: React.FC<SettingsProps> = ({
         api.getSSHConfig().catch(() => null),
         api.getTerminalSettings().catch(() => null),
         api.getTerminalSkills().catch(() => null),
-        loadNASUsers(),
+        loadConsoleUsers(),
       ]);
       setUsers(uList || []);
       if (sCfg) setSSHConfig(sCfg);
@@ -247,7 +248,7 @@ export const Settings: React.FC<SettingsProps> = ({
   const handleSaveSSHConfig = async () => {
     setSSHSaving(true);
     try {
-      // MacNAS keeps SSH password authentication disabled. The console/root
+      // MacBox keeps SSH password authentication disabled. The console/root
       // passwords are local VM credentials and are never used for SSH.
       const safeSSHConfig = { ...sshConfig, passwordAuthentication: false };
       await api.updateSSHConfig(safeSSHConfig);
@@ -419,44 +420,44 @@ export const Settings: React.FC<SettingsProps> = ({
       <SettingsHeader loading={usersLoading || sshLoading} onRefresh={loadData} />
       {alertMsg && <SettingsAlert alert={alertMsg} onDismiss={() => setAlertMsg(null)} />}
 
-      <SettingsNavigation activeSubTab={activeSubTab} onChange={setActiveSubTab} />
+      <SettingsNavigation activeSubTab={activeSubTab} onChange={setActiveSubTab} isAdmin={currentUser?.role === 'admin'} />
 
-      {activeSubTab === 'nas_users' && (
-        <NASUsersSection
-          users={nasUsers}
-          loading={nasUsersLoading}
+      {activeSubTab === 'console_users' && (
+        <ConsoleUsersSection
+          users={consoleUsers}
+          loading={consoleUsersLoading}
           currentUser={currentUser}
-          showAddModal={showAddNASModal}
-          newUsername={newNASUsername}
-          newDisplayName={newNASDisplayName}
-          newPassword={newNASPassword}
-          newConfirmPassword={newNASConfirmPassword}
-          newRole={newNASRole}
-          editingUser={editingNASUser}
+          showAddModal={showAddConsoleModal}
+          newUsername={newConsoleUsername}
+          newDisplayName={newConsoleDisplayName}
+          newPassword={newConsolePassword}
+          newConfirmPassword={newConsoleConfirmPassword}
+          newRole={newConsoleRole}
+          editingUser={editingConsoleUser}
           editDisplayName={editDisplayName}
           editRole={editRole}
           editEnabled={editEnabled}
           editNewPassword={editNewPassword}
-          deletingUser={deletingNASUser}
-          actionLoading={nasActionLoading}
-          onOpenAdd={() => setShowAddNASModal(true)}
-          onCloseAdd={() => setShowAddNASModal(false)}
-          onNewUsernameChange={setNewNASUsername}
-          onNewDisplayNameChange={setNewNASDisplayName}
-          onNewPasswordChange={setNewNASPassword}
-          onNewConfirmPasswordChange={setNewNASConfirmPassword}
-          onNewRoleChange={setNewNASRole}
-          onCreate={handleCreateNASUser}
-          onOpenEdit={handleOpenEditNASUser}
-          onCloseEdit={() => setEditingNASUser(null)}
+          deletingUser={deletingConsoleUser}
+          actionLoading={consoleActionLoading}
+          onOpenAdd={() => setShowAddConsoleModal(true)}
+          onCloseAdd={() => setShowAddConsoleModal(false)}
+          onNewUsernameChange={setNewConsoleUsername}
+          onNewDisplayNameChange={setNewConsoleDisplayName}
+          onNewPasswordChange={setNewConsolePassword}
+          onNewConfirmPasswordChange={setNewConsoleConfirmPassword}
+          onNewRoleChange={setNewConsoleRole}
+          onCreate={handleCreateConsoleUser}
+          onOpenEdit={handleOpenEditConsoleUser}
+          onCloseEdit={() => setEditingConsoleUser(null)}
           onEditDisplayNameChange={setEditDisplayName}
           onEditRoleChange={setEditRole}
           onEditEnabledChange={setEditEnabled}
           onEditNewPasswordChange={setEditNewPassword}
-          onUpdate={handleUpdateNASUser}
-          onRequestDelete={setDeletingNASUser}
-          onCloseDelete={() => setDeletingNASUser(null)}
-          onDelete={handleDeleteNASUser}
+          onUpdate={handleUpdateConsoleUser}
+          onRequestDelete={setDeletingConsoleUser}
+          onCloseDelete={() => setDeletingConsoleUser(null)}
+          onDelete={handleDeleteConsoleUser}
         />
       )}
 
@@ -555,6 +556,10 @@ export const Settings: React.FC<SettingsProps> = ({
 
       {activeSubTab === 'appearance' && (
         <AppearanceSettingsSection theme={theme} onThemeChange={setTheme} />
+      )}
+
+      {activeSubTab === 'backup' && (
+        <BackupRestoreSection onAlert={(alert) => setAlertMsg(alert)} />
       )}
 
       <SSHKeyModals

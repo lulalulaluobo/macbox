@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh_CN</string>
 	<key>CFBundleDisplayName</key>
-	<string>MacNAS</string>
+	<string>MacBox</string>
 	<key>CFBundleExecutable</key>
-	<string>MacNASMenu</string>
+	<string>MacBoxMemu</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.macnas.menu</string>
+	<string>com.macbox.menu</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>MacNAS</string>
+	<string>MacBox</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

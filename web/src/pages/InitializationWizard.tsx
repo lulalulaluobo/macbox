@@ -258,7 +258,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   const startProgressDetail = job?.error || (
     isStarting
       ? job?.message || (vmIsRunning
-        ? 'Lima 虚拟机已启动，正在等待 SSH 和 MacNAS 服务就绪。请保持 MacNAS 运行。'
+        ? 'Lima 虚拟机已启动，正在等待 SSH 和 MacBox 服务就绪。请保持 MacBox 运行。'
         : '正在启动虚拟机，可能正在下载 Ubuntu、Docker 和 Samba，首次启动通常需要 1–5 分钟。')
       : job?.message
   );
@@ -289,9 +289,9 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
               <ServerCog className="h-6 w-6" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-black uppercase tracking-[0.2em] text-sky-600 dark:text-sky-300">MacNAS first run</p>
-              <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">初始化 MacNAS</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">完成一次环境配置后，MacNAS 会自动启动 Lima 虚拟机并进入控制台。</p>
+              <p className="text-[11px] font-black uppercase tracking-[0.2em] text-sky-600 dark:text-sky-300">MacBox first run</p>
+              <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">初始化 MacBox</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">完成一次环境配置后，MacBox 会自动启动 Lima 虚拟机并进入控制台。</p>
             </div>
           </div>
 
@@ -430,7 +430,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
               </div>
 
               <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200">
-                初始化会创建名为 <span className="font-bold">macnas</span> 的 Lima 虚拟机。SSH 服务使用 root 密钥登录，密码认证保持关闭；需要密钥时可在设置页生成或导入。
+                初始化会创建名为 <span className="font-bold">macbox</span> 的 Lima 虚拟机。SSH 服务使用 root 密钥登录，密码认证保持关闭；需要密钥时可在设置页生成或导入。
               </div>
 
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -447,7 +447,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
             <div className="space-y-5">
               <div>
                 <h2 className="text-lg font-black text-slate-950 dark:text-white">正在完成初始化</h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">MacNAS 正在依次启动虚拟机、配置 SSH 并检查服务，请不要关闭窗口。</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">MacBox 正在依次启动虚拟机、配置 SSH 并检查服务，请不要关闭窗口。</p>
               </div>
 
               {!isComplete && (
@@ -466,7 +466,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
               <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/30">
                 <ProgressRow label="启动 Lima 虚拟机" status={job?.status === 'failed' || job?.status === 'cancelled' ? 'error' : job?.status === 'succeeded' ? 'done' : isStarting ? 'running' : 'waiting'} detail={startProgressDetail} />
                 <ProgressRow label="配置 root 密钥登录" status={isComplete ? 'done' : job?.status === 'succeeded' ? 'running' : 'waiting'} detail={isComplete ? '密码认证已关闭' : job?.stage === 'waiting-ssh' ? '正在等待并配置 SSH' : undefined} />
-                <ProgressRow label="进入 MacNAS 控制台" status={isComplete ? 'done' : 'waiting'} />
+                <ProgressRow label="进入 MacBox 控制台" status={isComplete ? 'done' : 'waiting'} />
               </div>
 
               {diagnostics && (

@@ -153,5 +153,5 @@ func setQuarkHeaders(request *http.Request) {
 }
 
 func newRequestID() string {
-	return fmt.Sprintf("macnas-%d", time.Now().UnixNano())
+	return fmt.Sprintf("macbox-%d", time.Now().UnixNano())
 }

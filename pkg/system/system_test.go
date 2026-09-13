@@ -6,8 +6,8 @@ import (
 )
 
 func TestGetSystemStats(t *testing.T) {
-	if os.Getenv("MACNAS_INTEGRATION") != "1" {
-		t.Skip("host statistics integration test; set MACNAS_INTEGRATION=1 to run")
+	if os.Getenv("MACBOX_INTEGRATION") != "1" {
+		t.Skip("host statistics integration test; set MACBOX_INTEGRATION=1 to run")
 	}
 	stats, err := GetSystemStats()
 	if err != nil {

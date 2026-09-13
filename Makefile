@@ -7,12 +7,12 @@ build-web:
 	cd web && npm run build
 
 build-backend:
-	@echo "==> 编译 Go 后端二进制 (bin/macnas)..."
+	@echo "==> 编译 Go 后端二进制 (bin/macbox)..."
 	mkdir -p bin
-	CGO_ENABLED=0 go build -o bin/macnas ./cmd/macnas
+	CGO_ENABLED=0 go build -o bin/macbox ./cmd/macbox
 
 build: build-web build-backend
-	@echo "==> MacNAS 构建完成！运行 ./bin/macnas 即可启动。"
+	@echo "==> MacBox 构建完成！运行 ./bin/macbox 即可启动。"
 
 build-mac-menu:
 	@echo "==> 构建 macOS 顶部菜单栏助手..."
@@ -26,11 +26,11 @@ release-mac-cli: release-mac
 
 dev-backend:
 	@echo "==> 启动 Go 后端开发服务..."
-	CGO_ENABLED=0 go run ./cmd/macnas
+	CGO_ENABLED=0 go run ./cmd/macbox
 
 dev-backend-lan:
 	@echo "==> 启动可供局域网访问的 Go Web 服务..."
-	CGO_ENABLED=0 go run ./cmd/macnas --lan
+	CGO_ENABLED=0 go run ./cmd/macbox --lan
 
 dev-web:
 	@echo "==> 启动前端开发调试服务器 (http://localhost:3000)..."

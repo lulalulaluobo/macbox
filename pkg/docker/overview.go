@@ -127,7 +127,7 @@ func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
 		HealthMessage:     healthMsg,
 		DockerReady:       dockerReady,
 		DockerVersion:     dockerVer,
-		StorageLocation:   "存储空间 1 (MacNAS 虚拟专有卷)",
+		StorageLocation:   "存储空间 1 (MacBox 虚拟专有卷)",
 		AutoStart:         true,
 		ContainersTotal:   len(containers),
 		ContainersRunning: runningContainers,

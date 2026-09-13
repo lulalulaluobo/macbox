@@ -1,23 +1,23 @@
 import React from 'react';
 import { Crown, Plus, RefreshCw, Trash2, UserCheck, X } from 'lucide-react';
-import type { NASUser } from '../../types';
+import type { ConsoleUser } from '../../types';
 
-interface NASUsersSectionProps {
-  users: NASUser[];
+interface ConsoleUsersSectionProps {
+  users: ConsoleUser[];
   loading: boolean;
-  currentUser?: NASUser | null;
+  currentUser?: ConsoleUser | null;
   showAddModal: boolean;
   newUsername: string;
   newDisplayName: string;
   newPassword: string;
   newConfirmPassword: string;
   newRole: 'admin' | 'user';
-  editingUser: NASUser | null;
+  editingUser: ConsoleUser | null;
   editDisplayName: string;
   editRole: 'admin' | 'user';
   editEnabled: boolean;
   editNewPassword: string;
-  deletingUser: NASUser | null;
+  deletingUser: ConsoleUser | null;
   actionLoading: boolean;
   onOpenAdd: () => void;
   onCloseAdd: () => void;
@@ -27,19 +27,19 @@ interface NASUsersSectionProps {
   onNewConfirmPasswordChange: (value: string) => void;
   onNewRoleChange: (value: 'admin' | 'user') => void;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
-  onOpenEdit: (user: NASUser) => void;
+  onOpenEdit: (user: ConsoleUser) => void;
   onCloseEdit: () => void;
   onEditDisplayNameChange: (value: string) => void;
   onEditRoleChange: (value: 'admin' | 'user') => void;
   onEditEnabledChange: (value: boolean) => void;
   onEditNewPasswordChange: (value: string) => void;
   onUpdate: (event: React.FormEvent<HTMLFormElement>) => void;
-  onRequestDelete: (user: NASUser) => void;
+  onRequestDelete: (user: ConsoleUser) => void;
   onCloseDelete: () => void;
   onDelete: () => void;
 }
 
-export const NASUsersSection: React.FC<NASUsersSectionProps> = ({
+export const ConsoleUsersSection: React.FC<ConsoleUsersSectionProps> = ({
   users,
   loading,
   currentUser,
@@ -78,11 +78,11 @@ export const NASUsersSection: React.FC<NASUsersSectionProps> = ({
   <>
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white p-4 dark:border-slate-800/80 dark:bg-slate-900/60">
-        <div><h3 className="text-sm font-bold text-slate-900 dark:text-white sm:text-base">NAS 用户</h3><p className="mt-0.5 hidden text-xs text-slate-500 dark:text-slate-400 sm:block">管理登录账号与管理员权限</p></div>
+        <div><h3 className="text-sm font-bold text-slate-900 dark:text-white sm:text-base">MacBox 用户</h3><p className="mt-0.5 hidden text-xs text-slate-500 dark:text-slate-400 sm:block">管理登录账号与管理员权限</p></div>
         <button type="button" onClick={onOpenAdd} className="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-sky-500 px-3 py-2 text-xs font-bold text-white transition hover:bg-sky-600"><Plus className="h-4 w-4" /><span>添加用户</span></button>
       </div>
       {loading ? (
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-8 text-center text-xs text-slate-500 dark:border-slate-800/80 dark:bg-slate-900/60"><RefreshCw className="mx-auto mb-2 h-5 w-5 animate-spin text-sky-500" /><span>正在加载 NAS 控制台用户列表...</span></div>
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-8 text-center text-xs text-slate-500 dark:border-slate-800/80 dark:bg-slate-900/60"><RefreshCw className="mx-auto mb-2 h-5 w-5 animate-spin text-sky-500" /><span>正在加载 MacBox 控制台用户列表...</span></div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {users.map((user) => {
@@ -111,12 +111,12 @@ export const NASUsersSection: React.FC<NASUsersSectionProps> = ({
     </div>
 
     {showAddModal && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"><div className="w-full max-w-md space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800"><div className="flex items-center space-x-2"><div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"><UserCheck className="h-4 w-4" /></div><div><h3 className="text-base font-bold text-slate-900 dark:text-white">添加新 NAS 控制台用户</h3><p className="text-xs text-slate-500 dark:text-slate-400">用于网页控制台登录与管理</p></div></div><button type="button" onClick={onCloseAdd} className="rounded-lg p-1 text-slate-400 transition hover:text-slate-600 dark:hover:text-white"><X className="h-5 w-5" /></button></div><form onSubmit={onCreate} className="space-y-3.5">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"><div className="w-full max-w-md space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900"><div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800"><div className="flex items-center space-x-2"><div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 dark:bg-sky-500/20 dark:text-sky-400"><UserCheck className="h-4 w-4" /></div><div><h3 className="text-base font-bold text-slate-900 dark:text-white">添加新 MacBox 控制台用户</h3><p className="text-xs text-slate-500 dark:text-slate-400">用于网页控制台登录与管理</p></div></div><button type="button" onClick={onCloseAdd} className="rounded-lg p-1 text-slate-400 transition hover:text-slate-600 dark:hover:text-white"><X className="h-5 w-5" /></button></div><form onSubmit={onCreate} className="space-y-3.5">
         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">用户名 *<input type="text" value={newUsername} onChange={(event) => onNewUsernameChange(event.target.value)} placeholder="英文字母、数字或下划线 (如 manager)" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-sky-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white" required /></label>
         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">显示昵称<input type="text" value={newDisplayName} onChange={(event) => onNewDisplayNameChange(event.target.value)} placeholder="用户备注名称 (可选)" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-sky-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white" /></label>
         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">初始登录密码 *<input type="password" value={newPassword} onChange={(event) => onNewPasswordChange(event.target.value)} placeholder="至少 8 位密码" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-sky-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white" required /></label>
         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">确认初始密码 *<input type="password" value={newConfirmPassword} onChange={(event) => onNewConfirmPasswordChange(event.target.value)} placeholder="再次输入密码" className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-sky-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white" required /></label>
-        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60"><span className="block text-xs font-semibold text-slate-700 dark:text-slate-300">角色与权限授权</span><div className="flex items-center space-x-4 text-xs"><label className="flex cursor-pointer items-center space-x-1.5"><input type="radio" name="nas-role" checked={newRole === 'admin'} onChange={() => onNewRoleChange('admin')} className="text-amber-500 focus:ring-amber-400" /><span className="flex items-center font-semibold text-amber-600 dark:text-amber-400"><Crown className="mr-1 h-3.5 w-3.5" />授权超级管理员</span></label><label className="flex cursor-pointer items-center space-x-1.5"><input type="radio" name="nas-role" checked={newRole === 'user'} onChange={() => onNewRoleChange('user')} className="text-sky-500 focus:ring-sky-400" /><span className="text-slate-700 dark:text-slate-300">普通用户</span></label></div></div>
+        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60"><span className="block text-xs font-semibold text-slate-700 dark:text-slate-300">角色与权限授权</span><div className="flex items-center space-x-4 text-xs"><label className="flex cursor-pointer items-center space-x-1.5"><input type="radio" name="console-role" checked={newRole === 'admin'} onChange={() => onNewRoleChange('admin')} className="text-amber-500 focus:ring-amber-400" /><span className="flex items-center font-semibold text-amber-600 dark:text-amber-400"><Crown className="mr-1 h-3.5 w-3.5" />授权超级管理员</span></label><label className="flex cursor-pointer items-center space-x-1.5"><input type="radio" name="console-role" checked={newRole === 'user'} onChange={() => onNewRoleChange('user')} className="text-sky-500 focus:ring-sky-400" /><span className="text-slate-700 dark:text-slate-300">普通用户</span></label></div></div>
         <div className="flex justify-end space-x-2 pt-2"><button type="button" onClick={onCloseAdd} className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">取消</button><button type="submit" disabled={actionLoading} className="rounded-xl bg-sky-500 px-5 py-2 text-xs font-bold text-white shadow-md shadow-sky-500/25 transition hover:bg-sky-600 disabled:opacity-50">{actionLoading ? '创建中...' : '确认创建用户'}</button></div>
       </form></div></div>
     )}

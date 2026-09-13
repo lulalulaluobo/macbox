@@ -45,7 +45,7 @@ func TestDirectoryDownloadScriptsAllowAuthorizedVMPathsButRejectRoot(t *testing.
 	} {
 		t.Run(name, func(t *testing.T) {
 			if strings.Contains(script, "realpath('/data')") {
-				t.Fatal("download script still hard-codes the NAS data root")
+		t.Fatal("download script still hard-codes the MacBox data root")
 			}
 			if !strings.Contains(script, "os.path.sep") {
 				t.Fatal("download script must continue protecting the VM root")
@@ -131,7 +131,7 @@ func TestIsSystemProtectedDir(t *testing.T) {
 		"/data/appdata",
 		"/etc/passwd",
 		"/usr/bin/env",
-		"/home/macnas/file.txt",
+		"/home/macbox/file.txt",
 	}
 	for _, p := range notProtected {
 		if isSystemProtectedDir(p) {

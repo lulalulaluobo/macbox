@@ -1,8 +1,8 @@
 [package]
-name = "macnas-desktop"
+name = "macbox-desktop"
 version = "0.1.0"
-description = "MacNAS desktop launcher"
-authors = ["MacNAS contributors"]
+description = "MacBox desktop launcher"
+authors = ["MacBox contributors"]
 edition = "2021"
 
 [build-dependencies]

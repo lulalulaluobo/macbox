@@ -4,7 +4,7 @@ export type ThemeMode = 'dark' | 'light' | 'system';
 
 export function getStoredTheme(): ThemeMode {
   if (typeof window === 'undefined') return 'dark';
-  const saved = localStorage.getItem('macnas-theme') as ThemeMode;
+  const saved = localStorage.getItem('macbox-theme') as ThemeMode;
   if (saved === 'light' || saved === 'dark' || saved === 'system') {
     return saved;
   }
@@ -14,7 +14,7 @@ export function getStoredTheme(): ThemeMode {
 export function applyTheme(theme: ThemeMode) {
   if (typeof window === 'undefined') return;
   const root = document.documentElement;
-  localStorage.setItem('macnas-theme', theme);
+  localStorage.setItem('macbox-theme', theme);
 
   let isDark = true;
   if (theme === 'light') {

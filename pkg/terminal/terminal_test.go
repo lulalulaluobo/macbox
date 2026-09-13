@@ -7,7 +7,7 @@ import "testing"
 func TestValidContainerRefAcceptsDockerNames(t *testing.T) {
 	valid := []string{
 		"jellyfin",
-		"macnas-jellyfin-1",
+		"macbox-jellyfin-1",
 		"my_app.v2",
 		"App.1",
 		"a",

@@ -1,8 +1,8 @@
 services:
   xunlei:
     image: cnk3x/xunlei:beta
-    container_name: macnas-xunlei
-    hostname: macnas-xunlei
+    container_name: macbox-xunlei
+    hostname: macbox-xunlei
     restart: unless-stopped
     cap_add:
       - SYS_ADMIN

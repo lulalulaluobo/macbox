@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/config"
 )
 
 // LocalMountCandidate is a safe, shallow scan result for the folder picker in
 // the Web UI. A browser cannot disclose the Mac's absolute path to a server,
-// so MacNAS offers well-known user folders and first-level mounted volumes as
+// so MacBox offers well-known user folders and first-level mounted volumes as
 // selectable candidates while retaining a manual path fallback for advanced
 // users.
 type LocalMountCandidate struct {

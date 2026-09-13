@@ -16,7 +16,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
     navigator.serviceWorker.register('/sw.js').then((registration) => {
       const announceUpdate = () => {
         if (registration.waiting) {
-          window.dispatchEvent(new CustomEvent('macnas-sw-update', {
+          window.dispatchEvent(new CustomEvent('macbox-sw-update', {
             detail: { registration },
           }));
         }

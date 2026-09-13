@@ -108,12 +108,12 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const [storageDisks, setStorageDisks] = useState<DiskInfo[]>([]);
   const [cloudMounts, setCloudMounts] = useState<CloudMount[]>([]);
   const [activeCloudMountId, setActiveCloudMountId] = useState<string | null>(() => {
-    try { return localStorage.getItem('macnas_active_cloud_mount') || null; } catch { return null; }
+    try { return localStorage.getItem('macbox_active_cloud_mount') || null; } catch { return null; }
   });
   const [showCloudMountModal, setShowCloudMountModal] = useState(false);
   const [diskNames, setDiskNames] = useState<Record<string, string>>(() => {
     try {
-      return JSON.parse(localStorage.getItem('macnas_disk_display_names') || '{}');
+      return JSON.parse(localStorage.getItem('macbox_disk_display_names') || '{}');
     } catch {
       return {};
     }
@@ -140,8 +140,8 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
 
   useEffect(() => {
     try {
-      if (activeCloudMountId) localStorage.setItem('macnas_active_cloud_mount', activeCloudMountId);
-      else localStorage.removeItem('macnas_active_cloud_mount');
+      if (activeCloudMountId) localStorage.setItem('macbox_active_cloud_mount', activeCloudMountId);
+      else localStorage.removeItem('macbox_active_cloud_mount');
     } catch {}
   }, [activeCloudMountId]);
 
@@ -298,7 +298,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
   const handleSaveDriveName = (driveId: string, nextName: string) => {
     const updated = { ...diskNames, [driveId]: nextName };
     setDiskNames(updated);
-    localStorage.setItem('macnas_disk_display_names', JSON.stringify(updated));
+    localStorage.setItem('macbox_disk_display_names', JSON.stringify(updated));
   };
 
   return (

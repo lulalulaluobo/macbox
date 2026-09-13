@@ -1,7 +1,7 @@
 {
   "id": "alist",
   "name": "Alist",
-  "description": "全能网盘聚合挂载中心，支持聚合阿里云盘、百度网盘、115、夸克、OneDrive、WebDAV 等数十种网盘到本地 NAS 统一浏览与串流播放。",
+  "description": "全能网盘聚合挂载中心，支持聚合阿里云盘、百度网盘、115、夸克、OneDrive、WebDAV 等数十种网盘到本地 MacBox 统一浏览与串流播放。",
   "version": "v3.36.0",
   "icon": "cloud",
   "category": "Cloud",

@@ -14,9 +14,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/luluen/mac-nas/pkg/cloud"
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/terminal"
+	"github.com/lulalulaluobo/macbox/pkg/cloud"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/terminal"
 )
 
 type quarkQRSession struct {
@@ -471,7 +471,7 @@ func (s *Server) handleCloudUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	tempFile, err := os.CreateTemp("", "macnas-quark-upload-*")
+	tempFile, err := os.CreateTemp("", "macbox-quark-upload-*")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "准备上传临时文件失败")
 		return
@@ -548,7 +548,7 @@ func (s *Server) handleCloudDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	destination := path.Clean(req.Destination)
 	if destination != "/data" && !strings.HasPrefix(destination, "/data/") {
-		writeError(w, http.StatusBadRequest, "下载目标必须位于 NAS 数据目录下")
+		writeError(w, http.StatusBadRequest, "下载目标必须位于 MacBox 数据目录下")
 		return
 	}
 	req.Destination = destination
@@ -561,7 +561,7 @@ func (s *Server) handleCloudDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithCancel(s.serverCtx)
-	job := s.jobs.addWithStage("cloud.download", "queued", 0, "准备下载到 NAS", cancel)
+	job := s.jobs.addWithStage("cloud.download", "queued", 0, "准备下载到 MacBox", cancel)
 	mountID := r.PathValue("id")
 	go func() {
 		err := s.runCloudDownload(ctx, job.ID, mountID, req)

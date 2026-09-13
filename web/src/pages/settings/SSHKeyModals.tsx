@@ -71,14 +71,14 @@ export const SSHKeyModals: React.FC<SSHKeyModalsProps> = ({
                 <div className="flex justify-between text-slate-400"><span>密钥指纹:</span><span className="text-slate-200">{generatedKeyResult.fingerprint}</span></div>
               </div>
               <div className="space-y-2 font-sans">
-                <h4 className="font-bold text-slate-200">使用指南（必须在运行 MacNAS 的 Mac 的 macOS“终端”中运行）:</h4>
+                <h4 className="font-bold text-slate-200">使用指南（必须在运行 MacBox 的 Mac 的 macOS“终端”中运行）:</h4>
                 <div className="space-y-2 rounded-xl border border-slate-800 bg-black/60 p-3 font-mono text-[11px] text-slate-300">
                   <div><span className="text-slate-500"># 步骤 1: 设置严格权限 (macOS / Linux 必需)</span><div className="select-all text-amber-300">chmod 600 ~/Downloads/{generatedKeyResult.filename}</div></div>
                   <div><span className="text-slate-500"># 步骤 2: 在 Mac 宿主机终端执行（端口 {sshConfig.sshLocalPort || 58107}）</span><div className="select-all text-sky-300">ssh -o StrictHostKeyChecking=accept-new -i ~/Downloads/{generatedKeyResult.filename} -p {sshConfig.sshLocalPort || 58107} root@127.0.0.1</div></div>
                   <div><span className="text-slate-500"># 步骤 3: 局域网其他设备（当前不提供默认直连）</span><div className="text-emerald-300">当前未开放宿主机 22 端口；运行 Mac 请始终使用步骤 2 的 127.0.0.1:{sshConfig.sshLocalPort || 58107}。</div></div>
                 </div>
               </div>
-              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-300/90">⚠️ <strong>安全提示</strong>: 私钥文件已自动下载至运行浏览器的 Mac 的 Downloads 文件夹中，文件名包含 `.txt` 扩展名也可以直接用于 SSH。为确保绝对安全，MacNAS 服务器端已彻底擦除私钥明文，请妥善保存该私钥文件。</div>
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-300/90">⚠️ <strong>安全提示</strong>: 私钥文件已自动下载至运行浏览器的 Mac 的 Downloads 文件夹中，文件名包含 `.txt` 扩展名也可以直接用于 SSH。为确保绝对安全，MacBox 服务器端已彻底擦除私钥明文，请妥善保存该私钥文件。</div>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-2">

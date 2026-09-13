@@ -2,10 +2,10 @@ import AppKit
 import Foundation
 import Darwin
 
-/// A small native menu-bar companion for the Web-first MacNAS distribution.
+/// A small native menu-bar companion for the Web-first MacBox distribution.
 ///
 /// The helper deliberately owns only processes and files that belong to
-/// MacNAS. It never scans or removes unrelated Lima instances, Docker data,
+/// MacBox. It never scans or removes unrelated Lima instances, Docker data,
 /// or host processes.
 final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private enum WebServiceState {
@@ -92,7 +92,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu = NSMenu()
         menu.delegate = self
 
-        statusMenuItem = NSMenuItem(title: "MacNAS · 检查中", action: nil, keyEquivalent: "")
+        statusMenuItem = NSMenuItem(title: "MacBox · 检查中", action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
         monitorHeaderItem = disabledItem("资源监控（每 5 秒更新）")
@@ -161,19 +161,19 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applyStatusVisual(_ state: WebServiceState) {
         webServiceState = state
-        statusMenuItem.title = "MacNAS · Web 服务\(state.label)（端口 \(port)）"
+        statusMenuItem.title = "MacBox · Web 服务\(state.label)（端口 \(port)）"
         statusMenuItem.image = symbolImage(state.symbolName, color: state.color, size: NSSize(width: 15, height: 15))
 
         if let button = statusItem.button {
             button.image = symbolImage("server.rack", color: state.color, size: NSSize(width: 18, height: 18))
                 ?? NSImage(named: NSImage.applicationIconName)
             button.image?.isTemplate = false
-            button.toolTip = "MacNAS：Web 服务\(state.label)"
+            button.toolTip = "MacBox：Web 服务\(state.label)"
         }
     }
 
     private func symbolImage(_ name: String, color: NSColor, size: NSSize) -> NSImage? {
-        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: "MacNAS")?
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: "MacBox")?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [color])) else {
             return nil
         }
@@ -275,28 +275,28 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if alreadyRunning {
                 self.actionInProgress = false
                 self.openWeb(nil)
-                self.showAlert(title: "MacNAS 已在运行", message: "Web 服务已经运行在端口 \(self.port)。")
+                self.showAlert(title: "MacBox 已在运行", message: "Web 服务已经运行在端口 \(self.port)。")
                 return
             }
 
             guard let binary = self.locateBackendBinary() else {
                 self.actionInProgress = false
-                self.showAlert(title: "找不到 MacNAS", message: "没有找到 macnas 可执行文件。请先运行发行包中的 install.sh，或从完整发行包启动菜单栏助手。", style: .warning)
+                self.showAlert(title: "找不到 MacBox", message: "没有找到 macbox 可执行文件。请先运行发行包中的 install.sh，或从完整发行包启动菜单栏助手。", style: .warning)
                 return
             }
 
             do {
-                let stateURL = self.fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".macnas", isDirectory: true)
+                let stateURL = self.fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".macbox", isDirectory: true)
                 try self.fileManager.createDirectory(at: stateURL, withIntermediateDirectories: true)
-                let logURL = stateURL.appendingPathComponent("macnas.log")
+                let logURL = stateURL.appendingPathComponent("macbox.log")
                 if !self.fileManager.fileExists(atPath: logURL.path) {
                     self.fileManager.createFile(atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
                 }
                 guard let logHandle = try? FileHandle(forWritingTo: logURL) else {
-                    throw NSError(domain: "MacNASMenu", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法打开菜单栏日志文件"])
+                    throw NSError(domain: "MacBoxMemu", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法打开菜单栏日志文件"])
                 }
                 try logHandle.seekToEnd()
-                logHandle.write(Data("\n[MacNAS Menu] 启动 Web 服务\n".utf8))
+                logHandle.write(Data("\n[MacBox Menu] 启动 Web 服务\n".utf8))
 
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: binary)
@@ -318,7 +318,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.waitForBackend(retries: 40)
             } catch {
                 self.actionInProgress = false
-                self.showAlert(title: "MacNAS 启动失败", message: error.localizedDescription, style: .warning)
+                self.showAlert(title: "MacBox 启动失败", message: error.localizedDescription, style: .warning)
             }
         }
     }
@@ -330,13 +330,13 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.actionInProgress = false
                 self.refreshStatus(nil)
                 self.openWeb(nil)
-                self.showAlert(title: "MacNAS 已启动", message: "Web 服务已启动并支持局域网访问。\n\n本机：http://127.0.0.1:\(self.port)\n日志：\(self.logPath())")
+                self.showAlert(title: "MacBox 已启动", message: "Web 服务已启动并支持局域网访问。\n\n本机：http://127.0.0.1:\(self.port)\n日志：\(self.logPath())")
                 return
             }
             if retries <= 0 {
                 self.actionInProgress = false
                 self.refreshStatus(nil)
-                self.showAlert(title: "MacNAS 正在启动", message: "启动命令已执行，但服务还没有返回。请稍后点击“刷新状态”，或打开日志查看原因。\n\n日志：\(self.logPath())", style: .warning)
+                self.showAlert(title: "MacBox 正在启动", message: "启动命令已执行，但服务还没有返回。请稍后点击“刷新状态”，或打开日志查看原因。\n\n日志：\(self.logPath())", style: .warning)
                 return
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -378,20 +378,20 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 completion?()
                 if !silent {
                     let message = stopped
-                        ? "MacNAS Web 服务已停止。"
-                        : "没有找到由 MacNAS 控制器启动的服务，未强制终止其他程序。"
-                    self.showAlert(title: stopped ? "MacNAS 已停止" : "MacNAS 未运行", message: message, style: stopped ? .informational : .warning)
+                        ? "MacBox Web 服务已停止。"
+                        : "没有找到由 MacBox 控制器启动的服务，未强制终止其他程序。"
+                    self.showAlert(title: stopped ? "MacBox 已停止" : "MacBox 未运行", message: message, style: stopped ? .informational : .warning)
                 }
             }
         }
     }
 
     @objc private func startLima(_ sender: Any?) {
-        runLima(arguments: ["start", "macnas", "--tty=false"], title: "启动 Lima 虚拟机")
+        runLima(arguments: ["start", configuredVMName(), "--tty=false"], title: "启动 Lima 虚拟机")
     }
 
     @objc private func stopLima(_ sender: Any?) {
-        runLima(arguments: ["stop", "macnas", "--tty=false"], title: "停止 Lima 虚拟机")
+        runLima(arguments: ["stop", configuredVMName(), "--tty=false"], title: "停止 Lima 虚拟机")
     }
 
     private func runLima(arguments: [String], title: String) {
@@ -421,7 +421,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func uninstallProgram(_ sender: Any?) {
-        guard confirm(title: "卸载 MacNAS 程序", message: "只移除 MacNAS 程序和菜单栏助手，保留 Lima 实例、Docker 数据和配置。继续吗？") else { return }
+        guard confirm(title: "卸载 MacBox 程序", message: "只移除 MacBox 程序和菜单栏助手，保留 Lima 实例、Docker 数据和配置。继续吗？") else { return }
         guard let script = locateScript("uninstall.sh") else {
             showAlert(title: "卸载失败", message: "找不到 uninstall.sh，请从完整发行包启动菜单栏助手。", style: .warning)
             return
@@ -432,7 +432,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func uninstallAll(_ sender: Any?) {
-        guard confirm(title: "彻底卸载 MacNAS", message: "将删除 MacNAS 专属 Lima 实例、管理盘、Docker 容器/镜像/卷、配置和程序。其他 Lima 实例及宿主机无关数据不会删除。继续吗？") else { return }
+        guard confirm(title: "彻底卸载 MacBox", message: "将删除 MacBox 专属 Lima 实例、管理盘、Docker 容器/镜像/卷、配置和程序。其他 Lima 实例及宿主机无关数据不会删除。继续吗？") else { return }
         guard let script = locateScript("uninstall.sh") else {
             showAlert(title: "卸载失败", message: "找不到 uninstall.sh，请从完整发行包启动菜单栏助手。", style: .warning)
             return
@@ -448,7 +448,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             self.actionInProgress = false
             if status == 0 {
-                self.showAlert(title: "MacNAS 已卸载", message: output.isEmpty ? "卸载操作已完成。" : String(output.suffix(1600)))
+                self.showAlert(title: "MacBox 已卸载", message: output.isEmpty ? "卸载操作已完成。" : String(output.suffix(1600)))
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     NSApplication.shared.terminate(nil)
                 }
@@ -476,7 +476,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func configuredPort() -> Int {
-        let path = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".macnas/config.yaml").path
+        let path = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".macbox/config.yaml").path
         guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else { return defaultPort }
         for line in contents.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -488,16 +488,36 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return defaultPort
     }
 
+    private func configuredVMName() -> String {
+        let path = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".macbox/config.yaml").path
+        guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else { return "macbox" }
+        var inVM = false
+        for line in contents.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "vm:" {
+                inVM = true
+                continue
+            }
+            if inVM && !line.hasPrefix(" ") && !line.hasPrefix("\t") {
+                inVM = false
+            }
+            guard inVM, trimmed.hasPrefix("name:") else { continue }
+            let value = trimmed.dropFirst("name:".count).trimmingCharacters(in: .whitespaces)
+            if !value.isEmpty { return String(value) }
+        }
+        return "macbox"
+    }
+
     private func locateBackendBinary() -> String? {
-        let installed = home + "/.local/share/macnas/bin/macnas"
+        let installed = home + "/.local/share/macbox/bin/macbox"
         if fileManager.isExecutableFile(atPath: installed) { return installed }
-        let release = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("bin/macnas").path
+        let release = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("bin/macbox").path
         if fileManager.isExecutableFile(atPath: release) { return release }
         return nil
     }
 
     private func locateScript(_ name: String) -> String? {
-        let installed = home + "/.local/share/macnas/\(name)"
+        let installed = home + "/.local/share/macbox/\(name)"
         if fileManager.isExecutableFile(atPath: installed) { return installed }
         let release = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(name).path
         if fileManager.isExecutableFile(atPath: release) { return release }
@@ -516,27 +536,27 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func launchAgentPath() -> String {
-        home + "/Library/LaunchAgents/com.macnas.server.plist"
+        home + "/Library/LaunchAgents/com.macbox.server.plist"
     }
 
     private func logPath() -> String {
-        home + "/.macnas/macnas.log"
+        home + "/.macbox/macbox.log"
     }
 
     private func writePID(_ pid: Int32) {
-        let path = home + "/.macnas/macnas.menu.pid"
+        let path = home + "/.macbox/macbox.menu.pid"
         try? String(pid).write(toFile: path, atomically: true, encoding: .utf8)
     }
 
     private func removePID() {
-        try? fileManager.removeItem(atPath: home + "/.macnas/macnas.menu.pid")
-        try? fileManager.removeItem(atPath: home + "/.macnas/macnas.command.pid")
+        try? fileManager.removeItem(atPath: home + "/.macbox/macbox.menu.pid")
+        try? fileManager.removeItem(atPath: home + "/.macbox/macbox.command.pid")
     }
 
     private func ownedBackendPID() -> Int32? {
-        var candidates: [String] = [home + "/.macnas/macnas.menu.pid", home + "/.macnas/macnas.command.pid"]
+        var candidates: [String] = [home + "/.macbox/macbox.menu.pid", home + "/.macbox/macbox.command.pid"]
         if let runningPID = backendProcess?.processIdentifier { candidates.insert(String(runningPID), at: 0) }
-        let binaries = [home + "/.local/share/macnas/bin/macnas", Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("bin/macnas").path]
+        let binaries = [home + "/.local/share/macbox/bin/macbox", Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("bin/macbox").path]
         for value in candidates {
             guard let pid = Int32(value.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1 else { continue }
             let command = runSync("/bin/ps", arguments: ["-p", String(pid), "-o", "command="])
@@ -614,7 +634,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 @main
-struct MacNASMenuMain {
+struct MacBoxMemuMain {
     static func main() {
         let application = NSApplication.shared
         let delegate = MenuBarDelegate()

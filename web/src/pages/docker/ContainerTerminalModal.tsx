@@ -75,7 +75,7 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
 
     ws.onopen = () => {
       setConnected(true);
-      term.write(`\r\n\x1b[36m[MacNAS] 已通过 docker exec 成功进入容器 [${containerName}] 终端会话！\x1b[0m\r\n\r\n`);
+      term.write(`\r\n\x1b[36m[MacBox] 已通过 docker exec 成功进入容器 [${containerName}] 终端会话！\x1b[0m\r\n\r\n`);
       const dims = fitAddon.proposeDimensions();
       if (dims) {
         ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
@@ -92,12 +92,12 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
 
     ws.onclose = () => {
       setConnected(false);
-      term.write(`\r\n\x1b[33m[MacNAS] 容器 [${containerName}] 终端连接已退出或断开。\x1b[0m\r\n`);
+      term.write(`\r\n\x1b[33m[MacBox] 容器 [${containerName}] 终端连接已退出或断开。\x1b[0m\r\n`);
     };
 
     ws.onerror = () => {
       setConnected(false);
-      term.write(`\r\n\x1b[31m[MacNAS] 连接容器终端出现异常，请确认容器是否处于运行状态。\x1b[0m\r\n`);
+      term.write(`\r\n\x1b[31m[MacBox] 连接容器终端出现异常，请确认容器是否处于运行状态。\x1b[0m\r\n`);
     };
 
     term.onData((data) => {

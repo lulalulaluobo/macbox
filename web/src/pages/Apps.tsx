@@ -179,7 +179,7 @@ export const Apps: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-3">
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">NAS 应用商城</h2>
+            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">应用商城</h2>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 font-medium">
               Docker 容器引擎
             </span>

@@ -195,6 +195,38 @@ func TestNewPasswordsUseBcryptAndPasswordChangeRevokesSessions(t *testing.T) {
 	}
 }
 
+func TestReplaceUsersJSONReplacesUsersAndRevokesSessions(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := NewManager(dir)
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	if _, err := mgr.CreateInitialAdmin(CreateUserRequest{
+		Username: testAdminUsername,
+		Password: testAdminPassword,
+	}); err != nil {
+		t.Fatalf("CreateInitialAdmin() error = %v", err)
+	}
+	token, _, err := mgr.Login(testAdminUsername, testAdminPassword, false)
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "users.json"))
+	if err != nil {
+		t.Fatalf("read users.json: %v", err)
+	}
+	if err := mgr.ReplaceUsersJSON(data); err != nil {
+		t.Fatalf("ReplaceUsersJSON() error = %v", err)
+	}
+	if _, err := mgr.ValidateToken(token); err == nil {
+		t.Fatal("replacing users must revoke existing sessions")
+	}
+	if mgr.NeedsSetup() {
+		t.Fatal("replacing users with an administrator should not require setup")
+	}
+}
+
 func TestUpdateUserValidationIsAtomic(t *testing.T) {
 	dir := t.TempDir()
 	mgr, err := NewManager(dir)

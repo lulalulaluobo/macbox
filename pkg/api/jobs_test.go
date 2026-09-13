@@ -57,7 +57,7 @@ func TestJobManagerPersistsProgressStage(t *testing.T) {
 }
 
 func TestPublicJobErrorHidesHostSpecificCommandOutput(t *testing.T) {
-	if got := publicJobError(errors.New(`/Users/example/.lima/macnas: limactl start failed`)); got != "后台操作失败，请打开诊断中心查看具体检查结果" {
+	if got := publicJobError(errors.New(`/Users/example/.lima/macbox: limactl start failed`)); got != "后台操作失败，请打开诊断中心查看具体检查结果" {
 		t.Fatalf("host-specific job error was not summarized: %q", got)
 	}
 	if got := publicJobError(errors.New("数据盘尚未挂载")); got != "数据盘尚未挂载" {

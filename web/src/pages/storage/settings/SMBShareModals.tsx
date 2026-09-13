@@ -108,7 +108,7 @@ export const SMBShareModals: React.FC<SMBShareModalsProps> = ({
               >
                 <FolderOpen className="h-5 w-5 shrink-0 text-sky-500" />
                 <span className={`min-w-0 flex-1 truncate font-mono text-sm ${shareFormPath ? 'text-slate-900 dark:text-white' : 'text-slate-400'}`}>
-                  {shareFormPath || '点击选择 NAS 中的文件夹'}
+                  {shareFormPath || '点击选择 MacBox 中的文件夹'}
                 </span>
                 <span className="shrink-0 text-xs font-semibold text-sky-600 dark:text-sky-400">选择</span>
               </button>

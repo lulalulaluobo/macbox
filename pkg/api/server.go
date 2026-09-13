@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/luluen/mac-nas/pkg/apps"
-	"github.com/luluen/mac-nas/pkg/auth"
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/docker"
-	"github.com/luluen/mac-nas/pkg/samba"
-	"github.com/luluen/mac-nas/pkg/system"
-	"github.com/luluen/mac-nas/pkg/terminal"
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/apps"
+	"github.com/lulalulaluobo/macbox/pkg/auth"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/docker"
+	"github.com/lulalulaluobo/macbox/pkg/samba"
+	"github.com/lulalulaluobo/macbox/pkg/system"
+	"github.com/lulalulaluobo/macbox/pkg/terminal"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 	"log"
 	"net"
 	"net/http"
@@ -54,6 +54,7 @@ type Server struct {
 	storageOpActive bool
 	dockerOpMu      sync.Mutex
 	dockerOpActive  bool
+	backupRestoreMu sync.Mutex
 	jobs            *jobManager
 	cloudAuthMu     sync.Mutex
 	quarkQR         map[string]*quarkQRSession
@@ -61,7 +62,7 @@ type Server struct {
 
 type contextKey string
 
-const userContextKey contextKey = "macnas-user"
+const userContextKey contextKey = "macbox-user"
 
 // JSON requests are control-plane operations. Keep them small so malformed
 // or hostile payloads cannot make every handler allocate unbounded memory.
@@ -69,7 +70,7 @@ const userContextKey contextKey = "macnas-user"
 // handler and are deliberately not covered by this cap.
 const maxJSONBodyBytes = 8 << 20
 
-const sessionCookieName = "macnas_session"
+const sessionCookieName = "macbox_session"
 
 func configuredOrigins(raw string) map[string]struct{} {
 	origins := make(map[string]struct{})
@@ -133,7 +134,7 @@ func (s *Server) hostAllowed(r *http.Request) bool {
 
 func (s *Server) originAllowed(r *http.Request, origin string) bool {
 	// Same-origin requests are always allowed. Cross-origin development or
-	// reverse-proxy deployments must opt in via MACNAS_ALLOWED_ORIGINS.
+	// reverse-proxy deployments must opt in via MACBOX_ALLOWED_ORIGINS.
 	if origin == "http://"+r.Host || origin == "https://"+r.Host {
 		return true
 	}
@@ -170,7 +171,7 @@ func configuredProxies(raw string) []*net.IPNet {
 		if _, network, err := net.ParseCIDR(entry); err == nil {
 			networks = append(networks, network)
 		} else {
-			log.Printf("[MacNAS API] ignoring invalid MACNAS_TRUSTED_PROXIES entry %q", entry)
+			log.Printf("[MacBox API] ignoring invalid MACBOX_TRUSTED_PROXIES entry %q", entry)
 		}
 	}
 	return networks
@@ -346,9 +347,9 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 		authMgr:         authMgr,
 		authInitErr:     authInitErr,
 		projectRoot:     projectRoot,
-		allowedOrigins:  configuredOrigins(os.Getenv("MACNAS_ALLOWED_ORIGINS")),
-		allowedHosts:    configuredHosts(os.Getenv("MACNAS_ALLOWED_HOSTS")),
-		trustedProxies:  configuredProxies(os.Getenv("MACNAS_TRUSTED_PROXIES")),
+		allowedOrigins:  configuredOrigins(os.Getenv("MACBOX_ALLOWED_ORIGINS")),
+		allowedHosts:    configuredHosts(os.Getenv("MACBOX_ALLOWED_HOSTS")),
+		trustedProxies:  configuredProxies(os.Getenv("MACBOX_TRUSTED_PROXIES")),
 		uploadSlots:     make(chan struct{}, 2),
 		mux:             http.NewServeMux(),
 		serverCtx:       serverCtx,
@@ -386,7 +387,7 @@ func (s *Server) Close() {
 		select {
 		case <-done:
 		case <-time.After(15 * time.Second):
-			log.Printf("[MacNAS API] timed out waiting for background operations to stop")
+			log.Printf("[MacBox API] timed out waiting for background operations to stop")
 		}
 	})
 }
@@ -442,7 +443,7 @@ func (s *Server) scheduleMountSync() {
 		ctx, cancel := context.WithTimeout(base, 2*time.Minute)
 		defer cancel()
 		if err := s.vmMgr.SyncMounts(ctx); err != nil {
-			log.Printf("[MacNAS API] mount sync failed: %v", err)
+			log.Printf("[MacBox API] mount sync failed: %v", err)
 		}
 	}()
 }
@@ -508,7 +509,7 @@ func (s *Server) Handler() http.Handler {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") && !s.hostAllowed(r) {
-			writeError(w, http.StatusMisdirectedRequest, "请求 Host 未被允许，请使用 MacNAS 的局域网地址")
+			writeError(w, http.StatusMisdirectedRequest, "请求 Host 未被允许，请使用 MacBox 的局域网地址")
 			return
 		}
 		if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
@@ -534,6 +535,7 @@ func (s *Server) Handler() http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			// Whitelisted unauthenticated endpoints
 			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" ||
+				(r.URL.Path == "/api/system/backup/restore" && s.authMgr != nil && s.authMgr.NeedsSetup() && s.isLoopbackRequest(r)) ||
 				(r.URL.Path == "/api/system/menubar-status" && s.isLoopbackRequest(r)) {
 				s.mux.ServeHTTP(w, r)
 				return
@@ -582,7 +584,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 		if len(logMsg) > 2048 {
 			logMsg = logMsg[:2048] + "…"
 		}
-		log.Printf("[MacNAS API] internal error: %s", logMsg)
+		log.Printf("[MacBox API] internal error: %s", logMsg)
 		msg = "服务器内部错误"
 	}
 	writeJSON(w, status, map[string]string{"error": msg})

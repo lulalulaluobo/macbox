@@ -1,7 +1,7 @@
 {
-  "name": "MacNAS 控制台",
-  "short_name": "MacNAS",
-  "description": "Mac mini 家庭服务器控制中心",
+  "name": "MacBox 控制台",
+  "short_name": "MacBox",
+  "description": "macOS 上的轻量级自托管服务中枢",
   "id": "/",
   "start_url": "/",
   "scope": "/",
@@ -11,7 +11,7 @@
   "background_color": "#f4faff",
   "icons": [
     {
-      "src": "/icons/macnas-mark.svg",
+      "src": "/icons/macbox-mark.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

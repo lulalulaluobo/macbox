@@ -3,18 +3,22 @@ import {
   Coffee,
   Cpu,
   HardDrive,
+  Plus,
   Play,
   Rocket,
   RotateCw,
   Server,
+  Settings2,
   Sliders,
   Square,
   X,
 } from 'lucide-react';
-import { ContainerInfo, DockerServiceShortcut, SystemOverview } from '../types';
+import { ContainerInfo, ServiceShortcut, ServiceShortcutInput, SystemOverview } from '../types';
 import { api } from '../api';
 import { DockerServiceIcon } from '../components/DockerServiceIcon';
-import { DOCKER_SERVICE_SHORTCUTS_CHANGED_EVENT, loadDockerServiceShortcuts, saveDockerServiceShortcuts } from '../utils/dockerServiceShortcuts';
+import { clearLegacyDockerServiceShortcuts, loadDockerServiceShortcuts } from '../utils/dockerServiceShortcuts';
+import { ServiceShortcutManagerModal } from './ServiceShortcutManagerModal';
+import { ServiceShortcutModal } from './ServiceShortcutModal';
 
 type DashboardTarget = 'storage' | 'docker' | 'apps' | 'settings';
 
@@ -22,9 +26,10 @@ interface DashboardProps {
   overview?: SystemOverview;
   onRefresh: () => void;
   onNavigateTab: (tab: DashboardTarget) => void;
+  isAdmin: boolean;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNavigateTab }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNavigateTab, isAdmin }) => {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [powerLoading, setPowerLoading] = useState(false);
   const [serviceLoading, setServiceLoading] = useState(false);
@@ -36,8 +41,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
   const [editMemory, setEditMemory] = useState(4);
   const [editDisk, setEditDisk] = useState(20);
   const [dockerServices, setDockerServices] = useState<ContainerInfo[]>([]);
-  const [serviceShortcuts, setServiceShortcuts] = useState<DockerServiceShortcut[]>(() => loadDockerServiceShortcuts());
-  const [dockerListLoaded, setDockerListLoaded] = useState(false);
+  const [serviceShortcuts, setServiceShortcuts] = useState<ServiceShortcut[]>([]);
+  const [showServiceManager, setShowServiceManager] = useState(false);
+  const [editingServiceShortcut, setEditingServiceShortcut] = useState<ServiceShortcut | null>(null);
+  const [showServiceModal, setShowServiceModal] = useState(false);
 
   const sys = overview?.system;
   const vm = overview?.vm;
@@ -55,7 +62,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
         const containers = await api.getContainers();
         if (active) {
           setDockerServices(containers || []);
-          setDockerListLoaded(true);
         }
       } catch {
         // A transient Docker/API error must not delete the user's shortcuts.
@@ -71,39 +77,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     };
   }, []);
 
-  // Service shortcuts are browser-local settings. Reconcile them with the
-  // authoritative Docker list so deleting a container also removes its home
-  // page entry, while a temporary API failure cannot wipe valid shortcuts.
   useEffect(() => {
-    if (!dockerListLoaded) return;
-    const stored = loadDockerServiceShortcuts();
-    const valid = stored.filter((shortcut) => dockerServices.some((container) => (
-      container.id === shortcut.id.replace(/^container:/, '') || container.name === shortcut.containerName
-    )));
-    setServiceShortcuts(valid);
-    if (valid.length !== stored.length) saveDockerServiceShortcuts(valid);
-  }, [dockerListLoaded, dockerServices]);
-
-  useEffect(() => {
-    const loadShortcuts = () => {
-      const shortcuts = loadDockerServiceShortcuts();
-      if (!dockerListLoaded) {
-        setServiceShortcuts(shortcuts);
-        return;
+    let active = true;
+    const loadServiceShortcuts = async () => {
+      try {
+        const result = await api.getServiceShortcuts();
+        let shortcuts = result.shortcuts || [];
+        // Preserve the old browser-local Docker shortcuts once, then move
+        // them into the shared server-side configuration.
+        if (isAdmin) {
+          const legacy = loadDockerServiceShortcuts();
+          const knownIDs = new Set(shortcuts.map((shortcut) => shortcut.id));
+          const pending = legacy.filter((shortcut) => !knownIDs.has(shortcut.id));
+          const migrated: ServiceShortcut[] = [];
+          for (const shortcut of pending) {
+            try {
+              const created = await api.createServiceShortcut(shortcut);
+              migrated.push(created.shortcut);
+              knownIDs.add(created.shortcut.id);
+            } catch {
+              // A single legacy item should not prevent the rest from loading.
+            }
+          }
+          if (legacy.length > 0 && migrated.length === pending.length) clearLegacyDockerServiceShortcuts();
+          shortcuts = [...shortcuts, ...migrated];
+        }
+        if (active) setServiceShortcuts(shortcuts);
+      } catch {
+        // Keep the dashboard usable when navigation configuration is briefly unavailable.
       }
-      const valid = shortcuts.filter((shortcut) => dockerServices.some((container) => (
-        container.id === shortcut.id.replace(/^container:/, '') || container.name === shortcut.containerName
-      )));
-      setServiceShortcuts(valid);
-      if (valid.length !== shortcuts.length) saveDockerServiceShortcuts(valid);
     };
-    window.addEventListener('storage', loadShortcuts);
-    window.addEventListener(DOCKER_SERVICE_SHORTCUTS_CHANGED_EVENT, loadShortcuts);
+    void loadServiceShortcuts();
     return () => {
-      window.removeEventListener('storage', loadShortcuts);
-      window.removeEventListener(DOCKER_SERVICE_SHORTCUTS_CHANGED_EVENT, loadShortcuts);
+      active = false;
     };
-  }, [dockerListLoaded, dockerServices]);
+  }, [isAdmin]);
 
   const notify = (text: string) => {
     setMessage(text);
@@ -204,19 +212,61 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     { label: '存储', value: selectedDisk?.totalSizeString || '--', progress: selectedDisk?.usedPercent || 0, icon: HardDrive, color: 'text-cyan-500', bar: 'from-cyan-400 to-sky-500' },
   ];
 
-  const serviceEntries = serviceShortcuts.map((shortcut) => ({
+  const serviceEntries = serviceShortcuts.filter((shortcut) => shortcut.enabled).map((shortcut) => ({
     shortcut,
-    container: dockerServices.find((container) => (
-      container.id === shortcut.id.replace(/^container:/, '') || container.name === shortcut.containerName
-    )),
+    container: shortcut.source === 'docker'
+      ? dockerServices.find((container) => (
+        container.id === shortcut.containerId ||
+        container.id === shortcut.id.replace(/^container:/, '') ||
+        container.name === shortcut.containerName
+      ))
+      : undefined,
   }));
 
-  const openDockerService = (shortcut: DockerServiceShortcut, container?: ContainerInfo) => {
-    if (container?.state !== 'running') {
-      notify(container ? `容器 ${container.name} 当前未运行，请先启动容器` : `未找到容器 ${shortcut.containerName}，请重新配置服务导航`);
+  const openService = (shortcut: ServiceShortcut, container?: ContainerInfo) => {
+    if (shortcut.source === 'docker' && container?.state !== 'running') {
+      notify(container ? `容器 ${container.name} 当前未运行，请先启动容器` : `未找到容器 ${shortcut.containerName || shortcut.name}，请重新配置服务导航`);
       return;
     }
     window.open(shortcut.url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleSaveManualService = async (shortcut: ServiceShortcutInput) => {
+    const result = shortcut.id
+      ? await api.updateServiceShortcut(shortcut.id, shortcut)
+      : await api.createServiceShortcut(shortcut);
+    setServiceShortcuts((current) => shortcut.id
+      ? current.map((item) => item.id === result.shortcut.id ? result.shortcut : item)
+      : [...current, result.shortcut]);
+    setShowServiceModal(false);
+    setEditingServiceShortcut(null);
+    notify(shortcut.id ? '服务导航已更新' : '服务导航已添加');
+  };
+
+  const handleDeleteService = async (id: string) => {
+    try {
+      await api.deleteServiceShortcut(id);
+      setServiceShortcuts((current) => current.filter((item) => item.id !== id));
+      notify('服务导航已删除');
+    } catch (err: any) {
+      notify(`删除失败：${err?.message || '服务导航操作失败'}`);
+    }
+  };
+
+  const handleMoveService = async (id: string, direction: -1 | 1) => {
+    const index = serviceShortcuts.findIndex((item) => item.id === id);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= serviceShortcuts.length) return;
+    const previous = [...serviceShortcuts];
+    const next = [...serviceShortcuts];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    setServiceShortcuts(next);
+    try {
+      await api.reorderServiceShortcuts(next.map((item) => item.id));
+    } catch (err: any) {
+      setServiceShortcuts(previous);
+      notify(`排序失败：${err?.message || '服务导航操作失败'}`);
+    }
   };
 
   return (
@@ -232,7 +282,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sky-500 dark:bg-sky-500/10 dark:text-sky-300"><Server className="h-5 w-5" /></span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-lg font-black tracking-tight text-slate-900 dark:text-white">Mac mini</h1>
+            <h1 className="truncate text-lg font-black tracking-tight text-slate-900 dark:text-white">MacBox</h1>
             {overview?.configDirty && <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-bold text-amber-600 dark:bg-amber-500/10 dark:text-amber-300">待重启</span>}
           </div>
           <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-slate-500"><span className={`h-2 w-2 rounded-full ${isVMRunning ? 'bg-emerald-500' : 'bg-amber-500'}`} /><span className="truncate">{isVMRunning ? `运行中 · ${sys?.uptimeString || '状态稳定'}` : vm?.status || '未启动'}</span></div>
@@ -255,36 +305,49 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
 
       <section className="rounded-[22px] border border-slate-200/80 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900/75 sm:p-4">
         <div className="flex items-center justify-between gap-3 px-1">
-          <div>
-            <h2 className="text-xs font-black text-slate-900 dark:text-white">Docker 服务导航</h2>
+          <div className="flex min-w-0 items-center gap-2">
+            <h2 className="text-xs font-black text-slate-900 dark:text-white">服务导航</h2>
+            {serviceEntries.length > 0 && <span className="shrink-0 text-[10px] font-semibold text-slate-400">{serviceEntries.length} 个服务</span>}
           </div>
-          {serviceEntries.length > 0 && <span className="shrink-0 text-[10px] font-semibold text-slate-400">{serviceEntries.length} 个服务</span>}
+          <div className="flex shrink-0 items-center gap-1">
+            {isAdmin && (
+              <button type="button" onClick={() => { setEditingServiceShortcut(null); setShowServiceModal(true); }} className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 transition hover:bg-sky-100 dark:bg-sky-500/10 dark:text-sky-300 dark:hover:bg-sky-500/20" aria-label="添加手动服务" title="添加手动服务">
+                <Plus className="h-4 w-4" />
+              </button>
+            )}
+            {isAdmin && (serviceShortcuts.length > 0 || !serviceEntries.length) && (
+              <button type="button" onClick={() => setShowServiceManager(true)} className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-sky-600 dark:hover:bg-slate-800 dark:hover:text-sky-300" aria-label="管理服务导航" title="管理服务导航">
+                <Settings2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {serviceEntries.length === 0 ? (
           <div className="mt-2 flex min-h-20 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 text-center text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-400">
-            暂无主页服务，前往 Docker → 容器，点击容器右侧「+」添加
+            暂无主页服务；管理员可点击右上角「+」添加，Docker 服务可在容器页面加入
           </div>
         ) : (
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {serviceEntries.map(({ shortcut, container }) => {
-              const isRunning = container?.state === 'running';
+              const isManual = shortcut.source === 'manual';
+              const isRunning = isManual || container?.state === 'running';
               const serviceContent = (
                 <>
                   <span className={`flex h-10 w-10 items-center justify-center rounded-2xl ${isRunning ? 'bg-sky-50 text-sky-500 dark:bg-sky-500/10 dark:text-sky-300' : 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'}`}>
                     <DockerServiceIcon name={shortcut.icon} className="h-5 w-5" />
                   </span>
                   <span className={`mt-1.5 max-w-full truncate text-xs font-bold ${isRunning ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`} title={shortcut.name}>{shortcut.name}</span>
-                  <span className={`mt-0.5 text-[9px] ${isRunning ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>{isRunning ? '运行中 · 点击打开' : '容器未运行'}</span>
+                  <span className={`mt-0.5 max-w-full truncate text-[9px] ${isRunning ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>{isManual ? '外部服务 · 点击打开' : isRunning ? '运行中 · 点击打开' : '容器未运行'}</span>
                 </>
               );
 
               return isRunning ? (
-                <a key={shortcut.id} href={shortcut.url} target="_blank" rel="noopener noreferrer" className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-sky-50 dark:hover:bg-sky-500/10" title={`打开 ${shortcut.name}：${shortcut.url}`}>
+                <button key={shortcut.id} type="button" onClick={() => openService(shortcut, container)} className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-sky-50 dark:hover:bg-sky-500/10" title={`打开 ${shortcut.name}：${shortcut.url}`}>
                   {serviceContent}
-                </a>
+                </button>
               ) : (
-                <button key={shortcut.id} type="button" onClick={() => openDockerService(shortcut, container)} className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-slate-50 dark:hover:bg-slate-800/60" title={`${shortcut.name} 当前不可用`}>
+                <button key={shortcut.id} type="button" onClick={() => openService(shortcut, container)} className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-slate-50 dark:hover:bg-slate-800/60" title={`${shortcut.name} 当前不可用`}>
                   {serviceContent}
                 </button>
               );
@@ -318,6 +381,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
             )}
           </div>
         </div>
+      )}
+
+      {showServiceModal && (
+        <ServiceShortcutModal
+          initialShortcut={editingServiceShortcut || undefined}
+          onClose={() => { setShowServiceModal(false); setEditingServiceShortcut(null); }}
+          onSaved={handleSaveManualService}
+        />
+      )}
+
+      {showServiceManager && (
+        <ServiceShortcutManagerModal
+          shortcuts={serviceShortcuts}
+          onClose={() => setShowServiceManager(false)}
+          onEdit={(shortcut) => { setEditingServiceShortcut(shortcut); setShowServiceManager(false); setShowServiceModal(true); }}
+          onDelete={handleDeleteService}
+          onMove={handleMoveService}
+        />
       )}
     </div>
   );

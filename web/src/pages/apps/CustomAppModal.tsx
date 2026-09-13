@@ -12,7 +12,7 @@ interface CustomAppModalProps {
 const SAMPLE_YAML = `services:
   app:
     image: amir20/dozzle:latest
-    container_name: macnas-dozzle
+    container_name: macbox-dozzle
     restart: unless-stopped
     ports:
       - "8888:8080"

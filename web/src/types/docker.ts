@@ -21,13 +21,25 @@ export interface ContainerInfo {
   project?: string;
 }
 
-export interface DockerServiceShortcut {
+export interface ServiceShortcut {
   id: string;
-  containerName: string;
+  source: 'docker' | 'manual';
+  containerId?: string;
+  containerName?: string;
   name: string;
   url: string;
   icon: string;
+  description?: string;
+  enabled: boolean;
 }
+
+export interface DockerServiceShortcut extends ServiceShortcut {
+  source: 'docker';
+  containerName: string;
+  containerId?: string;
+}
+
+export type ServiceShortcutInput = Omit<ServiceShortcut, 'id'> & { id?: string };
 
 export interface ImageInfo {
   id: string;

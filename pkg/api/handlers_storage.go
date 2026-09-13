@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/storage"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/storage"
 	"log"
 	"net/http"
 	"time"
@@ -32,7 +32,7 @@ func (s *Server) handleStorageDisks(w http.ResponseWriter, r *http.Request) {
 		// physical disks and the configured binding are still readable. Keep
 		// those parts available so the user can open storage settings and
 		// unbind/restore the internal backup.
-		log.Printf("[MacNAS Storage] managed disk discovery failed; returning degraded storage status: %v", managedErr)
+		log.Printf("[MacBox Storage] managed disk discovery failed; returning degraded storage status: %v", managedErr)
 		managed = []storage.ManagedDisk{}
 	}
 
@@ -76,7 +76,7 @@ func (s *Server) handleStorageBind(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":          "success",
-		"message":         "外接盘已成功绑定为 NAS 数据镜像，重启虚拟机后生效",
+		"message":         "外接盘已成功绑定为 MacBox 数据镜像，重启虚拟机后生效",
 		"dataPath":        imgPath,
 		"requiresRestart": true,
 	})
@@ -132,7 +132,7 @@ func (s *Server) handleStorageBindSecondary(w http.ResponseWriter, r *http.Reque
 
 	if err := s.regenerateVMConfig(); err != nil {
 		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
-			log.Printf("[MacNAS Storage] 回滚第二存储卷配置失败: %v", restoreErr)
+			log.Printf("[MacBox Storage] 回滚第二存储卷配置失败: %v", restoreErr)
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
 		return
@@ -162,7 +162,7 @@ func (s *Server) handleStorageUnbindSecondary(w http.ResponseWriter, r *http.Req
 
 	if err := s.regenerateVMConfig(); err != nil {
 		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
-			log.Printf("[MacNAS Storage] 回滚第二存储卷配置失败: %v", restoreErr)
+			log.Printf("[MacBox Storage] 回滚第二存储卷配置失败: %v", restoreErr)
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
 		return
@@ -202,7 +202,7 @@ func (s *Server) handleStorageMountsList(w http.ResponseWriter, r *http.Request)
 	response["health"] = health
 	if probeErr != nil {
 		response["healthError"] = "无法完成虚拟机挂载探针，请稍后重试"
-		log.Printf("[MacNAS Storage] local mount probe failed: %v", probeErr)
+		log.Printf("[MacBox Storage] local mount probe failed: %v", probeErr)
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -231,7 +231,7 @@ func (s *Server) handleStorageMountsAdd(w http.ResponseWriter, r *http.Request) 
 
 	if err := s.regenerateVMConfig(); err != nil {
 		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
-			log.Printf("[MacNAS Storage] 回滚直通目录配置失败: %v", restoreErr)
+			log.Printf("[MacBox Storage] 回滚直通目录配置失败: %v", restoreErr)
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
 		return
@@ -269,7 +269,7 @@ func (s *Server) handleStorageMountsToggle(w http.ResponseWriter, r *http.Reques
 
 	if err := s.regenerateVMConfig(); err != nil {
 		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
-			log.Printf("[MacNAS Storage] 回滚直通目录配置失败: %v", restoreErr)
+			log.Printf("[MacBox Storage] 回滚直通目录配置失败: %v", restoreErr)
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
 		return
@@ -311,7 +311,7 @@ func (s *Server) handleStorageMountsDelete(w http.ResponseWriter, r *http.Reques
 
 	if err := s.regenerateVMConfig(); err != nil {
 		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
-			log.Printf("[MacNAS Storage] 回滚直通目录配置失败: %v", restoreErr)
+			log.Printf("[MacBox Storage] 回滚直通目录配置失败: %v", restoreErr)
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
 		return
@@ -372,18 +372,18 @@ func (s *Server) handleStorageMountsWritable(w http.ResponseWriter, r *http.Requ
 			break
 		}
 	}
-	if out, remountErr := s.vmMgr.Exec(r.Context(), "sudo", "mount", "-o", "remount,"+mode, "/mnt/macnas-mounts/"+id); remountErr != nil {
-		log.Printf("[MacNAS Storage] 直通目录 remount 未立即生效: %s (%v)", out, remountErr)
+	if out, remountErr := s.vmMgr.Exec(r.Context(), "sudo", "mount", "-o", "remount,"+mode, "/mnt/macbox-mounts/"+id); remountErr != nil {
+		log.Printf("[MacBox Storage] 直通目录 remount 未立即生效: %s (%v)", out, remountErr)
 	}
 	if target != "" {
 		if out, remountErr := s.vmMgr.Exec(r.Context(), "sudo", "mount", "-o", "remount,"+mode, "/data/"+target); remountErr != nil {
-			log.Printf("[MacNAS Storage] 数据目录 remount 未立即生效: %s (%v)", out, remountErr)
+			log.Printf("[MacBox Storage] 数据目录 remount 未立即生效: %s (%v)", out, remountErr)
 		}
 	}
 
 	if err := s.regenerateVMConfig(); err != nil {
 		if restoreErr := s.restoreConfigSnapshot(previousConfig); restoreErr != nil {
-			log.Printf("[MacNAS Storage] 回滚直通目录配置失败: %v", restoreErr)
+			log.Printf("[MacBox Storage] 回滚直通目录配置失败: %v", restoreErr)
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("保存后重新生成虚拟机配置失败: %v", err))
 		return

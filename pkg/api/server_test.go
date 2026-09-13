@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/luluen/mac-nas/pkg/auth"
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/auth"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 )
 
 func requestWithUser(user *auth.User) *http.Request {
@@ -72,7 +72,7 @@ func TestAdminOnlyRequiresAdministrator(t *testing.T) {
 	}
 }
 
-func TestTerminalPathIsNASData(t *testing.T) {
+func TestTerminalPathIsDataRoot(t *testing.T) {
 	tests := map[string]bool{
 		"/data":                 true,
 		"/data/files/report.md": true,
@@ -82,8 +82,8 @@ func TestTerminalPathIsNASData(t *testing.T) {
 		"relative/path":         false,
 	}
 	for input, want := range tests {
-		if got := terminalPathIsNASData(input); got != want {
-			t.Errorf("terminalPathIsNASData(%q) = %v, want %v", input, got, want)
+		if got := terminalPathIsDataRoot(input); got != want {
+			t.Errorf("terminalPathIsDataRoot(%q) = %v, want %v", input, got, want)
 		}
 	}
 }
@@ -150,7 +150,7 @@ func TestHandlerSetsSecurityHeaders(t *testing.T) {
 func TestHandlerRejectsUnregisteredAPIHost(t *testing.T) {
 	server := &Server{
 		mux:          http.NewServeMux(),
-		allowedHosts: configuredHosts("nas.example.test"),
+		allowedHosts: configuredHosts("storage.example.test"),
 	}
 	handler := server.Handler()
 
@@ -162,7 +162,7 @@ func TestHandlerRejectsUnregisteredAPIHost(t *testing.T) {
 		t.Fatalf("unregistered Host status = %d, want %d", response.Code, http.StatusMisdirectedRequest)
 	}
 
-	for _, host := range []string{"192.168.2.123:19808", "localhost:19808", "nas.example.test:19808"} {
+	for _, host := range []string{"192.168.2.123:19808", "localhost:19808", "storage.example.test:19808"} {
 		request := httptest.NewRequest(http.MethodGet, "http://"+host+"/api/auth/status", nil)
 		request.Host = host
 		response := httptest.NewRecorder()

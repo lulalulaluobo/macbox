@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './pages/Dashboard';
 import { LoginPage } from './pages/LoginPage';
-import { SystemOverview, NASUser, TerminalPrefill } from './types';
+import { SystemOverview, ConsoleUser, TerminalPrefill } from './types';
 import { api } from './api';
 import { useTheme } from './theme';
 import { Key, X, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -17,7 +17,7 @@ const InitializationWizard = lazy(() => import('./pages/InitializationWizard').t
 
 export const App: React.FC = () => {
   useTheme();
-  const [currentUser, setCurrentUser] = useState<NASUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<ConsoleUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'storage' | 'docker' | 'apps' | 'terminal' | 'settings' | 'storage_settings' | 'smb_sharing'>('dashboard');
   const [overview, setOverview] = useState<SystemOverview | undefined>(undefined);
@@ -54,7 +54,7 @@ export const App: React.FC = () => {
       setOverview(over);
       setError(null);
     } catch (err: any) {
-      setError(err.message || '无法连接到 MacNAS 后端服务');
+      setError(err.message || '无法连接到 MacBox 后端服务');
     }
   };
 
@@ -90,15 +90,15 @@ export const App: React.FC = () => {
         setSwUpdateReady(true);
       }
     };
-    window.addEventListener('macnas-sw-update', handleSWUpdate);
+    window.addEventListener('macbox-sw-update', handleSWUpdate);
 
     const handleUnauthorized = () => {
       setCurrentUser(null);
     };
-    window.addEventListener('macnas-unauthorized', handleUnauthorized);
+    window.addEventListener('macbox-unauthorized', handleUnauthorized);
     return () => {
-      window.removeEventListener('macnas-unauthorized', handleUnauthorized);
-      window.removeEventListener('macnas-sw-update', handleSWUpdate);
+      window.removeEventListener('macbox-unauthorized', handleUnauthorized);
+      window.removeEventListener('macbox-sw-update', handleSWUpdate);
     };
   }, []);
 
@@ -141,7 +141,7 @@ export const App: React.FC = () => {
     return () => window.clearInterval(retryTimer);
   }, [currentUser, overview]);
 
-	const handleLoginSuccess = (user: NASUser, warning?: string) => {
+	const handleLoginSuccess = (user: ConsoleUser, warning?: string) => {
 		setCurrentUser(user);
 		setError(warning || null);
   };
@@ -198,7 +198,7 @@ export const App: React.FC = () => {
       <div className="min-h-[100dvh] flex items-center justify-center bg-slate-50 dark:bg-[#090d16] text-slate-500">
         <div className="flex flex-col items-center space-y-3">
           <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-medium tracking-wide">正在加载 MacNAS 安全环境...</span>
+          <span className="text-xs font-medium tracking-wide">正在加载 MacBox 安全环境...</span>
         </div>
       </div>
     );
@@ -209,7 +209,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className={`sora-app-shell flex flex-col bg-slate-50 dark:bg-[#090d16] text-slate-900 dark:text-slate-100 transition-colors duration-200 ${activeTab === 'terminal' ? 'h-[100dvh] min-h-0 overflow-hidden' : 'min-h-[100dvh]'}`}>
+    <div className={`macbox-app-shell sora-app-shell flex flex-col bg-slate-50 dark:bg-[#090d16] text-slate-900 dark:text-slate-100 transition-colors duration-200 ${activeTab === 'terminal' ? 'h-[100dvh] min-h-0 overflow-hidden' : 'min-h-[100dvh]'}`}>
       <Navbar
         activeTab={activeTab}
         setActiveTab={navigate}
@@ -253,7 +253,7 @@ export const App: React.FC = () => {
           )}
 
           {activeTab === 'dashboard' && overview && !needsInitialization && (
-            <Dashboard overview={overview} onRefresh={refreshData} onNavigateTab={navigate} />
+            <Dashboard overview={overview} onRefresh={refreshData} onNavigateTab={navigate} isAdmin={currentUser.role === 'admin'} />
           )}
 
           {activeTab === 'storage' && (
@@ -390,8 +390,8 @@ const ConnectionState: React.FC<ConnectionStateProps> = ({ error, onRetry }) => 
       <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${error ? 'bg-rose-50 text-rose-500 dark:bg-rose-500/10 dark:text-rose-300' : 'bg-sky-50 text-sky-500 dark:bg-sky-500/10 dark:text-sky-300'}`}>
         {error ? <AlertCircle className="h-6 w-6" /> : <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />}
       </div>
-      <h1 className="mt-5 text-lg font-black text-slate-950 dark:text-white">{error ? '正在等待 MacNAS 后台' : '正在连接 MacNAS'}</h1>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">{error ? '后台服务暂时没有返回状态，系统会自动重试。请确认 MacNAS 后台仍在运行。' : '正在读取虚拟机和本机环境状态…'}</p>
+      <h1 className="mt-5 text-lg font-black text-slate-950 dark:text-white">{error ? '正在等待 MacBox 后台' : '正在连接 MacBox'}</h1>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">{error ? '后台服务暂时没有返回状态，系统会自动重试。请确认 MacBox 后台仍在运行。' : '正在读取虚拟机和本机环境状态…'}</p>
       {error && <p className="mt-3 break-words text-xs text-rose-600 dark:text-rose-300">{error}</p>}
       <button type="button" onClick={() => void onRetry()} className="mt-6 inline-flex min-h-11 items-center justify-center rounded-2xl bg-sky-500 px-5 text-sm font-bold text-white shadow-sm shadow-sky-500/20 transition hover:bg-sky-600">重新连接</button>
     </section>
@@ -419,7 +419,7 @@ class PageLoadBoundary extends React.Component<React.PropsWithChildren, PageLoad
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('[MacNAS] 页面渲染失败', error, errorInfo);
+    console.error('[MacBox] 页面渲染失败', error, errorInfo);
   }
 
   private isChunkLoadError() {

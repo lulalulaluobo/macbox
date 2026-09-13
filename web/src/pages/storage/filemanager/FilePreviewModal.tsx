@@ -278,7 +278,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             />
 
             <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 px-3 py-3 dark:border-slate-800 sm:px-4">
-              <span className="mr-auto hidden text-xs text-slate-500 sm:block">保存后直接写入 NAS</span>
+              <span className="mr-auto hidden text-xs text-slate-500 sm:block">保存后直接写入 MacBox</span>
               <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
                 <button
                   onClick={onCloseText}

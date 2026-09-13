@@ -44,7 +44,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const [showHiddenFiles, setShowHiddenFiles] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try {
-      return window.localStorage.getItem('macnas_terminal_show_hidden') === 'true';
+      return window.localStorage.getItem('macbox_terminal_show_hidden') === 'true';
     } catch {
       return false;
     }
@@ -54,7 +54,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const [favoritePaths, setFavoritePaths] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
-      const saved = JSON.parse(window.localStorage.getItem('macnas_terminal_favorite_paths') || '[]');
+      const saved = JSON.parse(window.localStorage.getItem('macbox_terminal_favorite_paths') || '[]');
       if (!Array.isArray(saved)) return [];
       return Array.from(new Set(saved.filter((value): value is string => (
         typeof value === 'string' && value.startsWith('/')
@@ -79,12 +79,12 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   // Quick Shortcuts
   const rootShortcuts: TerminalShortcut[] = [
     ...(loginUser === 'root' ? [{ label: 'VM 根目录', path: '/', icon: HardDrive }] : []),
-    { label: 'NAS 根目录', path: '/data', icon: Folder },
+    { label: 'MacBox 数据根目录', path: '/data', icon: Folder },
     { label: 'Docker 目录', path: '/data/appdata', icon: Code },
   ];
 
   // The VM root is a browse-only view. Mutating operations continue to be
-  // anchored to the NAS data disk by the backend safe-mutation layer.
+  // anchored to the MacBox data disk by the backend safe-mutation layer.
   const isVMSystemPath = currentPath !== '/data' && !currentPath.startsWith('/data/');
 
   const favoriteShortcuts: TerminalShortcut[] = favoritePaths.map((path) => ({
@@ -96,35 +96,10 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const aiCommands = [
     {
       label: 'Codex',
-      title: '启动 Codex 高权限模式（跳过审批和沙箱）',
-      command: 'codex --dangerously-bypass-approvals-and-sandbox',
-    },
-    {
-      label: 'Claude',
-      title: '启动 Claude 高权限模式（跳过权限确认）',
-      command: 'claude --dangerously-skip-permissions',
-    },
-    {
-      label: 'Anti Gravity',
-      title: '启动 Anti Gravity 高权限模式（跳过权限确认）',
-      command: 'agy --dangerously-skip-permissions',
+      title: '在当前终端启动 Codex YOLO 模式',
+      command: 'codex --yolo',
     },
   ];
-
-  const aiCommandForUser = (command: string, user: 'root' | 'default') => {
-    if (user !== 'root') return `${command}\n`;
-
-    // Claude's GLM provider is configured in root's Claude settings. A plain
-    // `sudo -iu macnasctl` changes HOME and makes Claude fall back to the
-    // official login flow. Read only the provider settings as root, drop to
-    // macnasctl in the same process, then launch Claude with the same model
-    // configuration and no root privileges.
-    if (command === 'claude --dangerously-skip-permissions') {
-      return `python3 -c 'import json,os,pwd; u=pwd.getpwnam("macnasctl"); s=json.load(open("/root/.claude/settings.json")); e={k:v for k,v in os.environ.items() if k in ("PATH","TERM","COLORTERM","LANG","LC_ALL","TZ","NO_COLOR","FORCE_COLOR")}; e.update({str(k):str(v) for k,v in s.get("env",{}).items()}); e.update({"HOME":u.pw_dir,"USER":u.pw_name,"LOGNAME":u.pw_name,"SHELL":"/bin/bash","PWD":u.pw_dir,"CLAUDE_CONFIG_DIR":os.path.join(u.pw_dir,".claude")}); os.chdir(u.pw_dir); os.initgroups(u.pw_name,u.pw_gid); os.setgid(u.pw_gid); os.setuid(u.pw_uid); os.execvpe("claude",["claude","--dangerously-skip-permissions"],e)'\n`;
-    }
-
-    return `sudo -iu macnasctl -- bash -lc 'exec ${command}'\n`;
-  };
 
   const handleSwitchUser = (newUser: 'root' | 'default') => {
     if (newUser !== 'root' && isVMSystemPath) {
@@ -140,7 +115,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
   useEffect(() => {
     try {
-      window.localStorage.setItem('macnas_terminal_favorite_paths', JSON.stringify(favoritePaths));
+      window.localStorage.setItem('macbox_terminal_favorite_paths', JSON.stringify(favoritePaths));
     } catch {
       // 收藏仅作为快捷入口，浏览器无法写入时不影响文件管理功能。
     }
@@ -148,7 +123,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
 
   useEffect(() => {
     try {
-      window.localStorage.setItem('macnas_terminal_show_hidden', String(showHiddenFiles));
+      window.localStorage.setItem('macbox_terminal_show_hidden', String(showHiddenFiles));
     } catch {
       // 隐藏文件显示偏好无法保存时，不影响当前页面的切换。
     }
@@ -203,7 +178,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isVMSystemPath) {
-      setAlertMsg({ type: 'error', text: 'VM 系统目录仅支持浏览，请切换到 NAS 根目录后操作' });
+      setAlertMsg({ type: 'error', text: 'VM 系统目录仅支持浏览，请切换到 MacBox 数据根目录后操作' });
       return;
     }
     if (!newFolderName.trim()) return;
@@ -268,7 +243,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
   const handleFileUpload = async (filesToUpload: FileList | null) => {
     if (!filesToUpload || filesToUpload.length === 0) return;
     if (isVMSystemPath) {
-      setAlertMsg({ type: 'error', text: 'VM 系统目录仅支持浏览，请切换到 NAS 根目录后上传' });
+      setAlertMsg({ type: 'error', text: 'VM 系统目录仅支持浏览，请切换到 MacBox 数据根目录后上传' });
       return;
     }
     setUploading(true);
@@ -377,7 +352,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
         )}
 
         {/* Right Side: Interactive Web Terminal */}
-        <div className={`terminal-dark-preserve order-1 grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'min-h-[520px] flex-none lg:order-2 lg:min-h-0 lg:w-auto lg:flex-1' : 'min-h-0 flex-1'}`}>
+        <div className={`terminal-dark-preserve order-1 flex h-full min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-[#090d16] ${showSidebar ? 'min-h-[520px] flex-none lg:order-2 lg:min-h-0 lg:w-auto lg:flex-1' : 'min-h-0 flex-1'}`}>
           <TerminalToolbar
             showSidebar={showSidebar}
             connected={connected}
@@ -394,12 +369,14 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) =>
             onReconnect={handleReconnect}
             onCloseSession={handleCloseSession}
             onSwitchUser={() => handleSwitchUser(loginUser === 'root' ? 'default' : 'root')}
-            onSendCommand={(command) => sendToTerminal(aiCommandForUser(command, loginUser))}
+            onSendCommand={(command) => sendToTerminal(`${command}\n`)}
             onClear={() => xtermInstance.current?.clear()}
             onToggleFullscreen={() => setFullscreen((current) => !current)}
           />
 
-          <TerminalViewport terminalRef={terminalRef} />
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <TerminalViewport terminalRef={terminalRef} />
+          </div>
 
           {/* Bottom Text Input & Action Keys Helper Bar */}
           <TerminalInputBar

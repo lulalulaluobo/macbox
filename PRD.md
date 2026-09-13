@@ -1,4 +1,4 @@
-# MacNAS MVP PRD v0.1
+# MacBox MVP PRD v0.1
 
 ## 1. 产品目标
 
@@ -6,7 +6,7 @@
 
 第一版不追求替代大型商业系统，只验证核心闭环：
 
-**磁盘 → Linux VM → Docker → NAS共享 → Web管理**
+**磁盘 → Linux VM → Docker → MacBox 共享 → Web 管理**
 
 ---
 
@@ -45,7 +45,7 @@
 
 第一版只支持：
 
-**选择一个磁盘作为 NAS 数据盘。**
+**选择一个磁盘作为 MacBox 数据盘。**
 
 不做 RAID、不做存储池、不做快照。
 
@@ -53,7 +53,7 @@
 
 ### ③ Docker
 
-MacNAS 自动管理：
+MacBox 自动管理：
 
 **Lima VM + Docker Engine**
 
@@ -102,7 +102,7 @@ Jellyfin
 
 ---
 
-### ⑤ NAS 文件共享
+### ⑤ MacBox 文件共享
 
 提供一个默认共享：
 
@@ -115,8 +115,8 @@ Jellyfin
 页面显示：
 
 ```text
-共享名称：MacNAS
-地址：smb://192.168.1.10/MacNAS
+共享名称：MacBox
+地址：smb://192.168.1.10/MacBox
 状态：运行中
 ```
 
@@ -135,7 +135,7 @@ Jellyfin
 ```text
 macOS
 │
-├── MacNAS Backend
+├── MacBox Backend
 │      └── Web UI
 │
 └── Lima VM
@@ -161,7 +161,7 @@ macOS
 
 ```text
 外接 SSD
-└── MacNAS Linux Disk Image
+└── MacBox Linux Disk Image
         ↓
       Lima
         ↓
@@ -183,14 +183,14 @@ Docker
 应用
 ```
 
-NAS SMB 设置放在「存储」页面，不单独增加页面。
+SMB 设置放在「存储」页面，不单独增加页面。
 
 ---
 
 ## 5. 首次启动流程
 
 ```text
-安装 MacNAS
+安装 MacBox
     ↓
 检测 Mac 环境
     ↓
@@ -248,12 +248,12 @@ NAS SMB 设置放在「存储」页面，不单独增加页面。
 后端：Go
 VM：Lima
 容器：Docker Engine
-NAS：Samba
+文件共享：Samba
 系统信息：macOS CLI / Go
 应用部署：Docker Compose
 ```
 
-MacNAS Backend 负责统一控制 Lima、Docker 和 Samba。
+MacBox Backend 负责统一控制 Lima、Docker 和 Samba。
 
 ---
 
@@ -261,11 +261,11 @@ MacNAS Backend 负责统一控制 Lima、Docker 和 Samba。
 
 MVP 完成必须满足：
 
-1. Mac 重启后 MacNAS 可以重新启动服务。
+1. Mac 重启后 MacBox 可以重新启动服务。
 2. 不安装、不启动 Docker Desktop。
 3. Web UI 可以看到 Docker 容器状态。
 4. 可以一键安装 Jellyfin。
-5. Jellyfin 可以读取 NAS 数据目录。
+5. Jellyfin 可以读取 MacBox 数据目录。
 6. Windows / Mac 可以通过 SMB 访问数据。
 7. Mac 睡眠并唤醒后服务能够恢复。
 8. Lima VM 重启后数据不丢失。
@@ -280,6 +280,6 @@ MVP 完成必须满足：
 
 只判断：
 
-> **MacNAS 能否让一台 Mac mini 在不安装 Docker Desktop、不使用命令行的情况下，稳定承担 NAS + Docker 家庭服务器。**
+> **MacBox 能否让一台 Mac mini 在不安装 Docker Desktop、不使用命令行的情况下，稳定承担家庭文件中心 + Docker 服务。**
 
 如果这条链路稳定，再进入 v0.2。

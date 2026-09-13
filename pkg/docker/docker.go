@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 )
 
 type Client struct {
@@ -122,7 +122,7 @@ func (b *cappedDockerOutput) Bytes() []byte {
 	defer b.mu.Unlock()
 	output := append([]byte(nil), b.buf.Bytes()...)
 	if b.truncated {
-		output = append(output, []byte(fmt.Sprintf("\n[MacNAS] Docker 命令输出已截断（超过 %d MiB）\n", maxDockerCommandOutputBytes/(1<<20)))...)
+		output = append(output, []byte(fmt.Sprintf("\n[MacBox] Docker 命令输出已截断（超过 %d MiB）\n", maxDockerCommandOutputBytes/(1<<20)))...)
 	}
 	return output
 }

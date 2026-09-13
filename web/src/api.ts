@@ -5,6 +5,7 @@ import { dockerApi } from './api/docker';
 import { filesApi } from './api/files';
 import { sambaApi } from './api/samba';
 import { storageApi } from './api/storage';
+import { serviceShortcutsApi } from './api/serviceShortcuts';
 import { systemApi } from './api/system';
 import { terminalApi } from './api/terminal';
 
@@ -12,6 +13,7 @@ export const api = {
   ...systemApi,
   ...terminalApi,
   ...storageApi,
+  ...serviceShortcutsApi,
   ...cloudApi,
   ...dockerApi,
   ...appsApi,

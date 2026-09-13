@@ -73,7 +73,7 @@ export const SSHSettingsSection: React.FC<SSHSettingsSectionProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  允许使用 macOS Terminal、Termius、VSCode Remote 或 PuTTY 通过 SSH 协议远程连接管理 NAS。
+                  允许使用 macOS Terminal、Termius、VSCode Remote 或 PuTTY 通过 SSH 协议远程连接管理 MacBox。
                 </p>
               </div>
             </div>
@@ -135,7 +135,7 @@ export const SSHSettingsSection: React.FC<SSHSettingsSectionProps> = ({
                     <span className="text-[10px] font-mono text-slate-400">(PasswordAuthentication)</span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                    MacNAS 固定关闭 SSH 密码认证，仅使用 SSH 公钥登录 root；控制台和 root 密码不作为 SSH 凭据。
+                    MacBox 固定关闭 SSH 密码认证，仅使用 SSH 公钥登录 root；控制台和 root 密码不作为 SSH 凭据。
                   </p>
                 </div>
                 <span className="shrink-0 rounded-full bg-emerald-500/15 px-3 py-1.5 text-xs font-bold text-emerald-300">已关闭</span>
@@ -204,7 +204,7 @@ export const SSHSettingsSection: React.FC<SSHSettingsSectionProps> = ({
               </div>
 
               <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
-                提示: 先生成 Root SSH 密钥，然后在运行 MacNAS 的这台 Mac 的 macOS“终端”中执行弹窗里的完整命令；不要把这些命令粘贴到本页面的 Web 终端中。私钥路径是 Mac 的 Downloads，不是 VM 内的 /root/Downloads。
+                提示: 先生成 Root SSH 密钥，然后在运行 MacBox 的这台 Mac 的 macOS“终端”中执行弹窗里的完整命令；不要把这些命令粘贴到本页面的 Web 终端中。私钥路径是 Mac 的 Downloads，不是 VM 内的 /root/Downloads。
               </p>
             </div>
           </div>

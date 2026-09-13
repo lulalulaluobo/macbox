@@ -18,7 +18,7 @@ import (
 
 const (
 	// Keep enough scrollback for a refresh during an AI or maintenance task,
-	// but do not let a noisy process grow the MacNAS backend without bound.
+	// but do not let a noisy process grow the MacBox backend without bound.
 	maxTerminalHistoryBytes = 512 << 10
 	terminalSessionIdleTTL  = 24 * time.Hour
 	finishedSessionIdleTTL  = 30 * time.Minute
@@ -323,7 +323,7 @@ func (s *terminalSession) readLoop() {
 	s.activityMu.Lock()
 	s.finished = true
 	s.activityMu.Unlock()
-	s.appendOutput([]byte("\r\n\x1b[33m[MacNAS] 终端任务已结束，刷新后仍可查看本次输出。\x1b[0m\r\n"))
+	s.appendOutput([]byte("\r\n\x1b[33m[MacBox] 终端任务已结束，刷新后仍可查看本次输出。\x1b[0m\r\n"))
 	s.doneOnce.Do(func() { close(s.done) })
 
 	s.writeMu.Lock()
@@ -378,7 +378,7 @@ func (s *terminalSession) stop() {
 func newTerminalSessionID() string {
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		log.Printf("[MacNAS Terminal] session id generation failed: %v", err)
+		log.Printf("[MacBox Terminal] session id generation failed: %v", err)
 		return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(raw[:])

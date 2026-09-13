@@ -18,14 +18,14 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/luluen/mac-nas/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/config"
 )
 
 type DiskInfo struct {
 	DeviceIdentifier     string  `json:"identifier"`      // e.g. "disk4"
 	DeviceNode           string  `json:"deviceNode"`      // e.g. "/dev/disk4"
 	Name                 string  `json:"name"`            // e.g. "Lexar SSD THOR PRO 2TB"
-	VolumeName           string  `json:"volumeName"`      // e.g. "MacNAS Data"
+	VolumeName           string  `json:"volumeName"`      // e.g. "MacBox Data"
 	TotalSize            uint64  `json:"totalSize"`       // bytes
 	TotalSizeString      string  `json:"totalSizeString"` // e.g. "2.0 TB"
 	UsedSpace            uint64  `json:"usedSpace"`
@@ -62,7 +62,7 @@ type StorageOverview struct {
 	SecondaryDisk    *DiskInfo     `json:"secondaryDisk,omitempty"`
 	Disks            []DiskInfo    `json:"disks"`
 	ManagedDisks     []ManagedDisk `json:"managedDisks"`
-	NASDataDir       string        `json:"nasDataDir"`
+	DataDir          string        `json:"dataDir"`
 	IsExternalActive bool          `json:"isExternalActive"`
 	DataPath         string        `json:"dataPath"`
 	MountPoint       string        `json:"mountPoint"`
@@ -576,10 +576,10 @@ func recommendedSecondaryTargetDir(mountPoint string, isExternal bool) string {
 	// access to the volume root.
 	if !isExternal || mountPoint == "/System/Volumes/Data" {
 		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-			return filepath.Join(home, "MacNAS-SSD-Pool")
+			return filepath.Join(home, "MacBox-SSD-Pool")
 		}
 	}
-	return filepath.Join(mountPoint, "MacNAS-SSD-Pool")
+	return filepath.Join(mountPoint, "MacBox-SSD-Pool")
 }
 
 func listDisksFallback(ctx context.Context, selectedDiskIdentifier, secondary string) ([]DiskInfo, error) {
@@ -809,7 +809,7 @@ func CreateManagedDiskContext(ctx context.Context, name, size string) error {
 	return nil
 }
 
-// BindExternalDisk initializes an ext4 disk image on an external filesystem and bridges it to Lima's macnas-data
+// BindExternalDisk initializes an ext4 disk image on an external filesystem and bridges it to Lima's macbox-data
 func BindExternalDisk(cfg *config.Config, diskID, mountPoint string, sizeGB int) (string, error) {
 	return BindExternalDiskContext(context.Background(), cfg, diskID, mountPoint, sizeGB)
 }
@@ -862,19 +862,19 @@ func BindExternalDiskContext(ctx context.Context, cfg *config.Config, diskID, mo
 		return "", err
 	}
 
-	macnasDir := filepath.Join(mountPoint, "MacNAS")
+	macboxDir := filepath.Join(mountPoint, "MacBox")
 	// If mount point is root or system data drive, place inside user home on that drive
 	if mountPoint == "/System/Volumes/Data" || mountPoint == "/" {
-		macnasDir = filepath.Join(home, "MacNAS")
+		macboxDir = filepath.Join(home, "MacBox")
 	}
-	if err := os.MkdirAll(macnasDir, 0700); err != nil {
-		return "", fmt.Errorf("无法在外接盘创建 MacNAS 目录: %w", err)
+	if err := os.MkdirAll(macboxDir, 0700); err != nil {
+		return "", fmt.Errorf("无法在外接盘创建 MacBox 目录: %w", err)
 	}
-	if err := os.Chmod(macnasDir, 0700); err != nil {
-		return "", fmt.Errorf("无法保护外接盘 MacNAS 目录: %w", err)
+	if err := os.Chmod(macboxDir, 0700); err != nil {
+		return "", fmt.Errorf("无法保护外接盘 MacBox 目录: %w", err)
 	}
 
-	imgFile := filepath.Join(macnasDir, "datadisk.img")
+	imgFile := filepath.Join(macboxDir, "datadisk.img")
 	createdImage := false
 	cleanupCreatedImage := func(cause error) (string, error) {
 		if !createdImage {
@@ -1017,7 +1017,7 @@ func UnbindExternalDisk(cfg *config.Config) error {
 
 	if fi, err := os.Lstat(targetDatadisk); err == nil {
 		if fi.Mode()&os.ModeSymlink == 0 {
-			return fmt.Errorf("Lima 数据盘目标不是 MacNAS 管理的链接，未执行解除绑定")
+			return fmt.Errorf("Lima 数据盘目标不是 MacBox 管理的链接，未执行解除绑定")
 		}
 		if strings.TrimSpace(cfgSnapshot.Storage.DataPath) == "" || !sameLinkTargetPath(targetDatadisk, cfgSnapshot.Storage.DataPath) {
 			return fmt.Errorf("Lima 数据盘链接与当前配置不一致，未执行解除绑定")
@@ -1135,7 +1135,7 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 	if providedTargetDir != "" && !filepath.IsAbs(providedTargetDir) {
 		return nil, fmt.Errorf("第二存储卷目录必须使用绝对路径")
 	}
-	// A legacy client used to prefill <mountPoint>/MacNAS-SSD-Pool. That is
+	// A legacy client used to prefill <mountPoint>/MacBox-SSD-Pool. That is
 	// not writable for an internal macOS volume reported as /Volumes/Data;
 	// transparently migrate that exact default to the user's home directory.
 	// Explicit custom paths remain subject to the normal volume-boundary checks.
@@ -1150,7 +1150,7 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 			}
 		}
 	}
-	legacyDefault := mountPoint != "" && filepath.Clean(providedTargetDir) == filepath.Join(filepath.Clean(mountPoint), "MacNAS-SSD-Pool")
+	legacyDefault := mountPoint != "" && filepath.Clean(providedTargetDir) == filepath.Join(filepath.Clean(mountPoint), "MacBox-SSD-Pool")
 	if targetDir == "" || (!diskIsExternal && legacyDefault) {
 		targetDir = recommendedSecondaryTargetDir(mountPoint, diskIsExternal)
 		if targetDir == "" {
@@ -1158,7 +1158,7 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 			if err != nil {
 				return nil, err
 			}
-			targetDir = filepath.Join(home, "MacNAS-SSD-Pool")
+			targetDir = filepath.Join(home, "MacBox-SSD-Pool")
 		}
 	}
 
@@ -1192,7 +1192,7 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 	}
 	guestTarget = normalizedGuestTarget
 	if instanceName == "" {
-		instanceName = "macnas"
+		instanceName = "macbox"
 	}
 	instanceName, err = config.NormalizeVMName(instanceName)
 	if err != nil {
@@ -1224,7 +1224,7 @@ func BindSecondaryDiskContext(ctx context.Context, cfg *config.Config, diskID, m
 
 	cmd := exec.CommandContext(ctx, "limactl", "shell", instanceName, "sudo", "mkdir", "-p", "/data/"+guestTarget)
 	if err := cmd.Run(); err != nil {
-		log.Printf("[MacNAS Storage] 第二存储卷目录将在虚拟机重启时创建: %v", err)
+		log.Printf("[MacBox Storage] 第二存储卷目录将在虚拟机重启时创建: %v", err)
 	}
 
 	return map[string]interface{}{

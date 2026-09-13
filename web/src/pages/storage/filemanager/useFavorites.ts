@@ -9,7 +9,7 @@ export interface UseFavoritesOptions {
 
 const readStoredFavorites = (): string[] => {
   try {
-    const saved = localStorage.getItem('macnas_file_favorites');
+    const saved = localStorage.getItem('macbox_file_favorites');
     return saved ? JSON.parse(saved) : [];
   } catch {
     return [];
@@ -38,7 +38,7 @@ export const useFavorites = ({ enabled }: UseFavoritesOptions) => {
         const validPaths = favorites.filter((path) => itemMap.get(path)?.isDir === true);
         if (validPaths.length !== favorites.length) {
           setFavorites(validPaths);
-          try { localStorage.setItem('macnas_file_favorites', JSON.stringify(validPaths)); } catch {}
+          try { localStorage.setItem('macbox_file_favorites', JSON.stringify(validPaths)); } catch {}
         }
         setFavoriteItems(validPaths.map((path) => itemMap.get(path)).filter((item): item is FileItem => Boolean(item)));
         return;
@@ -57,7 +57,7 @@ export const useFavorites = ({ enabled }: UseFavoritesOptions) => {
     event?.stopPropagation();
     setFavorites((previous) => {
       const next = previous.includes(path) ? previous.filter((item) => item !== path) : [...previous, path];
-      try { localStorage.setItem('macnas_file_favorites', JSON.stringify(next)); } catch {}
+      try { localStorage.setItem('macbox_file_favorites', JSON.stringify(next)); } catch {}
       return next;
     });
   };

@@ -11,20 +11,20 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/luluen/mac-nas/pkg/config"
-	"github.com/luluen/mac-nas/pkg/vm"
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 )
 
 type SMBShareItem struct {
 	config.SMBShare
-	Address string `json:"address"` // e.g. smb://192.168.2.123:4455/MacNAS
+	Address string `json:"address"` // e.g. smb://192.168.2.123:4455/MacBox
 }
 
 type AvailableTarget struct {
 	Name        string `json:"name"`        // e.g. "主硬盘 1 完整存储池 (/data)"
 	Path        string `json:"path"`        // e.g. "/data"
 	Source      string `json:"source"`      // "primary", "secondary", "passthrough", "custom"
-	Description string `json:"description"` // e.g. "NAS 核心大容量存储池"
+	Description string `json:"description"` // e.g. "MacBox 核心大容量存储池"
 	Exists      bool   `json:"exists"`
 }
 
@@ -50,9 +50,17 @@ type Manager struct {
 }
 
 const (
-	sambaInternalUser    = "macnas"
-	sambaUsernameMapPath = "/etc/samba/macnas-users.map"
+	sambaInternalUser    = "macbox"
+	sambaUsernameMapPath = "/etc/samba/macbox-users.map"
 )
+
+func (m *Manager) internalUser() string {
+	return sambaInternalUser
+}
+
+func (m *Manager) usernameMapPath() string {
+	return sambaUsernameMapPath
+}
 
 func NewManager(cfg *config.Config, vmMgr *vm.Manager) *Manager {
 	m := &Manager{
@@ -60,7 +68,7 @@ func NewManager(cfg *config.Config, vmMgr *vm.Manager) *Manager {
 		vmMgr: vmMgr,
 	}
 	if err := m.ensureDefaultShares(); err != nil {
-		log.Printf("[MacNAS Samba] 保存默认共享配置失败: %v", err)
+		log.Printf("[MacBox Samba] 保存默认共享配置失败: %v", err)
 	}
 	return m
 }
@@ -80,7 +88,7 @@ func (m *Manager) ensureDefaultShares() error {
 	shares := []config.SMBShare{
 		{
 			ID:         "share-primary",
-			Name:       "MacNAS",
+			Name:       "MacBox",
 			Path:       "/data",
 			Comment:    "主硬盘 1 完整存储池",
 			Writable:   true,
@@ -102,7 +110,7 @@ func (m *Manager) ensureDefaultShares() error {
 	if hasSecondary {
 		shares = append(shares, config.SMBShare{
 			ID:         "share-secondary",
-			Name:       "MacNAS-SSD2",
+			Name:       "MacBox-SSD2",
 			Path:       "/data/volume2-ssd",
 			Comment:    "第二硬盘 256GB 本机高速盘",
 			Writable:   true,
@@ -167,9 +175,9 @@ func (m *Manager) GetStatus(ctx context.Context, hostIP string) (*SambaStatus, e
 		port = 4455
 	}
 
-	defaultAddr := fmt.Sprintf("smb://%s/MacNAS", hostIP)
+	defaultAddr := fmt.Sprintf("smb://%s/MacBox", hostIP)
 	if port != 445 {
-		defaultAddr = fmt.Sprintf("smb://%s:%d/MacNAS", hostIP, port)
+		defaultAddr = fmt.Sprintf("smb://%s:%d/MacBox", hostIP, port)
 	}
 
 	// Construct list of shares with resolved addresses
@@ -204,7 +212,7 @@ func (m *Manager) GetAvailableTargets(ctx context.Context) []AvailableTarget {
 	cfgSnapshot, err := config.Snapshot(m.cfg)
 	m.mu.Unlock()
 	if err != nil {
-		log.Printf("[MacNAS Samba] 读取可用共享目录失败: %v", err)
+		log.Printf("[MacBox Samba] 读取可用共享目录失败: %v", err)
 		return nil
 	}
 	secondaryDisk := cfgSnapshot.Storage.SecondaryDisk
@@ -297,8 +305,10 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 		return fmt.Errorf("读取 Samba 配置失败: %w", err)
 	}
 	sambaUser := strings.TrimSpace(cfgSnapshot.Samba.User)
+	internalUser := m.internalUser()
+	usernameMapPath := m.usernameMapPath()
 	if sambaUser == "" {
-		sambaUser = sambaInternalUser
+		sambaUser = internalUser
 	}
 	if err := config.ValidateSambaUsername(sambaUser); err != nil {
 		return fmt.Errorf("Samba 用户名无效: %w", err)
@@ -307,12 +317,12 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 	var sb strings.Builder
 	sb.WriteString("[global]\n")
 	sb.WriteString("   workgroup = WORKGROUP\n")
-	sb.WriteString("   server string = MacNAS\n")
+	sb.WriteString("   server string = MacBox\n")
 	sb.WriteString("   server role = standalone server\n")
 	sb.WriteString("   security = user\n")
 	sb.WriteString("   map to guest = Never\n")
-	if sambaUser != sambaInternalUser {
-		sb.WriteString("   username map = " + sambaUsernameMapPath + "\n")
+	if sambaUser != internalUser {
+		sb.WriteString("   username map = " + usernameMapPath + "\n")
 	}
 	sb.WriteString("   dns proxy = no\n")
 	sb.WriteString("   log file = /var/log/samba/log.%m\n")
@@ -343,7 +353,7 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 		if s.Comment != "" {
 			sb.WriteString(fmt.Sprintf("   comment = %s\n", s.Comment))
 		} else {
-			sb.WriteString(fmt.Sprintf("   comment = MacNAS Share %s\n", cleanName))
+			sb.WriteString(fmt.Sprintf("   comment = MacBox Share %s\n", cleanName))
 		}
 		sb.WriteString(fmt.Sprintf("   path = %s\n", cleanPath))
 		sb.WriteString("   browseable = yes\n")
@@ -364,8 +374,8 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 
 		sb.WriteString("   create mask = 0660\n")
 		sb.WriteString("   directory mask = 0770\n")
-		sb.WriteString("   force user = " + sambaInternalUser + "\n")
-		sb.WriteString("   force group = " + sambaInternalUser + "\n\n")
+		sb.WriteString("   force user = " + internalUser + "\n")
+		sb.WriteString("   force group = " + internalUser + "\n\n")
 	}
 
 	confContent := sb.String()
@@ -383,12 +393,12 @@ func (m *Manager) applyConfigLocked(ctx context.Context) error {
 	if out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(confContent), "sudo", "tee", "/etc/samba/smb.conf"); err != nil {
 		return fmt.Errorf("写入 smb.conf 失败: %s (%w)", out, err)
 	}
-	if sambaUser != sambaInternalUser {
-		mapContent := fmt.Sprintf("%s = %s\n", sambaInternalUser, sambaUser)
-		if out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(mapContent), "sudo", "tee", sambaUsernameMapPath); err != nil {
+	if sambaUser != internalUser {
+		mapContent := fmt.Sprintf("%s = %s\n", internalUser, sambaUser)
+		if out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(mapContent), "sudo", "tee", usernameMapPath); err != nil {
 			return fmt.Errorf("写入 Samba 用户映射失败: %s (%w)", out, err)
 		}
-		if out, err := m.vmMgr.Exec(ctx, "sudo", "chmod", "0600", sambaUsernameMapPath); err != nil {
+		if out, err := m.vmMgr.Exec(ctx, "sudo", "chmod", "0600", usernameMapPath); err != nil {
 			return fmt.Errorf("保护 Samba 用户映射失败: %s (%w)", out, err)
 		}
 	}
@@ -660,6 +670,7 @@ func (m *Manager) EnsurePassword(ctx context.Context) error {
 }
 
 func (m *Manager) ensurePasswordLocked(ctx context.Context) error {
+	internalUser := m.internalUser()
 	pwd := m.credentialPassword
 	if pwd == "" {
 		// An existing VM already keeps the Samba verifier in passdb.tdb. We still
@@ -681,15 +692,15 @@ func (m *Manager) ensurePasswordLocked(ctx context.Context) error {
 	if err := config.ValidateSambaUsername(user); err != nil {
 		return fmt.Errorf("Samba 用户名无效: %w", err)
 	}
-	if _, err := m.vmMgr.Exec(ctx, "id", "-u", sambaInternalUser); err != nil {
-		if _, userErr := m.vmMgr.Exec(ctx, "sudo", "useradd", "-M", "-s", "/usr/sbin/nologin", sambaInternalUser); userErr != nil {
+	if _, err := m.vmMgr.Exec(ctx, "id", "-u", internalUser); err != nil {
+		if _, userErr := m.vmMgr.Exec(ctx, "sudo", "useradd", "-M", "-s", "/usr/sbin/nologin", internalUser); userErr != nil {
 			return userErr
 		}
 	}
-	if out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(pwd+"\n"+pwd+"\n"), "sudo", "smbpasswd", "-a", sambaInternalUser, "-s"); err != nil {
+	if out, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(pwd+"\n"+pwd+"\n"), "sudo", "smbpasswd", "-a", internalUser, "-s"); err != nil {
 		return fmt.Errorf("同步 Samba 密码失败: %s (%w)", out, err)
 	}
-	if out, err := m.vmMgr.Exec(ctx, "sudo", "smbpasswd", "-e", sambaInternalUser); err != nil {
+	if out, err := m.vmMgr.Exec(ctx, "sudo", "smbpasswd", "-e", internalUser); err != nil {
 		return fmt.Errorf("启用 Samba 用户失败: %s (%w)", out, err)
 	}
 	return m.applyConfigLocked(ctx)
