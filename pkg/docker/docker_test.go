@@ -23,6 +23,43 @@ func TestCappedDockerOutput(t *testing.T) {
 	}
 }
 
+func TestHasDataBindMount(t *testing.T) {
+	tests := []struct {
+		name   string
+		mounts []containerMount
+		want   bool
+	}{
+		{
+			name:   "data root bind",
+			mounts: []containerMount{{Type: "bind", Source: "/data", Destination: "/data"}},
+			want:   true,
+		},
+		{
+			name:   "data child bind",
+			mounts: []containerMount{{Type: "bind", Source: "/data/downloads/Downloads", Destination: "/downloads"}},
+			want:   true,
+		},
+		{
+			name:   "named volume is ignored",
+			mounts: []containerMount{{Type: "volume", Source: "macbox-data", Destination: "/data"}},
+			want:   false,
+		},
+		{
+			name:   "unrelated host path is ignored",
+			mounts: []containerMount{{Type: "bind", Source: "/opt/service-data", Destination: "/data"}},
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasDataBindMount(tt.mounts); got != tt.want {
+				t.Fatalf("hasDataBindMount() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPublishedHostPorts(t *testing.T) {
 	content := `services:
   app:

@@ -39,13 +39,17 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
 
   // Send input content to terminal
   const handleSend = () => {
-    if (disabled || !inputText.trim()) return;
+    if (disabled) return;
 
-    // Send the text followed by carriage return \r
+    // An empty input intentionally works as Enter, so mobile users can submit
+    // an interactive prompt without opening the virtual keyboard's return key.
     onSendRaw(inputText + '\r');
 
-    // Save to local history
-    setHistory((prev) => [inputText, ...prev.slice(0, 49)]);
+    // Keep command history meaningful: an empty Enter should not create a
+    // blank entry that makes history navigation noisy.
+    if (inputText.trim()) {
+      setHistory((prev) => [inputText, ...prev.slice(0, 49)]);
+    }
     setHistoryIndex(-1);
     setInputText('');
 
@@ -243,7 +247,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
           <button
             type="button"
             onClick={handleSend}
-            disabled={disabled || !inputText.trim()}
+            disabled={disabled}
             className="flex min-h-10 items-center space-x-1.5 rounded-xl bg-sky-500 px-3 py-2 text-xs font-bold text-white shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3.5"
             title="发送命令到终端 (Enter)"
           >

@@ -21,6 +21,12 @@ type containerStatsRaw struct {
 	BlockIO  string `json:"BlockIO"`
 }
 
+type containerMount struct {
+	Type        string `json:"Type"`
+	Source      string `json:"Source"`
+	Destination string `json:"Destination"`
+}
+
 func (c *Client) getContainerStatsMap(ctx context.Context) map[string]containerStatsRaw {
 	statsMap := make(map[string]containerStatsRaw)
 	out, err := c.runDockerCmd(ctx, "stats", "--no-stream", "--format", "{{json .}}")
@@ -232,6 +238,65 @@ func (c *Client) RestartContainer(ctx context.Context, idOrName string) error {
 	}
 	_, err = c.runDockerCmd(ctx, "restart", idOrName)
 	return err
+}
+
+// RestartContainersUsingDataMount refreshes running containers whose bind
+// mount source is /data (or one of its children). Local Mac passthrough paths
+// are applied to /data after Docker has started during a VM boot. Linux bind
+// mounts are captured when the container starts, so these containers need one
+// restart before they can see a newly mounted or changed local directory.
+//
+// The method deliberately affects only running containers that explicitly
+// bind MacBox's data directory; unrelated containers are left untouched.
+func (c *Client) RestartContainersUsingDataMount(ctx context.Context) ([]string, error) {
+	out, err := c.runDockerCmd(ctx, "ps", "-q")
+	if err != nil {
+		return nil, fmt.Errorf("读取运行中的 Docker 容器失败: %w", err)
+	}
+
+	var restarted []string
+	for _, rawID := range strings.Fields(string(out)) {
+		id, err := normalizeContainerRef(rawID)
+		if err != nil {
+			continue
+		}
+
+		inspectOut, err := c.runDockerCmd(ctx, "inspect", "--format", "{{json .Mounts}}", id)
+		if err != nil {
+			return restarted, fmt.Errorf("读取容器 %s 的挂载信息失败: %w", id, err)
+		}
+
+		var mounts []containerMount
+		if err := json.Unmarshal(bytes.TrimSpace(inspectOut), &mounts); err != nil {
+			return restarted, fmt.Errorf("解析容器 %s 的挂载信息失败: %w", id, err)
+		}
+		if !hasDataBindMount(mounts) {
+			continue
+		}
+
+		if _, err := c.runDockerCmd(ctx, "restart", id); err != nil {
+			return restarted, fmt.Errorf("重启使用 MacBox 数据目录的容器 %s 失败: %w", id, err)
+		}
+		restarted = append(restarted, id)
+	}
+
+	if len(restarted) > 0 {
+		c.InvalidateContainerCaches()
+	}
+	return restarted, nil
+}
+
+func hasDataBindMount(mounts []containerMount) bool {
+	for _, mount := range mounts {
+		if mount.Type != "bind" {
+			continue
+		}
+		source := strings.TrimRight(strings.TrimSpace(mount.Source), "/")
+		if source == "/data" || strings.HasPrefix(source, "/data/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) RemoveContainer(ctx context.Context, idOrName string, force bool) error {

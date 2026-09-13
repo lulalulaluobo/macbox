@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -116,6 +117,7 @@ func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
 				log.Printf("[MacBox] ensure Samba password after VM start failed: %v", err)
 			}
+			s.refreshDataMountContainers(ctx, job.ID)
 		}
 		s.jobs.finish(job.ID, err)
 	}()
@@ -171,10 +173,53 @@ func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
 			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
 				log.Printf("[MacBox] ensure Samba password after VM restart failed: %v", err)
 			}
+			s.refreshDataMountContainers(ctx, job.ID)
 		}
 		s.jobs.finish(job.ID, err)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting", "message": "虚拟机重启中...", "jobId": job.ID})
+}
+
+// refreshDataMountContainers gives Docker containers a fresh view of local
+// Mac directories that were mounted into /data during this VM boot. A failure
+// here must not turn an otherwise healthy VM startup into a failed job: Docker
+// may still be starting, and containers without a /data bind mount need no
+// action at all.
+func (s *Server) refreshDataMountContainers(ctx context.Context, jobID string) {
+	s.jobs.update(jobID, "refreshing-services", 96, "正在刷新使用本机直通目录的服务")
+	// Docker is started in parallel with the mount service during boot. Give it
+	// a short, bounded window to accept commands so bind-mounted services such
+	// as AList are reliably refreshed rather than left with Docker's old view.
+	for attempt := 0; attempt < 20; attempt++ {
+		restarted, err := s.dockerClient.RestartContainersUsingDataMount(ctx)
+		if err == nil {
+			if len(restarted) > 0 {
+				log.Printf("[MacBox] refreshed %d containers after local mount sync", len(restarted))
+			}
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if attempt == 19 {
+			log.Printf("[MacBox] refresh containers after local mount sync failed: %v", err)
+			return
+		}
+		if err := waitForVMRefresh(ctx, time.Second); err != nil {
+			return
+		}
+	}
+}
+
+func waitForVMRefresh(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Storage Handlers
