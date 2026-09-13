@@ -70,7 +70,10 @@ chmod 0755 "$PACKAGE_DIR/bin/macbox" "$PACKAGE_DIR/install.sh" "$PACKAGE_DIR/uni
 mkdir -p "$DIST_DIR"
 rm -f -- "$ARCHIVE_PATH"
 tar -czf "$ARCHIVE_PATH" -C "$STAGE_DIR" "$PACKAGE_NAME"
-shasum -a 256 "$ARCHIVE_PATH" > "$ARCHIVE_PATH.sha256"
+(
+  cd "$DIST_DIR"
+  shasum -a 256 "$ARCHIVE_NAME" > "$ARCHIVE_NAME.sha256"
+)
 
 printf '\n[MacBox] 构建完成：%s\n' "$ARCHIVE_PATH"
 printf '[MacBox] SHA-256：%s\n' "$(awk '{print $1}' "$ARCHIVE_PATH.sha256")"
