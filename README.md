@@ -97,27 +97,15 @@ MacBox 采用 Apache License 2.0 发布，允许个人和组织商用、修改�
 如果用户已经在这台 Mac 上安装了 Codex CLI、WorkBuddy 或其他具有本地终端权限的 Agent，推荐直接发送下面这一句话，让 Agent 完成环境检测、Release 获取、校验和部署：
 
 ```text
-你现在运行在目标 Mac 的 macOS 本地终端，并且拥有本机终端权限。请完成 MacBox 的安装或升级，不要操作远程机器，不要进入 VM 内执行本机安装流程，也不要修改与 MacBox 无关的用户文件。
-
-请按以下要求执行：
-1. 检查 macOS 版本、CPU 架构、网络、Homebrew 和 Lima；根据 `uname -m` 选择 Apple Silicon 的 `aarch64` 包或 Intel 的 `x86_64` 包，禁止混用架构。
-2. 从 https://github.com/lulalulaluobo/macbox/releases/latest 获取最新稳定发行包，并校验 Release 提供的 SHA-256；校验失败时停止，不要运行其中的程序。
-3. 将下载、解压和校验文件放在 `~/macbox` 下的临时版本目录，不要使用开发机绝对路径；运行发行包中的 `install.sh` 完成安装。
-4. Lima 已安装时直接复用；未安装时先说明需要通过 Homebrew 安装并等待确认，不要安装 Docker Desktop，不要静默执行远程安装脚本。
-5. 保持 MacBox 的用户级安装位置：`~/.local/share/macbox`、`~/.local/bin/macbox`、`~/Applications/MacBoxMemu.app` 和 `~/.macbox`。已有 MacBox 配置、虚拟机、容器、镜像、卷和用户数据不得删除或覆盖。
-6. 安装完成后启动 MacBoxMemu.app；如果菜单栏助手不可用，再使用 `~/.local/bin/macbox --host 0.0.0.0 --port 19808` 启动 Web 服务。若 `19808` 已有 MacBox 服务监听，先检查并复用，不要重复启动或终止无关进程。
-7. 用 `curl` 检查 `http://127.0.0.1:19808/api/auth/status`，确认 Web 服务可访问；首次初始化由用户在本机网页完成，不要代替用户创建管理员密码。
-8. 最后返回实际发行版本、CPU 架构、安装目录、MacBoxMemu.app 路径、Lima 状态、本机地址、局域网地址和任何失败原因。
-
-遇到系统授权、需要输入密码或任何破坏性操作时先向我确认；不要只回复“安装完成”。
+请在当前 macOS 主机上先阅读仓库根目录的 `MACBOX_DEPLOYMENT_PROMPT.md`，再严格按文档完成 MacBox 部署，不要跳过只读检查或未经确认的破坏性操作。
 ```
 
 本地 Agent 需要能够在运行 MacBox 的 Mac 上执行终端命令；手机端聊天或没有本机权限的云端 Agent 不能替代本地部署。部署完成后，Agent 应返回实际安装目录、服务地址、Lima 状态和失败日志，而不是只报告“已完成”。
 
-如果用户已经克隆了源码，可使用下面的一句话提示词：
+如果需要从源码部署，可使用下面的一句话提示词：
 
 ```text
-请在当前 MacBox 源码目录完成本地部署：确认源码来自 https://github.com/lulalulaluobo/macbox，检查 Go、Node.js/npm、Xcode Command Line Tools 和 Lima，执行 `make release-mac` 生成与当前 Mac 架构匹配的发行包，校验发行包后运行其中的 `install.sh`，安装到 `~/.local/share/macbox` 和 `~/.local/bin/macbox`，再启动 `~/Applications/MacBoxMemu.app` 或 `macbox --host 0.0.0.0 --port 19808`。完成后用 curl 检查 `http://127.0.0.1:19808/api/auth/status`，返回构建版本、安装路径、Lima 状态、本机及局域网地址；不要覆盖已有配置、虚拟机、容器、镜像、卷或用户数据，所有需要授权或删除的操作先向我确认。
+请先执行 `git clone https://github.com/lulalulaluobo/macbox.git` 并进入仓库根目录，阅读根目录的 `MACBOX_DEPLOYMENT_PROMPT.md`，再严格按文档完成本地构建和部署，不要跳过检查或未经确认覆盖已有数据。
 ```
 
 ### 第二选择：直接使用 GitHub Release

@@ -48,6 +48,7 @@ CGO_ENABLED=0 GOOS=darwin GOARCH="$GOARCH_VALUE" go build \
   -o "$PACKAGE_DIR/bin/macbox" "$ROOT_DIR/cmd/macbox"
 cp -R "$ROOT_DIR/templates" "$PACKAGE_DIR/templates"
 cp -R "$ROOT_DIR/assets" "$PACKAGE_DIR/assets"
+cp "$ROOT_DIR/MACBOX_DEPLOYMENT_PROMPT.md" "$PACKAGE_DIR/MACBOX_DEPLOYMENT_PROMPT.md"
 cp "$ROOT_DIR/scripts/install.sh" "$PACKAGE_DIR/install.sh"
 cp "$ROOT_DIR/scripts/uninstall.sh" "$PACKAGE_DIR/uninstall.sh"
 cp "$ROOT_DIR/LICENSE" "$PACKAGE_DIR/LICENSE"
@@ -63,7 +64,7 @@ chmod 0755 "$PACKAGE_DIR/bin/macbox" "$PACKAGE_DIR/install.sh" "$PACKAGE_DIR/uni
   cd "$PACKAGE_DIR"
   {
     find bin templates assets MacBoxMemu.app/Contents -type f -print
-    printf '%s\n' LICENSE MacBox.command install.sh uninstall.sh
+    printf '%s\n' LICENSE MACBOX_DEPLOYMENT_PROMPT.md MacBox.command install.sh uninstall.sh
   } | sort | xargs shasum -a 256
 ) > "$PACKAGE_DIR/checksums.txt"
 
