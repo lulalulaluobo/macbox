@@ -117,6 +117,7 @@ func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
 				log.Printf("[MacBox] ensure Samba password after VM start failed: %v", err)
 			}
+			s.migrateManagedApps(ctx)
 			s.refreshDataMountContainers(ctx, job.ID)
 		}
 		s.jobs.finish(job.ID, err)
@@ -173,11 +174,18 @@ func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
 			if err := s.sambaMgr.EnsurePassword(ctx); err != nil {
 				log.Printf("[MacBox] ensure Samba password after VM restart failed: %v", err)
 			}
+			s.migrateManagedApps(ctx)
 			s.refreshDataMountContainers(ctx, job.ID)
 		}
 		s.jobs.finish(job.ID, err)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting", "message": "虚拟机重启中...", "jobId": job.ID})
+}
+
+func (s *Server) migrateManagedApps(ctx context.Context) {
+	if err := s.appMgr.MigrateManagedApps(ctx); err != nil {
+		log.Printf("[MacBox] managed app migration failed: %v", err)
+	}
 }
 
 // refreshDataMountContainers gives Docker containers a fresh view of local

@@ -284,6 +284,22 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         checkBackend { [weak self] alreadyRunning in
             guard let self else { return }
             if alreadyRunning {
+                if self.shouldInstallEmbeddedRuntime() {
+                    self.stopBackendProcess(silent: true) { [weak self] in
+                        guard let self else { return }
+                        self.actionInProgress = true
+                        self.installEmbeddedRuntimeIfNeeded { [weak self] installed in
+                            guard let self else { return }
+                            guard installed else {
+                                self.actionInProgress = false
+                                self.refreshStatus(nil)
+                                return
+                            }
+                            self.launchBackendProcess()
+                        }
+                    }
+                    return
+                }
                 self.actionInProgress = false
                 self.openWeb(nil)
                 self.showAlert(title: "MacBox 已在运行", message: "Web 服务已经运行在端口 \(self.port)。")
@@ -652,20 +668,9 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let installedBinary = home + "/.local/share/macbox/bin/macbox"
-        let installedBuildID = readTrimmedFile(home + "/.local/share/macbox/BUILD_ID")
-        let bundledBuildID = readTrimmedFile(runtime.appendingPathComponent("BUILD_ID").path)
-        let installedVersion = readTrimmedFile(home + "/.local/share/macbox/VERSION")
-        let bundledVersion = readTrimmedFile(runtime.appendingPathComponent("VERSION").path)
-            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        if fileManager.isExecutableFile(atPath: installedBinary) {
-            if let bundledBuildID, installedBuildID == bundledBuildID {
-                completion(true)
-                return
-            }
-            if bundledBuildID == nil, let bundledVersion, installedVersion == bundledVersion {
-                completion(true)
-                return
-            }
+        if !shouldInstallEmbeddedRuntime() {
+            completion(true)
+            return
         }
 
         let installer = runtime.appendingPathComponent("install.sh").path
@@ -691,6 +696,23 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             completion(true)
         }
+    }
+
+    private func shouldInstallEmbeddedRuntime() -> Bool {
+        guard let runtime = embeddedRuntimeRoot() else { return false }
+        let installedBinary = home + "/.local/share/macbox/bin/macbox"
+        guard fileManager.isExecutableFile(atPath: installedBinary) else { return true }
+
+        let installedBuildID = readTrimmedFile(home + "/.local/share/macbox/BUILD_ID")
+        let bundledBuildID = readTrimmedFile(runtime.appendingPathComponent("BUILD_ID").path)
+        if let bundledBuildID {
+            return installedBuildID != bundledBuildID
+        }
+
+        let installedVersion = readTrimmedFile(home + "/.local/share/macbox/VERSION")
+        let bundledVersion = readTrimmedFile(runtime.appendingPathComponent("VERSION").path)
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        return bundledVersion == nil || installedVersion != bundledVersion
     }
 
     private func readTrimmedFile(_ path: String) -> String? {

@@ -76,7 +76,11 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
       - "5244:5244"
     volumes:
       - /data/appdata/alist/data:/opt/alist/data
-      - /data:/data
+      - type: bind
+        source: /data
+        target: /data
+        bind:
+          propagation: rslave
     environment:
       - PUID=0
       - PGID=0

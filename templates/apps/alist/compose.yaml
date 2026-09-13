@@ -8,7 +8,11 @@ services:
       - UMASK=022
     volumes:
       - /data/appdata/alist/data:/opt/alist/data
-      - /data:/data
+      - type: bind
+        source: /data
+        target: /data
+        bind:
+          propagation: rslave
     ports:
       - "5244:5244"
     restart: unless-stopped

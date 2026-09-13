@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -74,6 +75,30 @@ func TestPublishedHostPorts(t *testing.T) {
 	want := []int{53, 8080, 8082, 8085}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("publishedHostPorts() = %v, want %v", got, want)
+	}
+}
+
+func TestMigrateAListDataBind(t *testing.T) {
+	oldCompose := `services:
+  alist:
+    container_name: macbox-alist
+    volumes:
+      - /data/appdata/alist/data:/opt/alist/data
+      - "/data:/data"
+`
+	updated, changed := migrateAListDataBind(oldCompose)
+	if !changed {
+		t.Fatal("migrateAListDataBind() did not migrate the legacy mount")
+	}
+	if !strings.Contains(updated, "propagation: rslave") {
+		t.Fatalf("migrated Compose does not enable rslave propagation:\n%s", updated)
+	}
+	if strings.Contains(updated, `- "/data:/data"`) {
+		t.Fatalf("migrated Compose still contains the legacy data bind:\n%s", updated)
+	}
+
+	if second, changedAgain := migrateAListDataBind(updated); changedAgain || second != updated {
+		t.Fatal("migrateAListDataBind() is not idempotent")
 	}
 }
 

@@ -40,6 +40,11 @@ func TestHasDataBindMount(t *testing.T) {
 			want:   true,
 		},
 		{
+			name:   "propagating data bind needs no restart",
+			mounts: []containerMount{{Type: "bind", Source: "/data", Destination: "/data", Propagation: "rslave"}},
+			want:   false,
+		},
+		{
 			name:   "named volume is ignored",
 			mounts: []containerMount{{Type: "volume", Source: "macbox-data", Destination: "/data"}},
 			want:   false,

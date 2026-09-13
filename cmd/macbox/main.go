@@ -120,6 +120,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("[MacBox] 认证服务初始化失败，服务未启动: %v", err)
 	}
+	server.StartMaintenance()
 	apiHandler := server.Handler()
 
 	embeddedFS := web.GetFS()

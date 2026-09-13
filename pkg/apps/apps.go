@@ -34,7 +34,58 @@ const (
 	maxComposeYAMLBytes  = 8 << 20
 	maxInstallPathBytes  = 4096
 	maxEnvironmentBytes  = 4096
+	alistComposePath     = "/data/appdata/alist/compose.yaml"
 )
+
+const alistDataBindLongSyntax = `      - type: bind
+        source: /data
+        target: /data
+        bind:
+          propagation: rslave`
+
+// MigrateManagedApps applies narrowly scoped compatibility migrations to
+// MacBox-managed applications. It preserves application data and user
+// settings, and only recreates a container when its generated Compose file is
+// known to use an older, unsafe mount form.
+func (m *Manager) MigrateManagedApps(ctx context.Context) error {
+	if _, err := m.vmMgr.Exec(ctx, "test", "-f", alistComposePath); err != nil {
+		return nil
+	}
+
+	content, err := m.vmMgr.Exec(ctx, "cat", alistComposePath)
+	if err != nil {
+		return fmt.Errorf("读取 Alist Compose 配置失败: %w", err)
+	}
+	updated, changed := migrateAListDataBind(content)
+	if !changed {
+		return nil
+	}
+
+	backupPath := alistComposePath + ".before-rslave"
+	if _, err := m.vmMgr.Exec(ctx, "sudo", "cp", "--no-clobber", alistComposePath, backupPath); err != nil {
+		return fmt.Errorf("备份旧版 Alist Compose 配置失败: %w", err)
+	}
+	if _, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(updated), "sudo", "tee", alistComposePath); err != nil {
+		return fmt.Errorf("升级 Alist 挂载配置失败: %w", err)
+	}
+	if _, err := m.vmMgr.Exec(ctx, "docker", "compose", "-p", "alist", "-f", alistComposePath, "up", "-d", "--force-recreate"); err != nil {
+		return fmt.Errorf("重建 Alist 容器以启用稳定直通失败: %w", err)
+	}
+	m.dockerClient.InvalidateContainerCaches()
+	return nil
+}
+
+func migrateAListDataBind(content string) (string, bool) {
+	if !strings.Contains(content, "container_name: macbox-alist") || strings.Contains(content, "propagation: rslave") {
+		return content, false
+	}
+	for _, oldMount := range []string{`      - /data:/data`, `      - "/data:/data"`, `      - '/data:/data'`} {
+		if strings.Contains(content, oldMount) {
+			return strings.Replace(content, oldMount, alistDataBindLongSyntax, 1), true
+		}
+	}
+	return content, false
+}
 
 // normalizeInstallConfig validates values that are interpolated into a
 // Compose document. The install endpoint is administrator-only, but it still

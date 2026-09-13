@@ -25,6 +25,7 @@ type containerMount struct {
 	Type        string `json:"Type"`
 	Source      string `json:"Source"`
 	Destination string `json:"Destination"`
+	Propagation string `json:"Propagation"`
 }
 
 func (c *Client) getContainerStatsMap(ctx context.Context) map[string]containerStatsRaw {
@@ -247,7 +248,8 @@ func (c *Client) RestartContainer(ctx context.Context, idOrName string) error {
 // restart before they can see a newly mounted or changed local directory.
 //
 // The method deliberately affects only running containers that explicitly
-// bind MacBox's data directory; unrelated containers are left untouched.
+// bind MacBox's data directory without recursive mount propagation; unrelated
+// containers and rslave/rshared binds are left untouched.
 func (c *Client) RestartContainersUsingDataMount(ctx context.Context) ([]string, error) {
 	out, err := c.runDockerCmd(ctx, "ps", "-q")
 	if err != nil {
@@ -292,7 +294,9 @@ func hasDataBindMount(mounts []containerMount) bool {
 			continue
 		}
 		source := strings.TrimRight(strings.TrimSpace(mount.Source), "/")
-		if source == "/data" || strings.HasPrefix(source, "/data/") {
+		usesData := source == "/data" || strings.HasPrefix(source, "/data/")
+		propagatesMounts := mount.Propagation == "rslave" || mount.Propagation == "rshared"
+		if usesData && !propagatesMounts {
 			return true
 		}
 	}

@@ -362,6 +362,25 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 	return s
 }
 
+// StartMaintenance runs compatibility work that should happen once after a
+// backend upgrade. If the VM is stopped, the same migrations are applied by
+// the VM start/restart handlers when it becomes available.
+func (s *Server) StartMaintenance() {
+	if s == nil || !s.beginBackgroundWork() {
+		return
+	}
+	go func() {
+		defer s.endBackgroundWork()
+		ctx, cancel := s.operationContext(2 * time.Minute)
+		defer cancel()
+		status, err := s.vmMgr.GetStatusContext(ctx)
+		if err != nil || status == nil || status.Status != "Running" {
+			return
+		}
+		s.migrateManagedApps(ctx)
+	}()
+}
+
 // Close cancels server-owned background work. HTTP handlers that submit
 // long-running VM or mount operations derive their contexts from this root,
 // so process shutdown does not leave limactl jobs running indefinitely.
