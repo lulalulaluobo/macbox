@@ -92,102 +92,72 @@ MacBox 采用 Apache License 2.0 发布，允许个人和组织商用、修改�
 
 ## 安装与分发
 
-### 首选：本地 Agent 源码部署
+### 推荐安装方式：下载 DMG 安装包（首选）
 
-如果用户已经在这台 Mac 上安装了 Codex CLI、WorkBuddy 或其他具有本地终端权限的 Agent，发送下面这一句话，让 Agent 先获取源码再执行完整部署流程：
+推荐直接从 [GitHub Releases](https://github.com/lulalulaluobo/macbox/releases) 页面下载匹配 Mac 芯片架构的 DMG 安装包：
 
-```text
-请先执行 `git clone https://github.com/lulalulaluobo/macbox.git` 并进入仓库根目录，阅读根目录的 `MACBOX_DEPLOYMENT_PROMPT.md`，再严格按文档完成本地构建和部署，不要跳过检查或未经确认覆盖已有数据。
-```
+- **Apple Silicon（M1/M2/M3/M4 系列芯片）**：下载 `MacBox_*_macos_aarch64.dmg`
+- **Intel 芯片 Mac**：下载 `MacBox_*_macos_x86_64.dmg`
 
-本地 Agent 需要能够在运行 MacBox 的 Mac 上执行终端命令；手机端聊天或没有本机权限的云端 Agent 不能替代本地部署。部署完成后，Agent 应返回实际安装目录、服务地址、Lima 状态和失败日志，而不是只报告“已完成”。
+#### 安装与启动步骤
 
-### 第二选择：直接使用 GitHub Release DMG
+1. **拖入应用程序**：双击打开下载的 `.dmg` 镜像，将 `MacBoxMemu.app` 拖入 `Applications`（应用程序）文件夹；
+2. **启动菜单栏助手**：在“启动台”或“访达 → 应用程序”中双击运行 `MacBoxMemu.app`，macOS 顶部菜单栏将出现 MacBox 图标；
+3. **启动后端服务**：点击顶部菜单栏图标，选择 **“启动后端服务”**（首次运行会自动完成运行组件配置与依赖环境检查）；
+4. **进入控制台初始化**：服务启动成功后，点击菜单栏的 **“打开控制台”**（或直接在浏览器访问 `http://127.0.0.1:19808`），现场设置管理员用户名与密码完成首次安全初始化。
 
-从 GitHub Release 下载并校验匹配架构的 DMG：
+默认地址：
+- 本机：`http://127.0.0.1:19808`
+- 局域网：`http://<Mac局域网IP>:19808`
 
-- Apple Silicon（M1/M2/M3/M4）：`MacBox_*_macos_aarch64.dmg`
-- Intel Mac：`MacBox_*_macos_x86_64.dmg`
+> [!TIP]
+> **关于 macOS 首次打开安全提示（Gatekeeper）**
+> 由于开源发行包使用自签名，若 macOS 提示“无法打开，因为无法验证开发者”：
+> 1. 在访达中找到 `MacBoxMemu.app`，**右键（或按住 Control 键）点击“打开”**，在弹窗中选择“打开”；
+> 2. 或在 macOS“系统设置 → 隐私与安全性”中点击“仍要打开”；
+> 3. 亦可在终端中单次移除该 App 的隔离属性：
+>    ```bash
+>    xattr -dr com.apple.quarantine /Applications/MacBoxMemu.app
+>    ```
 
-打开 DMG 后，将 `MacBoxMemu.app` 拖入“Applications”。没有系统管理员权限时，也可以放入个人目录的 `~/Applications`。不要直接在只读 DMG 中运行。
+---
 
-从“应用程序”中启动后，从顶部菜单选择：
+### 其他安装与部署方式
 
-1. 启动后端服务；
-2. 菜单栏程序会校验并安装内嵌的用户级运行组件；
-3. 打开网页端并在本机完成首次初始化。
+#### 方式一：命令行发行包安装（tar.gz）
 
-首次初始化只允许在运行 MacBox 的 Mac 本机完成。登录页会要求现场设置管理员用户名和至少 8 个字符的强密码，不使用公开固定账号密码。
+适合无图形桌面或偏好终端管理的用户。从 GitHub Releases 下载对应架构的 `tar.gz`：
 
-如果 macOS 阻止未签名或未公证的开源 App：
-
-1. 先校验 Release 的 SHA-256；
-2. 在 Finder 中右键 `MacBoxMemu.app`，选择“打开”；
-3. 如果仍被阻止，到“系统设置 → 隐私与安全性”点击“仍要打开”。
-
-确认来源可信时，也可以只对当前发行包中的 App 移除隔离标记：
-
-```
-xattr -dr com.apple.quarantine "./MacBoxMemu.app"
-open "./MacBoxMemu.app"
-```
-
-不要使用会全局关闭 Gatekeeper 的 `sudo spctl --master-disable`。
-
-### 命令行备用安装
-
-Release 同时保留两个架构的 `tar.gz`。建议将压缩包下载并解压到用户目录下的 `~/macbox`，该目录只是临时工作目录：
-
-```
+```bash
 tar -xzf MacBox_*_macos_*.tar.gz
 cd MacBox_*_macos_*
 ./install.sh --start
 ```
 
-安装器会把程序安装到用户级目录 `~/.local/share/macbox`，并创建 `~/.local/bin/macbox`。它会检查 Lima：
+安装器会把程序安装到用户级目录 `~/.local/share/macbox`，并创建 `~/.local/bin/macbox`。它会自动检查并配置 Lima 环境。
 
-- 已安装 Lima：直接复用；
-- 已安装 Homebrew 但没有 Lima：交互式询问后执行 `brew install lima`；
-- 没有 Homebrew：显示官方安装方式并停止，不静默执行远程脚本。
+#### 方式二：从源码构建与开发者模式
 
-默认地址：
+适合参与开发、调试或自行编译定制版本的用户：
 
-```
-本机：http://127.0.0.1:19808
-局域网：http://<Mac局域网IP>:19808
-```
-
-### 从源码构建
-
-源码方式适合开发、调试和贡献，不是普通用户的默认安装路径。MacBox 源码仓库地址为 `https://github.com/lulalulaluobo/macbox`：
-
-```
+```bash
 git clone https://github.com/lulalulaluobo/macbox.git
 cd macbox
-make dmg                 # 构建两个架构的 DMG
-make dmg-aarch64         # 只构建 Apple Silicon DMG
-make dmg-x86-64          # 只构建 Intel DMG
+
+# 构建安装包
+make dmg                 # 构建双架构 DMG
+make dmg-aarch64         # 仅构建 Apple Silicon DMG
+make dmg-x86-64          # 仅构建 Intel DMG
 make release-mac         # 构建命令行压缩包
-```
 
-DMG 构建依赖 Go、Node.js/npm、Xcode Command Line Tools 和 macOS，不要求构建机预先启动 Lima。构建脚本会：
-
-1. 构建 React 前端；
-2. 分别编译 Apple Silicon 与 Intel Go 后端；
-3. 将 VM 模板、安装器、卸载器和备用控制器嵌入 `MacBoxMemu.app`；
-4. 从内向外进行 ad-hoc 签名；
-5. 生成并验证 DMG 和 SHA-256 校验文件。
-
-当前公开测试包没有 Apple Developer ID 公证，首次打开可能需要在 Finder 中右键选择“打开”。构建脚本已经为后续 Developer ID 签名和 `notarytool` 公证预留环境变量，详见 [DMG_PACKAGING_PLAN.md](DMG_PACKAGING_PLAN.md)。
-
-常用开发命令：
-
-```
+# 本地开发调试
 make build              # 构建前端并编译 bin/macbox
-make dev-backend        # 仅本机访问的开发服务
-make dev-backend-lan    # 局域网可访问的开发服务
-make test               # 后端测试
+make dev-backend        # 启动本机开发后端
+make dev-backend-lan    # 启动局域网可访问后端
+make test               # 执行后端单元测试
 ```
+
+若通过本地终端 Agent 协助部署，可参考仓库根目录的 [MACBOX_DEPLOYMENT_PROMPT.md](MACBOX_DEPLOYMENT_PROMPT.md) 引导流程。
 
 ## 局域网边界与安全说明
 
