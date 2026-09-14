@@ -545,6 +545,12 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 		fmt.Fprintf(out, "❌ 启动容器失败: %v\n", err)
 		return fmt.Errorf("docker compose up failed: %w", err)
 	}
+
+	// Best-effort: if a VirtioFS mount was not yet propagated into the
+	// container's bind mount, restart the compose project so the container
+	// picks up the correct Mac host directory.
+	m.ensureContainerMountPropagation(ctx, composePath, finalYAML, out)
+
 	portsChanged := false
 	if len(forwardedPorts) > 0 {
 		var err error
@@ -602,6 +608,68 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 
 	fmt.Fprintf(out, "\n🎉 应用 [%s] 部署完成并已成功上线运行！\n", id)
 	return nil
+}
+
+// ensureContainerMountPropagation detects whether any bind-mounted host path
+// that sits on a VirtioFS layer was shadowed by the underlying ext4 data disk
+// when Docker created the container. This happens when the VirtioFS bind mount
+// (macbox-mounts.service) finishes after Docker has already resolved the source
+// directory. A simple restart after the mounts are ready fixes the issue.
+//
+// The check is best-effort: failures are logged but never block the install.
+func (m *Manager) ensureContainerMountPropagation(ctx context.Context, composePath, composeYAML string, out io.Writer) {
+	// Parse container names and their bind-mount host paths from the YAML.
+	type composeFile struct {
+		Services map[string]struct {
+			ContainerName string   `yaml:"container_name"`
+			Volumes       []string `yaml:"volumes"`
+		} `yaml:"services"`
+	}
+	var cf composeFile
+	if err := yaml.Unmarshal([]byte(composeYAML), &cf); err != nil {
+		return
+	}
+
+	needRestart := false
+	for _, svc := range cf.Services {
+		cname := svc.ContainerName
+		if cname == "" {
+			continue
+		}
+		for _, vol := range svc.Volumes {
+			parts := strings.SplitN(vol, ":", 3)
+			if len(parts) < 2 || !strings.HasPrefix(parts[0], "/data/") {
+				continue
+			}
+			hostPath := strings.Trim(parts[0], `"'`)
+			containerPath := strings.Trim(parts[1], `"'`)
+
+			// Check whether the host path is backed by VirtioFS in the VM.
+			hostDF, err := m.vmMgr.Exec(ctx, "df", "-T", hostPath)
+			if err != nil || !strings.Contains(hostDF, "virtiofs") {
+				continue // Not a VirtioFS-backed path; nothing to verify.
+			}
+
+			// Now check what the container sees.
+			containerDF, err := m.vmMgr.Exec(ctx, "docker", "exec", cname, "df", "-T", containerPath)
+			if err != nil {
+				continue
+			}
+			if !strings.Contains(containerDF, "virtiofs") {
+				fmt.Fprintf(out, "⚠️ 检测到 %s 的挂载 %s 未穿透到 Mac 直通目录，将自动重启容器修复...\n", cname, hostPath)
+				needRestart = true
+				break
+			}
+		}
+	}
+
+	if needRestart {
+		if err := m.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", composePath, "restart"); err != nil {
+			fmt.Fprintf(out, "⚠️ 自动重启容器失败: %v（可手动重启容器解决）\n", err)
+		} else {
+			fmt.Fprintln(out, "✅ 容器已重启，Mac 直通目录挂载已修复")
+		}
+	}
 }
 
 func (m *Manager) Install(ctx context.Context, id string) error {
