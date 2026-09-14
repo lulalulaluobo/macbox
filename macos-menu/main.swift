@@ -198,7 +198,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let url = URL(string: "http://127.0.0.1:\(port)/api/system/menubar-status") else { return }
 
         monitorRequestInFlight = true
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 2.5)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5.0)
         request.httpMethod = "GET"
         URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
             let status: MenuBarStatus?
@@ -210,7 +210,9 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.monitorRequestInFlight = false
-                self.updateMonitoringItems(status)
+                if let status {
+                    self.updateMonitoringItems(status)
+                }
             }
         }.resume()
     }

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/lulalulaluobo/macbox/pkg/config"
@@ -16,7 +17,7 @@ import (
 // through the loopback-only exception in Handler; it deliberately omits host
 // names, IP addresses, paths, and other control-plane details.
 func (s *Server) handleSystemMenubarStatus(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
 	result := map[string]interface{}{
@@ -40,34 +41,61 @@ func (s *Server) handleSystemMenubarStatus(w http.ResponseWriter, r *http.Reques
 	_, limaInstalled := vm.FindLima()
 	result["limaInstalled"] = limaInstalled
 
-	if vmStatus, err := s.vmMgr.GetStatusContext(ctx); err == nil && vmStatus != nil {
-		result["vmStatus"] = vmStatus.Status
-		result["dockerReady"] = vmStatus.DockerReady
-	} else {
-		result["degraded"] = true
-	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
-	if containers, err := s.dockerClient.ListContainers(ctx); err == nil {
-		running := 0
-		for _, container := range containers {
-			if container.State == "running" {
-				running++
-			}
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		if vmStatus, err := s.vmMgr.GetStatusContext(ctx); err == nil && vmStatus != nil {
+			mu.Lock()
+			result["vmStatus"] = vmStatus.Status
+			result["dockerReady"] = vmStatus.DockerReady
+			mu.Unlock()
+		} else {
+			mu.Lock()
+			result["degraded"] = true
+			mu.Unlock()
 		}
-		result["dockerTotal"] = len(containers)
-		result["dockerRunning"] = running
-	} else {
-		result["degraded"] = true
-	}
+	}()
 
-	if cfgSnapshot, err := storageSnapshot(s, ctx); err == nil && cfgSnapshot != nil {
-		result["storageName"] = cfgSnapshot.Name
-		result["storageUsed"] = cfgSnapshot.UsedSpace
-		result["storageTotal"] = cfgSnapshot.TotalSize
-		result["storageUsedPercent"] = cfgSnapshot.UsedPercent
-	} else {
-		result["degraded"] = true
-	}
+	go func() {
+		defer wg.Done()
+		if containers, err := s.dockerClient.ListContainersSummary(ctx); err == nil {
+			running := 0
+			for _, container := range containers {
+				if container.State == "running" {
+					running++
+				}
+			}
+			mu.Lock()
+			result["dockerTotal"] = len(containers)
+			result["dockerRunning"] = running
+			mu.Unlock()
+		} else {
+			mu.Lock()
+			result["degraded"] = true
+			mu.Unlock()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		if cfgSnapshot, err := storageSnapshot(s, ctx); err == nil && cfgSnapshot != nil {
+			mu.Lock()
+			result["storageName"] = cfgSnapshot.Name
+			result["storageUsed"] = cfgSnapshot.UsedSpace
+			result["storageTotal"] = cfgSnapshot.TotalSize
+			result["storageUsedPercent"] = cfgSnapshot.UsedPercent
+			mu.Unlock()
+		} else {
+			mu.Lock()
+			result["degraded"] = true
+			mu.Unlock()
+		}
+	}()
+
+	wg.Wait()
 
 	writeJSON(w, http.StatusOK, result)
 }
