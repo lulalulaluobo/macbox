@@ -63,10 +63,12 @@ pid_matches_macbox() {
 }
 
 owned_pid() {
-  local pid=""
-  if [[ -f "$PID_FILE" ]]; then
-    pid="$(tr -d '[:space:]' < "$PID_FILE" 2>/dev/null || true)"
-  fi
+    local pid=""
+    if [[ -f "$PID_FILE" ]]; then
+        # Older controllers stored "<pid> <command>" in this file. Read only
+        # the first field so upgrades remain able to stop the managed server.
+        pid="$(awk 'NF { print $1; exit }' "$PID_FILE" 2>/dev/null || true)"
+    fi
   if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && pid_matches_macbox "$pid"; then
     printf '%s\n' "$pid"
     return 0

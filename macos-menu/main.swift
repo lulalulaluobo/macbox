@@ -630,16 +630,53 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func ownedBackendPID() -> Int32? {
-        var candidates: [String] = [home + "/.macbox/macbox.menu.pid", home + "/.macbox/macbox.command.pid"]
-        if let runningPID = backendProcess?.processIdentifier { candidates.insert(String(runningPID), at: 0) }
-        var binaries = [home + "/.local/share/macbox/bin/macbox", Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("bin/macbox").path]
+        var candidates: [Int32] = []
+        if let runningPID = backendProcess?.processIdentifier { candidates.append(runningPID) }
+
+        for path in [home + "/.macbox/macbox.menu.pid", home + "/.macbox/macbox.command.pid"] {
+            if let pid = readPIDFile(path) { candidates.append(pid) }
+        }
+
+        for pid in candidates where pid > 1 {
+            if isMacBoxBackendPID(pid) { return pid }
+        }
+
+        // The menu app may have lost its PID file after an app update or a
+        // manual launch. Recover the MacBox process from its managed port,
+        // while still refusing to touch an unrelated process on that port.
+        return backendPIDListeningOnPort()
+    }
+
+    private func readPIDFile(_ path: String) -> Int32? {
+        guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let firstToken = contents.split { character in
+            character == " " || character == "\t" || character == "\n" || character == "\r"
+        }.first
+        guard let firstToken, let pid = Int32(firstToken), pid > 1 else { return nil }
+        return pid
+    }
+
+    private func macBoxBackendBinaries() -> [String] {
+        var binaries = [
+            home + "/.local/share/macbox/bin/macbox",
+            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("bin/macbox").path
+        ]
         if let embedded = embeddedRuntimeRoot()?.appendingPathComponent("bin/macbox").path {
             binaries.append(embedded)
         }
-        for value in candidates {
-            guard let pid = Int32(value.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 1 else { continue }
-            let command = runSync("/bin/ps", arguments: ["-p", String(pid), "-o", "command="])
-            if binaries.contains(where: { command.contains($0) }) { return pid }
+        return binaries
+    }
+
+    private func isMacBoxBackendPID(_ pid: Int32) -> Bool {
+        let command = runSync("/bin/ps", arguments: ["-p", String(pid), "-o", "command="])
+        return macBoxBackendBinaries().contains(where: { command.contains($0) })
+    }
+
+    private func backendPIDListeningOnPort() -> Int32? {
+        let output = runSync("/usr/sbin/lsof", arguments: ["-nP", "-tiTCP:\(port)", "-sTCP:LISTEN"])
+        for token in output.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" || $0 == "\r" }) {
+            guard let pid = Int32(token), pid > 1, isMacBoxBackendPID(pid) else { continue }
+            return pid
         }
         return nil
     }

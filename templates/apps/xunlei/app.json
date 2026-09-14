@@ -13,7 +13,7 @@
   "volumes": [
     {"host": "/data/appdata/xunlei/data", "container": "/xunlei/data", "description": "迅雷登录信息、插件与运行数据"},
     {"host": "/data/appdata/xunlei/cache", "container": "/xunlei/var/packages/pan-xunlei-com", "description": "迅雷套件缓存，避免重复下载"},
-    {"host": "/data/downloads", "container": "/xunlei/downloads", "description": "迅雷下载文件目录"}
+    {"host": "/data/downloads", "container": "/xunlei/downloads", "description": "迅雷下载文件目录（支持本机直通目录）"}
   ],
   "env": [
     {"key": "XL_UID", "value": "0", "description": "下载目录用户 ID（MacBox 数据目录默认由 root 管理）"},

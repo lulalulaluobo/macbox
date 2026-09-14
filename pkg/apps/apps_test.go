@@ -102,6 +102,28 @@ func TestMigrateAListDataBind(t *testing.T) {
 	}
 }
 
+func TestMigrateXunleiDownloadBind(t *testing.T) {
+	oldCompose := `services:
+  xunlei:
+    volumes:
+      - "/data/downloads:/xunlei/downloads"
+      - /data/appdata/xunlei/data:/xunlei/data
+`
+	updated, changed := migrateXunleiDownloadBind(oldCompose)
+	if !changed {
+		t.Fatal("migrateXunleiDownloadBind() did not migrate the legacy mount")
+	}
+	if !strings.Contains(updated, "source: /data/downloads") || !strings.Contains(updated, "propagation: rslave") {
+		t.Fatalf("migrated Compose does not propagate the download sub-mount:\n%s", updated)
+	}
+	if strings.Contains(updated, `"/data/downloads:/xunlei/downloads"`) {
+		t.Fatalf("migrated Compose still contains the legacy download bind:\n%s", updated)
+	}
+	if second, changedAgain := migrateXunleiDownloadBind(updated); changedAgain || second != updated {
+		t.Fatal("migrateXunleiDownloadBind() is not idempotent")
+	}
+}
+
 func TestPublishedHostPortsRejectsInvalidCompose(t *testing.T) {
 	if _, err := publishedHostPorts("services: ["); err == nil {
 		t.Fatal("publishedHostPorts() accepted invalid YAML")
