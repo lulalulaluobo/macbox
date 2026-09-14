@@ -518,14 +518,7 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
       - XL_UID=0
       - XL_GID=0
     volumes:
-      # /data/downloads can contain VirtioFS sub-mounts such as the Mac
-      # Downloads directory. Propagate those mounts into the container so
-      # downloads never land in Docker's private view of the VM directory.
-      - type: bind
-        source: /data/downloads
-        target: /xunlei/downloads
-        bind:
-          propagation: rslave
+      - /data/downloads:/xunlei/downloads
       - /data/appdata/xunlei/data:/xunlei/data
       - /data/appdata/xunlei/cache:/xunlei/var/packages/pan-xunlei-com
 `,

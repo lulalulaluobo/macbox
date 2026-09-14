@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -44,25 +43,12 @@ const alistDataBindLongSyntax = `      - type: bind
         bind:
           propagation: rslave`
 
-const xunleiDownloadBindLongSyntax = `      - type: bind
-        source: /data/downloads
-        target: /xunlei/downloads
-        bind:
-          propagation: rslave`
-
 // MigrateManagedApps applies narrowly scoped compatibility migrations to
 // MacBox-managed applications. It preserves application data and user
 // settings, and only recreates a container when its generated Compose file is
 // known to use an older, unsafe mount form.
 func (m *Manager) MigrateManagedApps(ctx context.Context) error {
-	var migrationErrors []error
-	if err := m.migrateAListDataMount(ctx); err != nil {
-		migrationErrors = append(migrationErrors, err)
-	}
-	if err := m.migrateXunleiDownloadMount(ctx); err != nil {
-		migrationErrors = append(migrationErrors, err)
-	}
-	return errors.Join(migrationErrors...)
+	return m.migrateAListDataMount(ctx)
 }
 
 func (m *Manager) migrateAListDataMount(ctx context.Context) error {
@@ -93,61 +79,7 @@ func (m *Manager) migrateAListDataMount(ctx context.Context) error {
 	return nil
 }
 
-func (m *Manager) migrateXunleiDownloadMount(ctx context.Context) error {
-	const composePath = "/data/appdata/xunlei/compose.yaml"
-	if _, err := m.vmMgr.Exec(ctx, "test", "-f", composePath); err != nil {
-		return nil
-	}
 
-	content, err := m.vmMgr.Exec(ctx, "cat", composePath)
-	if err != nil {
-		return fmt.Errorf("读取迅雷 Compose 配置失败: %w", err)
-	}
-	updated, changed := migrateXunleiDownloadBind(content)
-	if !changed {
-		return nil
-	}
-
-	backupPath := composePath + ".before-rslave"
-	if _, err := m.vmMgr.Exec(ctx, "sudo", "cp", "--no-clobber", composePath, backupPath); err != nil {
-		return fmt.Errorf("备份旧版迅雷 Compose 配置失败: %w", err)
-	}
-	if _, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(updated), "sudo", "tee", composePath); err != nil {
-		return fmt.Errorf("升级迅雷下载挂载配置失败: %w", err)
-	}
-
-	// Recreate a running container immediately. For a stopped container,
-	// refresh its definition without starting the service unexpectedly.
-	running, inspectErr := m.vmMgr.Exec(ctx, "docker", "inspect", "-f", "{{.State.Running}}", "macbox-xunlei")
-	if inspectErr != nil {
-		return nil
-	}
-	if strings.TrimSpace(running) == "true" {
-		if _, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "up", "-d", "--force-recreate"); err != nil {
-			return fmt.Errorf("重建迅雷容器以启用直通目录传播失败: %w", err)
-		}
-	} else if _, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "create", "--force-recreate"); err != nil {
-		return fmt.Errorf("刷新已停止迅雷容器配置失败: %w", err)
-	}
-	m.dockerClient.InvalidateContainerCaches()
-	return nil
-}
-
-func migrateXunleiDownloadBind(content string) (string, bool) {
-	if strings.Contains(content, "source: /data/downloads") && strings.Contains(content, "propagation: rslave") {
-		return content, false
-	}
-	for _, oldMount := range []string{
-		`      - /data/downloads:/xunlei/downloads`,
-		`      - "/data/downloads:/xunlei/downloads"`,
-		`      - '/data/downloads:/xunlei/downloads'`,
-	} {
-		if strings.Contains(content, oldMount) {
-			return strings.Replace(content, oldMount, xunleiDownloadBindLongSyntax, 1), true
-		}
-	}
-	return content, false
-}
 
 func migrateAListDataBind(content string) (string, bool) {
 	if !strings.Contains(content, "container_name: macbox-alist") || strings.Contains(content, "propagation: rslave") {
