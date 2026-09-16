@@ -8,6 +8,13 @@ MacBox 采用 Apache License 2.0 发布，允许个人和组织商用、修改�
 
 当前版本同时提供可拖入“应用程序”的 DMG，以及用于命令行部署和故障恢复的预编译压缩包。发行产物不包含开发机用户、Docker 容器、Docker 镜像、卷、Lima 实例或 MacBox 数据。
 
+## 🎬 视频教程
+
+想快速了解 MacBox 的安装、配置和使用，可以观看我制作的视频教程：
+
+- [▶ YouTube 教程](https://www.youtube.com/watch?v=XUFgOKayQXQ)
+- [▶ 哔哩哔哩教程](https://www.bilibili.com/video/BV17hen6GE3M/?vd_source=cc70909d9757ad74a76ffd8f1ce58103)
+
 ## v0.1.0 当前版本功能（2026-09-13）
 
 这是 MacBox 的第一个可用版本，重点完成“轻量运行、按需扩展、网页管理”的基础闭环：用户可以把一台闲置 Mac 变成文件中心、应用中心和开发工作台，并通过 VM 内终端继续安装自己的项目。
