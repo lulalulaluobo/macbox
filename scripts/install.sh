@@ -10,6 +10,7 @@ START_AFTER_INSTALL=0
 SKIP_LIMA_CHECK=0
 SKIP_MENU_APP=0
 BACKEND_SOURCE=""
+MENU_APP_SOURCE=""
 PORT="${MACBOX_PORT:-$DEFAULT_PORT}"
 HOST="${MACBOX_HOST:-$DEFAULT_HOST}"
 
@@ -120,15 +121,33 @@ validate_release() {
     *) die "不支持的 macOS CPU 架构：$machine" ;;
   esac
 
+  # Inside the menu bar app bundle the backend ships under Contents/Helpers and
+  # the app lives above Resources/runtime; manual runs from that directory must
+  # work the same as from the tar.gz layout (bin/macbox next to install.sh).
+  local bundle_helpers="$SCRIPT_DIR/../../Helpers/macbox"
+  local bundle_app
+  bundle_app="$(cd "$SCRIPT_DIR/../.." 2>/dev/null && pwd -P)/MacBoxMemu.app"
   if [[ -z "$BACKEND_SOURCE" ]]; then
-    BACKEND_SOURCE="$SCRIPT_DIR/bin/macbox"
+    if [[ -x "$SCRIPT_DIR/bin/macbox" ]]; then
+      BACKEND_SOURCE="$SCRIPT_DIR/bin/macbox"
+    elif [[ "$SCRIPT_DIR" == */Contents/Resources/runtime && -x "$bundle_helpers" ]]; then
+      BACKEND_SOURCE="$(cd "$(dirname -- "$bundle_helpers")" && pwd -P)/macbox"
+      [[ -n "$MENU_APP_SOURCE" ]] || MENU_APP_SOURCE="$bundle_app"
+      if (( SKIP_MENU_APP == 0 )); then
+        log "检测到在 App 内手动运行 install.sh：跳过复制菜单栏 App（当前 App 即菜单入口）。"
+      fi
+      SKIP_MENU_APP=1
+    else
+      BACKEND_SOURCE="$SCRIPT_DIR/bin/macbox"
+    fi
   fi
   [[ "$BACKEND_SOURCE" == /* ]] || die "后端来源必须是绝对路径。"
   [[ -x "$BACKEND_SOURCE" && ! -d "$BACKEND_SOURCE" ]] || die "发行包不完整：缺少可执行的 macbox 后端。"
   [[ -x "$SCRIPT_DIR/MacBox.command" ]] || die "发行包不完整：缺少可执行文件 MacBox.command。"
   if (( SKIP_MENU_APP == 0 )); then
-    [[ -d "$SCRIPT_DIR/MacBoxMemu.app/Contents/MacOS" ]] || die "发行包不完整：缺少 MacBoxMemu.app。"
-    [[ -x "$SCRIPT_DIR/MacBoxMemu.app/Contents/MacOS/MacBoxMemu" ]] || die "发行包不完整：MacBoxMemu.app 不可执行。"
+    [[ -n "$MENU_APP_SOURCE" ]] || MENU_APP_SOURCE="$SCRIPT_DIR/MacBoxMemu.app"
+    [[ -d "$MENU_APP_SOURCE/Contents/MacOS" ]] || die "发行包不完整：缺少 MacBoxMemu.app。"
+    [[ -x "$MENU_APP_SOURCE/Contents/MacOS/MacBoxMemu" ]] || die "发行包不完整：MacBoxMemu.app 不可执行。"
   fi
   [[ -x "$SCRIPT_DIR/uninstall.sh" ]] || die "发行包不完整：缺少可执行文件 uninstall.sh。"
   [[ -d "$SCRIPT_DIR/templates/vm" ]] || die "发行包不完整：缺少 templates/vm。"
@@ -184,7 +203,7 @@ install_files() {
   cp -R "$SCRIPT_DIR/templates" "$stage/templates"
   [[ ! -d "$SCRIPT_DIR/assets" ]] || cp -R "$SCRIPT_DIR/assets" "$stage/assets"
   if (( SKIP_MENU_APP == 0 )); then
-    cp -R "$SCRIPT_DIR/MacBoxMemu.app" "$stage/MacBoxMemu.app"
+    cp -R "$MENU_APP_SOURCE" "$stage/MacBoxMemu.app"
   fi
   cp "$SCRIPT_DIR/uninstall.sh" "$stage/uninstall.sh"
   cp "$SCRIPT_DIR/MacBox.command" "$stage/MacBox.command"
