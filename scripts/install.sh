@@ -142,7 +142,12 @@ validate_release() {
     fi
   fi
   [[ "$BACKEND_SOURCE" == /* ]] || die "后端来源必须是绝对路径。"
-  [[ -x "$BACKEND_SOURCE" && ! -d "$BACKEND_SOURCE" ]] || die "发行包不完整：缺少可执行的 macbox 后端。"
+  if [[ ! -x "$BACKEND_SOURCE" || -d "$BACKEND_SOURCE" ]]; then
+    if [[ -f "$SCRIPT_DIR/../go.mod" && -d "$SCRIPT_DIR/../cmd/macbox" ]]; then
+      die "这是源码仓库/源码归档，不包含编译产物。请先在仓库根目录执行 make build && make release-mac，再进入解压 dist/MacBox_*_macos_*.tar.gz 后运行 ./install.sh；或从 GitHub Releases 下载二进制包 MacBox_<版本>_macos_<架构>.tar.gz（不要使用自动生成的 Source code 归档）。"
+    fi
+    die "发行包不完整：缺少可执行的 macbox 后端。"
+  fi
   [[ -x "$SCRIPT_DIR/MacBox.command" ]] || die "发行包不完整：缺少可执行文件 MacBox.command。"
   if (( SKIP_MENU_APP == 0 )); then
     [[ -n "$MENU_APP_SOURCE" ]] || MENU_APP_SOURCE="$SCRIPT_DIR/MacBoxMemu.app"
