@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/containerengine"
 	"github.com/lulalulaluobo/macbox/pkg/storage"
 	"gopkg.in/yaml.v3"
 )
@@ -609,6 +610,23 @@ func (m *Manager) ValidateDataDiskContext(ctx context.Context) error {
 	return nil
 }
 
+// shouldInstallGuestDocker decides whether the rendered Lima config installs
+// Docker inside the guest. With dockerMode "auto" and no existing instance, a
+// running host engine lets a newly created VM stay Docker-free; existing
+// instances keep their original layout because Lima runs provision scripts at
+// creation time.
+func (m *Manager) shouldInstallGuestDocker(snapshot *config.Config, instanceExists bool) bool {
+	if instanceExists || snapshot.VM.DockerMode == "vm" {
+		return true
+	}
+	for _, engine := range containerengine.HostEngines() {
+		if engine.Running && engine.SocketPath != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // GenerateConfig renders templates/vm/macbox.yaml.tmpl into ~/.macbox/macbox.yaml
 func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 	tmplData, err := os.ReadFile(tmplPath)
@@ -674,6 +692,14 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		}
 	}
 
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		return fmt.Errorf("读取用户目录失败: %w", homeErr)
+	}
+	instanceDir := filepath.Join(home, ".lima", instanceName)
+	_, instanceStatErr := os.Stat(instanceDir)
+	instanceExists := instanceStatErr == nil
+
 	data := struct {
 		CPUs             int
 		Memory           int
@@ -685,6 +711,7 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		LocalMounts      []config.LocalMount
 		AISkillsEnabled  bool
 		AISkillsHostPath string
+		InstallDocker    bool
 	}{
 		CPUs:             cpus,
 		Memory:           memory,
@@ -696,6 +723,7 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		LocalMounts:      localMounts,
 		AISkillsEnabled:  cfgSnapshot.Terminal.AISkillsEnabled,
 		AISkillsHostPath: aiSkillsHostPath,
+		InstallDocker:    m.shouldInstallGuestDocker(cfgSnapshot, instanceExists),
 	}
 
 	var buf bytes.Buffer
@@ -713,12 +741,7 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		return fmt.Errorf("读取现有虚拟机配置失败: %w", outputErr)
 	}
 	instancePath := ""
-	home, homeErr := os.UserHomeDir()
-	if homeErr != nil {
-		return fmt.Errorf("读取用户目录失败: %w", homeErr)
-	}
-	instanceDir := filepath.Join(home, ".lima", instanceName)
-	if _, err := os.Stat(instanceDir); err == nil {
+	if instanceExists {
 		instancePath = filepath.Join(instanceDir, "lima.yaml")
 	}
 
@@ -1138,13 +1161,24 @@ func (m *Manager) ProbeLocalMounts(ctx context.Context) ([]LocalMountProbe, erro
 // supplementary groups. Lima can keep an existing shell session alive after
 // usermod, so callers that need the new groups should use
 // ExecAsManagementUser, which starts a fresh process with initgroups applied.
+// The docker group is only present when the guest actually installed Docker;
+// host-engine VMs skip it, mirroring the `getent group` guard in the
+// provisioning script.
 func (m *Manager) EnsureRuntimeAccess(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	out, err := m.Exec(ctx, "sudo", "usermod", "-aG", "docker,"+m.guestProductGroup(), m.guestManagementUser())
-	if err != nil {
-		return fmt.Errorf("修复 Lima 管理账号权限失败: %s (%w)", strings.TrimSpace(out), err)
+	var groups []string
+	for _, group := range []string{"docker", m.guestProductGroup()} {
+		if _, err := m.Exec(ctx, "getent", "group", group); err == nil {
+			groups = append(groups, group)
+		}
+	}
+	if len(groups) > 0 {
+		out, err := m.Exec(ctx, "sudo", "usermod", "-aG", strings.Join(groups, ","), m.guestManagementUser())
+		if err != nil {
+			return fmt.Errorf("修复 Lima 管理账号权限失败: %s (%w)", strings.TrimSpace(out), err)
+		}
 	}
 	if _, err := m.ExecAsManagementUser(ctx, "id"); err != nil {
 		return fmt.Errorf("验证 Lima 管理账号权限失败: %w", err)
@@ -1461,7 +1495,7 @@ func runVMCommand(ctx context.Context, instanceName string, stdin io.Reader, com
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	err := cmd.Run()
-	return output.String(), err
+	return output.String(), enrichCommandError(err, output.String())
 }
 
 func runHostCommand(ctx context.Context, name string, args ...string) (string, error) {
@@ -1473,7 +1507,37 @@ func runHostCommand(ctx context.Context, name string, args ...string) (string, e
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	err := cmd.Run()
-	return output.String(), err
+	return output.String(), enrichCommandError(err, output.String())
+}
+
+// enrichCommandError keeps the original error type (callers use errors.As to
+// detect exec.ExitError) but appends the last lines of merged output so UI
+// errors show what the guest command actually complained about.
+func enrichCommandError(err error, output string) error {
+	if err == nil {
+		return nil
+	}
+	tail := commandErrorTail(output)
+	if tail == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, tail)
+}
+
+func commandErrorTail(output string) string {
+	const maxTailBytes = 400
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var kept []string
+	for i := len(lines) - 1; i >= 0 && len(kept) < 4; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			kept = append([]string{line}, kept...)
+		}
+	}
+	tail := strings.Join(kept, " | ")
+	if len(tail) > maxTailBytes {
+		tail = "…" + tail[len(tail)-maxTailBytes:]
+	}
+	return tail
 }
 
 func resolveCommandPath(name string) string {

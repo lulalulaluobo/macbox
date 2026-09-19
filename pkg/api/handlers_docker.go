@@ -11,11 +11,17 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/containerengine"
 	"github.com/lulalulaluobo/macbox/pkg/docker"
 )
 
 // Docker Handlers
 func (s *Server) handleDockerOverview(w http.ResponseWriter, r *http.Request) {
+	if s.appleContainerActive(r.Context()) {
+		s.handleAppleOverview(w, r)
+		return
+	}
 	overview, err := s.dockerClient.GetOverview(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -24,7 +30,34 @@ func (s *Server) handleDockerOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, overview)
 }
 
+// handleDockerEngine reports which container engine MacBox is currently
+// routing Docker commands to (host engine, Lima VM, or Apple container).
+func (s *Server) handleDockerEngine(w http.ResponseWriter, r *http.Request) {
+	if s.appleContainerActive(r.Context()) {
+		running, _, _ := s.appleClient.SystemStatus(r.Context())
+		bridgeEnabled := false
+		if snapshot, err := config.Snapshot(s.cfg); err == nil {
+			bridgeEnabled = snapshot.Container.AppleCompose
+		}
+		mockerPath, mockerInstalled := containerengine.MockerCLI()
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"mode":                s.appleEngineMode(),
+			"engine":              map[string]interface{}{"kind": "apple-container", "name": "Apple container", "cliPath": s.appleClient.CLIPath(), "running": running},
+			"source":              "apple",
+			"appleComposeEnabled": bridgeEnabled,
+			"mockerInstalled":     mockerInstalled,
+			"mockerPath":          mockerPath,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.dockerClient.EngineInfo(r.Context()))
+}
+
 func (s *Server) handleDockerContainers(w http.ResponseWriter, r *http.Request) {
+	if s.appleContainerActive(r.Context()) {
+		s.handleAppleContainers(w, r)
+		return
+	}
 	containers, err := s.dockerClient.ListContainers(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusOK, []docker.ContainerInfo{})
@@ -41,6 +74,10 @@ func (s *Server) handleDockerContainerAction(w http.ResponseWriter, r *http.Requ
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+	if s.appleContainerActive(r.Context()) {
+		s.handleAppleContainerAction(w, r, id, req.Action, req.Force)
 		return
 	}
 	if !s.beginDockerOperation(w) {
@@ -71,12 +108,16 @@ func (s *Server) handleDockerContainerAction(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleDockerRemoveContainer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	force := r.URL.Query().Get("force") == "true"
+	if s.appleContainerActive(r.Context()) {
+		s.handleAppleContainerAction(w, r, id, "remove", force)
+		return
+	}
 	if !s.beginDockerOperation(w) {
 		return
 	}
 	defer s.endDockerOperation()
-	id := r.PathValue("id")
-	force := r.URL.Query().Get("force") == "true"
 	if err := s.dockerClient.RemoveContainer(r.Context(), id, force); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -91,6 +132,10 @@ func (s *Server) handleDockerLogs(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(tailStr); err == nil && n > 0 {
 		tail = docker.NormalizeLogTail(n)
 	}
+	if s.appleContainerActive(r.Context()) {
+		s.handleAppleLogs(w, r, id, tail)
+		return
+	}
 	logs, err := s.dockerClient.GetLogs(r.Context(), id, tail)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -101,6 +146,10 @@ func (s *Server) handleDockerLogs(w http.ResponseWriter, r *http.Request) {
 
 // Docker Images Handlers
 func (s *Server) handleDockerImages(w http.ResponseWriter, r *http.Request) {
+	if s.appleContainerActive(r.Context()) {
+		s.handleAppleImages(w, r)
+		return
+	}
 	images, err := s.dockerClient.ListImages(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusOK, []docker.ImageInfo{})
@@ -115,6 +164,10 @@ func (s *Server) handleDockerPullImage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Image) == "" {
 		writeError(w, http.StatusBadRequest, "镜像名称不能为空")
+		return
+	}
+	if s.appleContainerActive(r.Context()) {
+		s.handleApplePullImage(w, r, strings.TrimSpace(req.Image))
 		return
 	}
 	if !s.beginDockerOperation(w) {
@@ -134,12 +187,16 @@ func (s *Server) handleDockerPullImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerRemoveImage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	force := r.URL.Query().Get("force") == "true"
+	if s.appleContainerActive(r.Context()) {
+		s.handleAppleRemoveImage(w, r, id, force)
+		return
+	}
 	if !s.beginDockerOperation(w) {
 		return
 	}
 	defer s.endDockerOperation()
-	id := r.PathValue("id")
-	force := r.URL.Query().Get("force") == "true"
 	if err := s.dockerClient.RemoveImage(r.Context(), id, force); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -148,6 +205,9 @@ func (s *Server) handleDockerRemoveImage(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleDockerPruneImages(w http.ResponseWriter, r *http.Request) {
+	if s.appleUnsupported(w, r, "镜像清理") {
+		return
+	}
 	if !s.beginDockerOperation(w) {
 		return
 	}
@@ -165,6 +225,27 @@ func (s *Server) handleDockerPruneImages(w http.ResponseWriter, r *http.Request)
 
 // Docker Compose Handlers
 func (s *Server) handleDockerComposeList(w http.ResponseWriter, r *http.Request) {
+	if s.appleContainerActive(r.Context()) {
+		// Reached only via composeEngine, which guarantees the mocker CLI is
+		// injected into ctx. Container inventory comes from the Apple
+		// `container` list (it already carries mocker compose project labels).
+		containers, err := s.appleClient.List(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusOK, []docker.ComposeProject{})
+			return
+		}
+		infos := make([]docker.ContainerInfo, 0, len(containers))
+		for _, c := range containers {
+			infos = append(infos, convertAppleContainer(c))
+		}
+		projects, err := s.dockerClient.ListComposeProjectsWithContainers(r.Context(), infos)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, projects)
+		return
+	}
 	projects, err := s.dockerClient.ListComposeProjects(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusOK, []docker.ComposeProject{})
@@ -311,6 +392,10 @@ func dockerComposeDeleteErrorStatus(err error) int {
 
 // Docker Networks & Mirrors Handlers
 func (s *Server) handleDockerNetworks(w http.ResponseWriter, r *http.Request) {
+	if s.appleContainerActive(r.Context()) {
+		writeJSON(w, http.StatusOK, []docker.DockerNetwork{})
+		return
+	}
 	networks, err := s.dockerClient.ListNetworks(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusOK, []docker.DockerNetwork{})
@@ -320,6 +405,9 @@ func (s *Server) handleDockerNetworks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDockerGetMirrors(w http.ResponseWriter, r *http.Request) {
+	if s.appleUnsupported(w, r, "镜像加速设置") {
+		return
+	}
 	mirrors, err := s.dockerClient.GetRegistryMirrors(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -329,6 +417,9 @@ func (s *Server) handleDockerGetMirrors(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleDockerSetMirrors(w http.ResponseWriter, r *http.Request) {
+	if s.appleUnsupported(w, r, "镜像加速设置") {
+		return
+	}
 	var req struct {
 		Mirrors []string `json:"mirrors"`
 	}

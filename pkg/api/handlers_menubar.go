@@ -40,6 +40,13 @@ func (s *Server) handleSystemMenubarStatus(w http.ResponseWriter, r *http.Reques
 
 	_, limaInstalled := vm.FindLima()
 	result["limaInstalled"] = limaInstalled
+	// The menu-bar helper mirrors this preference so "start backend" respects
+	// the configured --no-open without parsing config.yaml itself.
+	if cfgSnapshot, err := config.Snapshot(s.cfg); err == nil && cfgSnapshot != nil {
+		result["noOpen"] = cfgSnapshot.System.NoOpen
+	} else {
+		result["noOpen"] = false
+	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex

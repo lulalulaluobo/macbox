@@ -79,8 +79,6 @@ func (m *Manager) migrateAListDataMount(ctx context.Context) error {
 	return nil
 }
 
-
-
 func migrateAListDataBind(content string) (string, bool) {
 	if !strings.Contains(content, "container_name: macbox-alist") || strings.Contains(content, "propagation: rslave") {
 		return content, false
@@ -200,6 +198,18 @@ func generateAppSecret() (string, error) {
 		return "", fmt.Errorf("generate app secret: %w", err)
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// translateGuestPath maps a VM-side /data path onto the host data root used
+// when a host container engine is active.
+func translateGuestPath(guestPath, dataRoot string) string {
+	if guestPath == docker.VMDataRoot {
+		return dataRoot
+	}
+	if strings.HasPrefix(guestPath, docker.VMDataRoot+"/") {
+		return path.Join(dataRoot, strings.TrimPrefix(guestPath, docker.VMDataRoot+"/"))
+	}
+	return guestPath
 }
 
 // Keep this small package-local wrapper for existing tests and callers while
@@ -420,6 +430,9 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	if err != nil {
 		return err
 	}
+	if m.dockerClient == nil {
+		return fmt.Errorf("Docker 客户端未初始化")
+	}
 	fmt.Fprintf(out, "🚀 [MacBox AppStore] 开始准备部署应用: %s\n", id)
 
 	meta, err := m.GetAppConfig(ctx, id)
@@ -495,6 +508,11 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 		baiduVNCPassword = secret[:8]
 		finalYAML = strings.ReplaceAll(finalYAML, "VNC_SERVER_PASSWD=macbox-change-me", "VNC_SERVER_PASSWD="+baiduVNCPassword)
 	}
+	// When operations resolve to a host container engine, translate the
+	// VM-authored document: /data bind sources move under the MacBox host
+	// data root and docker.sock mounts point at the engine socket.
+	hostEngineMode := m.dockerClient.HostEngineActive(ctx)
+	finalYAML = m.dockerClient.TranslateComposeForEngine(ctx, finalYAML)
 	if len([]byte(finalYAML)) > maxComposeYAMLBytes {
 		return fmt.Errorf("最终 Docker Compose YAML 内容不能超过 8 MB")
 	}
@@ -503,23 +521,33 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 		return fmt.Errorf("解析 Compose 配置失败: %w", err)
 	}
 
-	// 1. Create all needed directories inside VM
-	appDataDir := path.Join("/data/appdata", id)
-	dirsToCreate := []string{appDataDir, "/data/media", "/data/files", "/data/downloads"}
+	// 1. Create all needed data directories on the engine host
+	appDataDir := path.Join(m.dockerClient.AppDataRoot(ctx), id)
+	dirsToCreate := []string{appDataDir, path.Join(m.dockerClient.DataRoot(ctx), "media"), path.Join(m.dockerClient.DataRoot(ctx), "files"), path.Join(m.dockerClient.DataRoot(ctx), "downloads")}
 
 	for _, hPath := range cfg.VolumesMap {
 		if strings.HasPrefix(hPath, "/") {
+			mapped := hPath
+			if hostEngineMode {
+				mapped = translateGuestPath(hPath, m.dockerClient.DataRoot(ctx))
+			}
 			// If it's a file with extension like .db or .json, get dirname
-			if strings.Contains(filepath.Base(hPath), ".") {
-				dirsToCreate = append(dirsToCreate, filepath.Dir(hPath))
+			if strings.Contains(filepath.Base(mapped), ".") {
+				dirsToCreate = append(dirsToCreate, filepath.Dir(mapped))
 			} else {
-				dirsToCreate = append(dirsToCreate, hPath)
+				dirsToCreate = append(dirsToCreate, mapped)
 			}
 		}
 	}
 
 	fmt.Fprintf(out, "📁 [1/3] 正在检查并创建宿主机持久化目录...\n")
 	for _, dir := range dirsToCreate {
+		if hostEngineMode {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				fmt.Fprintf(out, "⚠️ 创建宿主机目录提示 (%s): %v\n", dir, err)
+			}
+			continue
+		}
 		if _, err := m.vmMgr.Exec(ctx, "mkdir", "-p", dir); err != nil {
 			fmt.Fprintf(out, "⚠️ 创建宿主机目录提示 (%s): %v\n", dir, err)
 		}
@@ -528,20 +556,25 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	// 2. Stream compose.yaml through stdin so YAML cannot be interpreted as shell code.
 	fmt.Fprintf(out, "📝 [2/3] 写入项目配置文件: %s/compose.yaml ...\n", appDataDir)
 	composePath := path.Join(appDataDir, "compose.yaml")
-	if _, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(finalYAML), "sudo", "tee", composePath); err != nil {
+	if hostEngineMode {
+		if err := docker.WriteComposeFileOnHost(composePath, finalYAML); err != nil {
+			fmt.Fprintf(out, "❌ 写入 compose.yaml 失败: %v\n", err)
+			return fmt.Errorf("write compose.yaml failed: %w", err)
+		}
+	} else if _, err := m.vmMgr.ExecWithInput(ctx, strings.NewReader(finalYAML), "sudo", "tee", composePath); err != nil {
 		fmt.Fprintf(out, "❌ 写入 compose.yaml 失败: %v\n", err)
 		return fmt.Errorf("write compose.yaml failed: %w", err)
 	}
 
 	// 3. Pull image with stream
 	fmt.Fprintf(out, "📦 正在拉取 Docker 镜像 (实时进度流):\n")
-	if err := m.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", composePath, "pull"); err != nil {
+	if err := m.dockerClient.ExecComposeFileStream(ctx, out, "compose", "-f", composePath, "pull"); err != nil {
 		fmt.Fprintf(out, "\n⚠️ pull 提示已跳过，正在尝试直接启动容器...\n")
 	}
 
 	// 4. Start container
 	fmt.Fprintf(out, "\n⚡ [3/3] 启动 Docker 容器...\n")
-	if err := m.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", composePath, "up", "-d", "--remove-orphans"); err != nil {
+	if err := m.dockerClient.ExecComposeFileStream(ctx, out, "compose", "-f", composePath, "up", "-d", "--remove-orphans"); err != nil {
 		fmt.Fprintf(out, "❌ 启动容器失败: %v\n", err)
 		return fmt.Errorf("docker compose up failed: %w", err)
 	}
@@ -549,10 +582,14 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	// Best-effort: if a VirtioFS mount was not yet propagated into the
 	// container's bind mount, restart the compose project so the container
 	// picks up the correct Mac host directory.
-	m.ensureContainerMountPropagation(ctx, composePath, finalYAML, out)
+	if !hostEngineMode {
+		m.ensureContainerMountPropagation(ctx, composePath, finalYAML, out)
+	}
 
 	portsChanged := false
-	if len(forwardedPorts) > 0 {
+	// Host engines publish ports directly on macOS; Lima forwarding only
+	// applies when the daemon lives inside the VM.
+	if !hostEngineMode && len(forwardedPorts) > 0 {
 		var err error
 		portsChanged, err = m.vmMgr.AddForwardedPortsChanged(forwardedPorts...)
 		if err != nil {
@@ -587,7 +624,7 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 			}
 			return ctx.Err()
 		}
-		if _, err := m.vmMgr.Exec(ctx, "docker", "exec", "macbox-alist", "./alist", "admin", "set", alistPassword); err != nil {
+		if _, err := m.dockerClient.DockerExecOutput(ctx, "exec", "macbox-alist", "./alist", "admin", "set", alistPassword); err != nil {
 			return fmt.Errorf("初始化 Alist 管理员密码失败: %w", err)
 		}
 	}
@@ -676,12 +713,24 @@ func (m *Manager) Install(ctx context.Context, id string) error {
 	return m.InstallStreamCustom(ctx, id, InstallCustomConfig{}, io.Discard)
 }
 
+// appComposePath resolves the compose file location for an installed app under
+// the active engine's appdata root.
+func (m *Manager) appComposePath(ctx context.Context, id string) (string, error) {
+	if m.dockerClient == nil {
+		return "", fmt.Errorf("Docker 客户端未初始化")
+	}
+	return path.Join(m.dockerClient.AppDataRoot(ctx), strings.TrimSpace(id), "compose.yaml"), nil
+}
+
 func (m *Manager) Start(ctx context.Context, id string) error {
 	if !validAppID.MatchString(strings.TrimSpace(id)) {
 		return fmt.Errorf("应用标识格式无效")
 	}
-	composePath := path.Join("/data/appdata", strings.TrimSpace(id), "compose.yaml")
-	out, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "start")
+	composePath, err := m.appComposePath(ctx, id)
+	if err != nil {
+		return err
+	}
+	out, err := m.dockerClient.ExecComposeFile(ctx, "compose", "-f", composePath, "start")
 	if err != nil {
 		return fmt.Errorf("docker compose start failed: %s (%w)", out, err)
 	}
@@ -692,8 +741,11 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	if !validAppID.MatchString(strings.TrimSpace(id)) {
 		return fmt.Errorf("应用标识格式无效")
 	}
-	composePath := path.Join("/data/appdata", strings.TrimSpace(id), "compose.yaml")
-	out, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "stop")
+	composePath, err := m.appComposePath(ctx, id)
+	if err != nil {
+		return err
+	}
+	out, err := m.dockerClient.ExecComposeFile(ctx, "compose", "-f", composePath, "stop")
 	if err != nil {
 		return fmt.Errorf("docker compose stop failed: %s (%w)", out, err)
 	}
@@ -704,8 +756,11 @@ func (m *Manager) Restart(ctx context.Context, id string) error {
 	if !validAppID.MatchString(strings.TrimSpace(id)) {
 		return fmt.Errorf("应用标识格式无效")
 	}
-	composePath := path.Join("/data/appdata", strings.TrimSpace(id), "compose.yaml")
-	out, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "restart")
+	composePath, err := m.appComposePath(ctx, id)
+	if err != nil {
+		return err
+	}
+	out, err := m.dockerClient.ExecComposeFile(ctx, "compose", "-f", composePath, "restart")
 	if err != nil {
 		return fmt.Errorf("docker compose restart failed: %s (%w)", out, err)
 	}
@@ -716,14 +771,22 @@ func (m *Manager) Uninstall(ctx context.Context, id string) error {
 	if !validAppID.MatchString(strings.TrimSpace(id)) {
 		return fmt.Errorf("应用标识格式无效")
 	}
-	appDataDir := path.Join("/data/appdata", strings.TrimSpace(id))
-	composePath := path.Join(appDataDir, "compose.yaml")
+	composePath, err := m.appComposePath(ctx, id)
+	if err != nil {
+		return err
+	}
 	// Keep named volumes by default. Removing an application must not silently
 	// delete its persistent data; an explicit data cleanup flow can be added
 	// separately when the UI has a second confirmation step.
-	out, err := m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "down")
+	out, err := m.dockerClient.ExecComposeFile(ctx, "compose", "-f", composePath, "down")
 	if err != nil {
 		return fmt.Errorf("docker compose down failed: %s (%w)", out, err)
+	}
+	if m.dockerClient.HostEngineActive(ctx) {
+		if err := os.Remove(composePath); err != nil {
+			return fmt.Errorf("remove compose.yaml failed: %w", err)
+		}
+		return nil
 	}
 	if _, err := m.vmMgr.Exec(ctx, "rm", "-f", composePath); err != nil {
 		return fmt.Errorf("remove compose.yaml failed: %w", err)
@@ -736,8 +799,11 @@ func (m *Manager) GetLogs(ctx context.Context, id string, tail int) (string, err
 	if !validAppID.MatchString(strings.TrimSpace(id)) {
 		return "", fmt.Errorf("应用标识格式无效")
 	}
-	composePath := path.Join("/data/appdata", strings.TrimSpace(id), "compose.yaml")
-	return m.vmMgr.Exec(ctx, "docker", "compose", "-f", composePath, "logs", fmt.Sprintf("--tail=%d", tail))
+	composePath, err := m.appComposePath(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return m.dockerClient.ExecComposeFile(ctx, "compose", "-f", composePath, "logs", fmt.Sprintf("--tail=%d", tail))
 }
 
 func (m *Manager) AddCustomApp(input CustomAppInput) (*AppMetadata, error) {

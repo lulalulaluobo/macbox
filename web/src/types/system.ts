@@ -81,10 +81,20 @@ export interface ServiceStatus {
   workingDir: string;
 }
 
+export type AutostartComponent = 'web' | 'vm';
+
+export interface ServiceComponents {
+  web: ServiceStatus;
+  vm: ServiceStatus;
+  legacy: ServiceStatus;
+}
+
 export interface SystemOverview {
   system: SystemStats;
   power?: PowerStatus;
   service?: ServiceStatus;
+  services?: ServiceComponents;
+  noOpen?: boolean;
   vm: VMStatus;
   vmAction?: string;    // "starting" | "stopping" | "restarting" | "" (idle)
   configDirty?: boolean; // true when config changed and VM needs restart
@@ -108,6 +118,7 @@ export interface VMConfigInfo {
   cpus: number;
   memory: number;
   diskSize: number;
+  dockerMode?: 'auto' | 'vm';
   hostCpus: number;
   hostMemoryGB: number;
   vmStatus: string;

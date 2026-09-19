@@ -1,8 +1,9 @@
-import type { ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerNetwork } from '../types';
+import type { ContainerInfo, ImageInfo, ComposeProject, DockerOverview, DockerEngineInfo, AppleComposeBridge, DockerNetwork } from '../types';
 import { BASE_URL, fetchJSON } from './client';
 
 export const dockerApi = {  // Docker Overview & Containers
   getDockerOverview: () => fetchJSON<DockerOverview>(`${BASE_URL}/docker/overview`),
+  getDockerEngine: () => fetchJSON<DockerEngineInfo>(`${BASE_URL}/docker/engine`),
   getContainers: () => fetchJSON<ContainerInfo[]>(`${BASE_URL}/docker/containers`),
   containerAction: (id: string, action: 'start' | 'stop' | 'restart' | 'remove', force = false) =>
     fetchJSON<{ status: string }>(`${BASE_URL}/docker/containers/${id}/action`, {
@@ -108,6 +109,12 @@ export const dockerApi = {  // Docker Overview & Containers
 
   // Docker Networks & Mirrors
   getDockerNetworks: () => fetchJSON<DockerNetwork[]>(`${BASE_URL}/docker/networks`),
+  getAppleComposeBridge: () => fetchJSON<AppleComposeBridge>(`${BASE_URL}/docker/apple-compose`),
+  setAppleComposeBridge: (enabled: boolean) =>
+    fetchJSON<AppleComposeBridge>(`${BASE_URL}/docker/apple-compose`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
   getRegistryMirrors: () => fetchJSON<{ mirrors: string[] }>(`${BASE_URL}/docker/mirrors`),
   setRegistryMirrors: (mirrors: string[]) =>
     fetchJSON<{ status: string }>(`${BASE_URL}/docker/mirrors`, {

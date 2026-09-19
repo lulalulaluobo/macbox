@@ -66,9 +66,13 @@ provision:
     export DEBIAN_FRONTEND=noninteractive
 
     # 1. 安装 Docker Engine 与 Samba
+    # MacBox 在检测到宿主容器引擎 (OrbStack / Docker Desktop 等) 且 dockerMode
+    # 为 auto 时会自动跳过 VM 内的 Docker 安装，避免重复占用资源。
+    {{if .InstallDocker}}
     if ! command -v docker >/dev/null 2>&1; then
       curl -fsSL https://get.docker.com | sh
     fi
+    {{end}}
 
     if ! command -v smbd >/dev/null 2>&1 || ! command -v sshd >/dev/null 2>&1; then
       apt-get update && apt-get install -y samba smbclient openssh-server
@@ -238,14 +242,18 @@ probes:
 - script: |
     #!/bin/bash
     set -eux -o pipefail
+    {{if .InstallDocker}}
     command -v docker >/dev/null 2>&1
     pgrep dockerd >/dev/null 2>&1
+    {{end}}
     command -v smbd >/dev/null 2>&1
   hint: See "/var/log/cloud-init-output.log" in the guest
 
 portForwards:
+{{if .InstallDocker}}
 - guestSocket: "/var/run/docker.sock"
   hostSocket: "{{ "{{.Dir}}" }}/sock/docker.sock"
+{{end}}
 {{ $hostBindAddress := .HostBindAddress }}
 {{range .ForwardedPorts}}
 - guestPort: {{.}}

@@ -10,6 +10,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/system/service", s.handleSystemServiceStatus)
 	s.mux.HandleFunc("POST /api/system/service/install", s.adminOnly(s.handleSystemServiceInstall))
 	s.mux.HandleFunc("POST /api/system/service/uninstall", s.adminOnly(s.handleSystemServiceUninstall))
+	s.mux.HandleFunc("POST /api/system/service/no-open", s.adminOnly(s.handleSystemNoOpen))
 	s.mux.HandleFunc("GET /api/system/backup", s.adminOnly(s.handleSystemBackupExport))
 	s.mux.HandleFunc("POST /api/system/backup/restore", s.handleSystemBackupRestore)
 
@@ -62,6 +63,7 @@ func (s *Server) registerRoutes() {
 
 	// 4. Docker Overview & Containers
 	s.mux.HandleFunc("GET /api/docker/overview", s.handleDockerOverview)
+	s.mux.HandleFunc("GET /api/docker/engine", s.handleDockerEngine)
 	s.mux.HandleFunc("GET /api/docker/containers", s.handleDockerContainers)
 	s.mux.HandleFunc("POST /api/docker/containers/{id}/action", s.adminOnly(s.handleDockerContainerAction))
 	s.mux.HandleFunc("DELETE /api/docker/containers/{id}", s.adminOnly(s.handleDockerRemoveContainer))
@@ -73,32 +75,38 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/docker/images/{id}", s.adminOnly(s.handleDockerRemoveImage))
 	s.mux.HandleFunc("POST /api/docker/images/prune", s.adminOnly(s.handleDockerPruneImages))
 
-	// Docker Compose
-	s.mux.HandleFunc("GET /api/docker/compose", s.handleDockerComposeList)
-	s.mux.HandleFunc("GET /api/docker/compose/{name}", s.adminOnly(s.handleDockerComposeGetYaml))
-	s.mux.HandleFunc("POST /api/docker/compose/deploy", s.adminOnly(s.handleDockerComposeDeploy))
-	s.mux.HandleFunc("POST /api/docker/compose/deploy/stream", s.adminOnly(s.handleDockerComposeDeployStream))
-	s.mux.HandleFunc("POST /api/docker/compose/{name}/action", s.adminOnly(s.handleDockerComposeAction))
-	s.mux.HandleFunc("DELETE /api/docker/compose/{name}", s.adminOnly(s.handleDockerComposeDelete))
+	// Docker Compose (Apple engine: served through the experimental mocker
+	// bridge; see composeEngine middleware)
+	s.mux.HandleFunc("GET /api/docker/compose", s.composeEngine(s.handleDockerComposeList))
+	s.mux.HandleFunc("GET /api/docker/compose/{name}", s.adminOnly(s.composeEngine(s.handleDockerComposeGetYaml)))
+	s.mux.HandleFunc("POST /api/docker/compose/deploy", s.adminOnly(s.composeEngine(s.handleDockerComposeDeploy)))
+	s.mux.HandleFunc("POST /api/docker/compose/deploy/stream", s.adminOnly(s.composeEngine(s.handleDockerComposeDeployStream)))
+	s.mux.HandleFunc("POST /api/docker/compose/{name}/action", s.adminOnly(s.composeEngine(s.handleDockerComposeAction)))
+	s.mux.HandleFunc("DELETE /api/docker/compose/{name}", s.adminOnly(s.composeEngine(s.handleDockerComposeDelete)))
+
+	// Experimental Apple Compose bridge (mocker)
+	s.mux.HandleFunc("GET /api/docker/apple-compose", s.handleAppleComposeGet)
+	s.mux.HandleFunc("POST /api/docker/apple-compose", s.adminOnly(s.handleAppleComposeSet))
 
 	// Docker Networks & Mirrors
 	s.mux.HandleFunc("GET /api/docker/networks", s.handleDockerNetworks)
 	s.mux.HandleFunc("GET /api/docker/mirrors", s.handleDockerGetMirrors)
 	s.mux.HandleFunc("POST /api/docker/mirrors", s.adminOnly(s.handleDockerSetMirrors))
 
-	// 5. Apps
+	// 5. Apps (installs run through docker compose; under the Apple engine
+	// they are served by the mocker bridge or blocked per composeEngine)
 	s.mux.HandleFunc("GET /api/apps", s.handleAppsList)
 	s.mux.HandleFunc("GET /api/apps/{id}/config", s.adminOnly(s.handleAppGetConfig))
-	s.mux.HandleFunc("POST /api/apps/{id}/install", s.adminOnly(s.handleAppInstall))
-	s.mux.HandleFunc("POST /api/apps/{id}/install/custom", s.adminOnly(s.handleAppInstallCustomStream))
+	s.mux.HandleFunc("POST /api/apps/{id}/install", s.adminOnly(s.composeEngine(s.handleAppInstall)))
+	s.mux.HandleFunc("POST /api/apps/{id}/install/custom", s.adminOnly(s.composeEngine(s.handleAppInstallCustomStream)))
 	s.mux.HandleFunc("POST /api/apps/custom", s.adminOnly(s.handleAppCustomAdd))
 	s.mux.HandleFunc("DELETE /api/apps/custom/{id}", s.adminOnly(s.handleAppCustomDelete))
 	s.mux.HandleFunc("POST /api/apps/sync", s.adminOnly(s.handleAppStoreSync))
-	s.mux.HandleFunc("POST /api/apps/{id}/start", s.adminOnly(s.handleAppStart))
-	s.mux.HandleFunc("POST /api/apps/{id}/stop", s.adminOnly(s.handleAppStop))
-	s.mux.HandleFunc("POST /api/apps/{id}/restart", s.adminOnly(s.handleAppRestart))
-	s.mux.HandleFunc("POST /api/apps/{id}/uninstall", s.adminOnly(s.handleAppUninstall))
-	s.mux.HandleFunc("GET /api/apps/{id}/logs", s.adminOnly(s.handleAppLogs))
+	s.mux.HandleFunc("POST /api/apps/{id}/start", s.adminOnly(s.composeEngine(s.handleAppStart)))
+	s.mux.HandleFunc("POST /api/apps/{id}/stop", s.adminOnly(s.composeEngine(s.handleAppStop)))
+	s.mux.HandleFunc("POST /api/apps/{id}/restart", s.adminOnly(s.composeEngine(s.handleAppRestart)))
+	s.mux.HandleFunc("POST /api/apps/{id}/uninstall", s.adminOnly(s.composeEngine(s.handleAppUninstall)))
+	s.mux.HandleFunc("GET /api/apps/{id}/logs", s.adminOnly(s.composeEngine(s.handleAppLogs)))
 
 	// 6. Samba
 	s.mux.HandleFunc("GET /api/samba/status", s.handleSambaStatus)

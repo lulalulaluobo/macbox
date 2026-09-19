@@ -1,7 +1,7 @@
 import React from 'react';
-import { ArchiveRestore, Crown, Palette, RadioTower, Shield, Terminal, UserCheck, Users } from 'lucide-react';
+import { ArchiveRestore, Crown, FlaskConical, Palette, RadioTower, Shield, Terminal, UserCheck, Users } from 'lucide-react';
 
-export type SettingsSubTab = 'console_users' | 'users' | 'rootpwd' | 'ssh' | 'terminal' | 'service_publish' | 'appearance' | 'backup';
+export type SettingsSubTab = 'console_users' | 'users' | 'rootpwd' | 'ssh' | 'terminal' | 'service_publish' | 'experimental' | 'appearance' | 'backup';
 
 interface SettingsNavigationProps {
   activeSubTab: SettingsSubTab;
@@ -16,13 +16,14 @@ const tabs: Array<{ id: SettingsSubTab; label: string; icon: React.ComponentType
   { id: 'ssh', label: 'SSH', icon: Shield, iconClassName: 'text-teal-500' },
   { id: 'terminal', label: '终端', icon: Terminal, iconClassName: 'text-sky-500' },
   { id: 'service_publish', label: '服务发布', icon: RadioTower, iconClassName: 'text-cyan-500' },
+  { id: 'experimental', label: '实验性功能', icon: FlaskConical, iconClassName: 'text-rose-500' },
   { id: 'appearance', label: '外观', icon: Palette, iconClassName: 'text-indigo-500' },
   { id: 'backup', label: '备份', icon: ArchiveRestore, iconClassName: 'text-emerald-500' },
 ];
 
 export const SettingsNavigation: React.FC<SettingsNavigationProps> = ({ activeSubTab, onChange, isAdmin = false }) => (
-  <div className={`grid grid-cols-3 gap-1 rounded-2xl border border-slate-200 bg-slate-100/80 p-1.5 text-xs font-semibold dark:border-slate-800 dark:bg-slate-900/70 ${isAdmin ? 'sm:grid-cols-8' : 'sm:grid-cols-6'}`}>
-    {tabs.filter(({ id }) => (id !== 'backup' && id !== 'service_publish') || isAdmin).map(({ id, label, icon: Icon, iconClassName }) => (
+  <div className={`grid grid-cols-3 gap-1 rounded-2xl border border-slate-200 bg-slate-100/80 p-1.5 text-xs font-semibold dark:border-slate-800 dark:bg-slate-900/70 ${isAdmin ? 'sm:grid-cols-9' : 'sm:grid-cols-6'}`}>
+    {tabs.filter(({ id }) => (id !== 'backup' && id !== 'service_publish' && id !== 'experimental') || isAdmin).map(({ id, label, icon: Icon, iconClassName }) => (
       <button
         key={id}
         onClick={() => onChange(id)}

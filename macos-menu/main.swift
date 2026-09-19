@@ -52,6 +52,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let dockerReady: Bool?
         let dockerTotal: Int?
         let dockerRunning: Int?
+        let noOpen: Bool?
     }
 
     private let fileManager = FileManager.default
@@ -67,6 +68,16 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var backendRunning = false
     private var monitorRequestInFlight = false
     private var webServiceState: WebServiceState = .checking
+    // Server-side (config.yaml noOpen) preference; mirrored from
+    // /api/system/menubar-status so autostart --no-open is respected without
+    // the menu helper parsing YAML itself.
+    private var serverNoOpen = false
+    private var autoOpenWebPreference: Bool {
+        get { UserDefaults.standard.object(forKey: "AutoOpenWeb") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "AutoOpenWeb") }
+    }
+    private var autoOpenItem: NSMenuItem!
+    private func shouldAutoOpenWeb() -> Bool { autoOpenWebPreference && !serverNoOpen }
     private var monitorHeaderItem: NSMenuItem!
     private var cpuMonitorItem: NSMenuItem!
     private var memoryMonitorItem: NSMenuItem!
@@ -126,6 +137,11 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("停止 Lima 虚拟机", #selector(stopLima)))
         menu.addItem(item("刷新状态", #selector(refreshStatus)))
         menu.addItem(.separator())
+        autoOpenItem = NSMenuItem(title: "启动后自动打开网页", action: #selector(toggleAutoOpenWeb), keyEquivalent: "")
+        autoOpenItem.target = self
+        autoOpenItem.state = autoOpenWebPreference ? .on : .off
+        menu.addItem(autoOpenItem)
+        menu.addItem(.separator())
         menu.addItem(item("打开日志", #selector(openLog)))
         menu.addItem(.separator())
         menu.addItem(item("卸载程序（保留实例和数据）", #selector(uninstallProgram)))
@@ -150,6 +166,11 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func openWeb(_ sender: Any?) {
         guard let url = URL(string: "http://127.0.0.1:\(port)") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    @objc private func toggleAutoOpenWeb(_ sender: Any?) {
+        autoOpenWebPreference.toggle()
+        autoOpenItem?.state = autoOpenWebPreference ? .on : .off
     }
 
     @objc private func refreshStatus(_ sender: Any?) {
@@ -211,6 +232,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self else { return }
                 self.monitorRequestInFlight = false
                 if let status {
+                    self.serverNoOpen = status.noOpen ?? false
                     self.updateMonitoringItems(status)
                 }
             }
@@ -303,7 +325,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     return
                 }
                 self.actionInProgress = false
-                self.openWeb(nil)
+                if self.shouldAutoOpenWeb() { self.openWeb(nil) }
                 self.showAlert(title: "MacBox 已在运行", message: "Web 服务已经运行在端口 \(self.port)。")
                 return
             }
@@ -370,7 +392,7 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if ready {
                 self.actionInProgress = false
                 self.refreshStatus(nil)
-                self.openWeb(nil)
+                if self.shouldAutoOpenWeb() { self.openWeb(nil) }
                 let lanLine = self.lanAddress().map { "\n局域网：http://\($0):\(self.port)" } ?? "\n局域网：未检测到有效地址"
                 self.showAlert(title: "MacBox 已启动", message: "Web 服务已启动并支持局域网访问。\n\n本机：http://127.0.0.1:\(self.port)\(lanLine)\n日志：\(self.logPath())")
                 return

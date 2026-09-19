@@ -86,6 +86,9 @@ func (c *Client) ListNetworks(ctx context.Context) ([]DockerNetwork, error) {
 }
 
 func (c *Client) GetRegistryMirrors(ctx context.Context) ([]string, error) {
+	if c.HostEngineActive(ctx) {
+		return nil, fmt.Errorf("当前使用宿主容器引擎，registry mirrors 请在 OrbStack/Docker Desktop 的设置中管理")
+	}
 	out, err := c.vmMgr.Exec(ctx, "cat", "/etc/docker/daemon.json")
 	if err != nil && strings.TrimSpace(out) != "" {
 		return nil, fmt.Errorf("读取 Docker 配置失败: %w", err)
@@ -104,6 +107,9 @@ func (c *Client) GetRegistryMirrors(ctx context.Context) ([]string, error) {
 }
 
 func (c *Client) SetRegistryMirrors(ctx context.Context, mirrors []string) error {
+	if c.HostEngineActive(ctx) {
+		return fmt.Errorf("当前使用宿主容器引擎，registry mirrors 请在 OrbStack/Docker Desktop 的设置中管理")
+	}
 	normalizedMirrors, err := normalizeRegistryMirrors(mirrors)
 	if err != nil {
 		return err

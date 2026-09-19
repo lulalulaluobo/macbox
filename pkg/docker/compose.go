@@ -109,6 +109,41 @@ func PublishedHostPorts(content string) ([]int, error) {
 	return ports, nil
 }
 
+// composeLayout tells the Compose code paths where project files live:
+// inside the Lima guest on /data, or on the macOS host next to the host
+// engine's data root.
+type composeLayout struct {
+	host        bool
+	composeRoot string
+	appDataRoot string
+}
+
+func (l composeLayout) projectPath(name string) string {
+	return filepath.Join(l.composeRoot, name)
+}
+
+func (c *Client) composeLayout(ctx context.Context) composeLayout {
+	if c.HostEngineActive(ctx) {
+		appData := filepath.Join(HostDataDir(), "appdata")
+		return composeLayout{
+			host:        true,
+			composeRoot: filepath.Join(appData, "compose"),
+			appDataRoot: appData,
+		}
+	}
+	return composeLayout{composeRoot: userComposeRoot, appDataRoot: "/data/appdata"}
+}
+
+// fileExistsInLayout adapts os.Stat / guest `test -f` to the active layout.
+func (c *Client) fileExistsInLayout(ctx context.Context, layout composeLayout, filePath string) bool {
+	if layout.host {
+		info, err := os.Stat(filePath)
+		return err == nil && !info.IsDir()
+	}
+	_, err := c.vmMgr.Exec(ctx, "test", "-f", filePath)
+	return err == nil
+}
+
 func (c *Client) ListComposeProjects(ctx context.Context) ([]ComposeProject, error) {
 	containers, err := c.ListContainersSummary(ctx)
 	if err != nil {
@@ -125,23 +160,30 @@ func (c *Client) ListComposeProjectsWithContainers(ctx context.Context, containe
 }
 
 func (c *Client) listComposeProjects(ctx context.Context, containers []ContainerInfo) ([]ComposeProject, error) {
-	// 1. Run docker compose ls -a
-	out, err := c.runDockerCmd(ctx, "compose", "ls", "-a", "--format", "json")
+	// 1. Run docker compose ls -a. Mocker prints a table for this command and
+	// ignores --format json, so under the mocker override we skip it entirely
+	// and derive projects from discovery + container states below.
 	var lsItems []composeLsItem
-	if err == nil && len(out) > 0 {
-		if err := json.Unmarshal(out, &lsItems); err != nil {
-			return nil, fmt.Errorf("解析 Compose 项目列表失败: %w", err)
+	if _, mocker := composeCLIFromContext(ctx); !mocker {
+		out, err := c.runDockerCmd(ctx, "compose", "ls", "-a", "--format", "json")
+		if err == nil && len(out) > 0 {
+			if err := json.Unmarshal(out, &lsItems); err != nil {
+				return nil, fmt.Errorf("解析 Compose 项目列表失败: %w", err)
+			}
+		} else if err != nil {
+			return nil, fmt.Errorf("读取 Compose 项目列表失败: %w", err)
 		}
-	} else if err != nil {
-		return nil, fmt.Errorf("读取 Compose 项目列表失败: %w", err)
 	}
 
 	projectMap := make(map[string]*ComposeProject)
+	lsProjects := make(map[string]bool)
+	layout := c.composeLayout(ctx)
 	for _, it := range lsItems {
 		name := strings.TrimSpace(it.Name)
 		if name == "" {
 			continue
 		}
+		lsProjects[name] = true
 		status := strings.ToLower(it.Status)
 		state := "running"
 		if strings.Contains(status, "exited") || strings.Contains(status, "stopped") {
@@ -156,7 +198,7 @@ func (c *Client) listComposeProjects(ctx context.Context, containers []Container
 			workingDir = filepath.Dir(firstFile)
 		}
 
-		isSystem := !strings.Contains(workingDir, "/data/appdata/compose/")
+		isSystem := !strings.Contains(workingDir, layout.composeRoot+"/")
 
 		projectMap[name] = &ComposeProject{
 			Name:          name,
@@ -169,17 +211,23 @@ func (c *Client) listComposeProjects(ctx context.Context, containers []Container
 		}
 	}
 
-	// 2. Discover offline projects in /data/appdata/compose/
+	// 2. Discover offline projects in the active Compose root.
 	// A fresh MacBox data volume has no user Compose projects yet. Keep the
 	// discovery command successful for that empty state instead of marking a
 	// healthy Docker daemon as degraded because find cannot open a missing
 	// optional directory.
-	findScript := "if [ -d " + userComposeRoot + " ]; then find " + userComposeRoot + " -maxdepth 2 -type f \\( -name compose.yaml -o -name docker-compose.yml \\); fi"
-	findOut, err := c.vmMgr.Exec(ctx, "sh", "-c", findScript)
-	if err != nil {
-		return nil, fmt.Errorf("扫描 Compose 配置目录失败: %w", err)
+	var discovered []string
+	if layout.host {
+		discovered = hostComposeConfigPaths(layout.composeRoot)
+	} else {
+		findScript := "if [ -d " + userComposeRoot + " ]; then find " + userComposeRoot + " -maxdepth 2 -type f \\( -name compose.yaml -o -name docker-compose.yml \\); fi"
+		findOut, err := c.vmMgr.Exec(ctx, "sh", "-c", findScript)
+		if err != nil {
+			return nil, fmt.Errorf("扫描 Compose 配置目录失败: %w", err)
+		}
+		discovered = discoveredComposeConfigPaths(findOut)
 	}
-	for _, line := range discoveredComposeConfigPaths(findOut) {
+	for _, line := range discovered {
 		dir := filepath.Dir(line)
 		name := filepath.Base(dir)
 		if _, exists := projectMap[name]; !exists {
@@ -196,21 +244,60 @@ func (c *Client) listComposeProjects(ctx context.Context, containers []Container
 	}
 
 	// 3. Associate containers and count services
+	containerStates := make(map[string][]string)
 	for _, container := range containers {
-		if container.Project != "" {
-			if proj, ok := projectMap[container.Project]; ok {
-				proj.Containers = append(proj.Containers, container.Names)
-			}
+		if container.Project == "" {
+			continue
 		}
+		proj, ok := projectMap[container.Project]
+		if !ok {
+			// `compose ls` is unavailable (mocker) or the project file was
+			// removed while containers still run: show the live project.
+			if len(lsItems) != 0 {
+				continue
+			}
+			proj = &ComposeProject{
+				Name:        container.Project,
+				Status:      "running",
+				WorkingDir:  filepath.Join(layout.composeRoot, container.Project),
+				Containers:  []string{},
+				IsSystemApp: false,
+			}
+			projectMap[container.Project] = proj
+		}
+		proj.Containers = append(proj.Containers, container.Names)
+		containerStates[container.Project] = append(containerStates[container.Project], strings.ToLower(container.State))
 	}
 
 	var results []ComposeProject
 	for _, proj := range projectMap {
 		proj.ServicesCount = len(proj.Containers)
+		// Projects absent from `compose ls` carry a static or placeholder
+		// status; recompute it from the live container states instead.
+		if !lsProjects[proj.Name] {
+			proj.Status = composeStatusFromContainers(containerStates[proj.Name])
+		}
 		results = append(results, *proj)
 	}
 
 	return results, nil
+}
+
+func composeStatusFromContainers(states []string) string {
+	running := 0
+	for _, state := range states {
+		if strings.Contains(state, "running") || strings.Contains(state, "starting") {
+			running++
+		}
+	}
+	switch {
+	case running == 0:
+		return "stopped"
+	case running == len(states):
+		return "running"
+	default:
+		return "partially_running"
+	}
 }
 
 // composeConfigPaths returns the supported filenames in canonical order. If a
@@ -225,9 +312,36 @@ func composeConfigPaths(root, name string) []string {
 }
 
 func isUserComposeConfigPath(filePath string) bool {
+	return isComposeConfigPathUnder(userComposeRoot, filePath)
+}
+
+func isComposeConfigPathUnder(root, filePath string) bool {
 	cleanPath := path.Clean(filePath)
-	root := path.Clean(userComposeRoot)
-	return strings.HasPrefix(cleanPath, root+"/")
+	cleanRoot := path.Clean(root)
+	return strings.HasPrefix(cleanPath, cleanRoot+"/")
+}
+
+// hostComposeConfigPaths lists compose files of one-deep project directories
+// under the macOS-side Compose root.
+func hostComposeConfigPaths(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		for _, candidate := range []string{"compose.yaml", "docker-compose.yml"} {
+			filePath := filepath.Join(root, entry.Name(), candidate)
+			if info, statErr := os.Stat(filePath); statErr == nil && !info.IsDir() {
+				paths = append(paths, filePath)
+			}
+		}
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 func discoveredComposeConfigPaths(output string) []string {
@@ -253,8 +367,12 @@ func discoveredComposeConfigPaths(output string) []string {
 }
 
 func composeProjectDeleteTargets(filePath string) ([]string, error) {
+	return composeProjectDeleteTargetsIn(userComposeRoot, filePath)
+}
+
+func composeProjectDeleteTargetsIn(root, filePath string) ([]string, error) {
 	cleanPath := path.Clean(filePath)
-	if !isUserComposeConfigPath(cleanPath) {
+	if !isComposeConfigPathUnder(root, cleanPath) {
 		return nil, ErrSystemComposeProject
 	}
 	dir := path.Dir(cleanPath)
@@ -280,18 +398,19 @@ func (c *Client) resolveExistingComposeFile(ctx context.Context, name string) (s
 	if !validProjectName.MatchString(name) {
 		return "", fmt.Errorf("项目名称只能包含英文字母、数字、下划线或连字符")
 	}
+	layout := c.composeLayout(ctx)
 
 	// Check user compose directory first. compose.yaml is canonical when both
 	// supported filenames exist in the same project directory.
-	for _, userPath := range composeConfigPaths(userComposeRoot, name) {
-		if _, err := c.vmMgr.Exec(ctx, "test", "-f", userPath); err == nil {
+	for _, userPath := range composeConfigPaths(layout.composeRoot, name) {
+		if c.fileExistsInLayout(ctx, layout, userPath) {
 			return userPath, nil
 		}
 	}
 
 	// Check system appdata directory
-	sysPath := path.Join("/data/appdata", name, "compose.yaml")
-	if _, err := c.vmMgr.Exec(ctx, "test", "-f", sysPath); err == nil {
+	sysPath := path.Join(layout.appDataRoot, name, "compose.yaml")
+	if c.fileExistsInLayout(ctx, layout, sysPath) {
 		return sysPath, nil
 	}
 
@@ -310,6 +429,7 @@ func (c *Client) ensureComposeFile(ctx context.Context, name string) (string, er
 	if !validProjectName.MatchString(name) {
 		return "", fmt.Errorf("项目名称只能包含英文字母、数字、下划线或连字符")
 	}
+	layout := c.composeLayout(ctx)
 
 	// Check if this is a built-in app template from projectRoot.
 	if c.projectRoot != "" {
@@ -318,9 +438,17 @@ func (c *Client) ensureComposeFile(ctx context.Context, name string) (string, er
 			if len(data) > maxComposeYAMLBytes {
 				return "", fmt.Errorf("Compose 模板超过 8 MB 限制")
 			}
-			// Auto sync template compose file into VM /data/appdata/<name>/compose.yaml
-			appDir := path.Join("/data/appdata", name)
+			appDir := path.Join(layout.appDataRoot, name)
 			sysPath := path.Join(appDir, "compose.yaml")
+			if layout.host {
+				// Auto sync template into the host appdata directory with /data
+				// bind sources rewritten to the host data root.
+				if err := writeHostComposeFile(ctx, sysPath, TranslateBindPaths(string(data), HostDataDir())); err != nil {
+					return "", fmt.Errorf("同步项目配置失败: %w", err)
+				}
+				return sysPath, nil
+			}
+			// Auto sync template compose file into VM /data/appdata/<name>/compose.yaml
 			if _, mkdirErr := c.vmMgr.Exec(ctx, "mkdir", "-p", appDir); mkdirErr != nil {
 				return "", fmt.Errorf("同步项目目录失败: %w", mkdirErr)
 			}
@@ -334,9 +462,25 @@ func (c *Client) ensureComposeFile(ctx context.Context, name string) (string, er
 	return "", fmt.Errorf("找不到项目 %s 的 compose 配置文件", name)
 }
 
+// writeHostComposeFile creates the project directory and stores the YAML with
+// 0600 permissions because Compose files may contain credentials.
+func writeHostComposeFile(ctx context.Context, filePath, content string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return WriteComposeFileOnHost(filePath, content)
+}
+
 func (c *Client) GetComposeYaml(ctx context.Context, name string) (string, error) {
 	filePath, err := c.resolveExistingComposeFile(ctx, name)
 	if err == nil {
+		if c.composeLayout(ctx).host {
+			data, readErr := os.ReadFile(filePath)
+			if readErr != nil {
+				return "", fmt.Errorf("读取 compose 文件失败: %w", readErr)
+			}
+			return string(data), nil
+		}
 		out, readErr := c.vmMgr.Exec(ctx, "cat", filePath)
 		if readErr != nil {
 			return "", fmt.Errorf("读取 compose 文件失败: %w", readErr)
@@ -456,6 +600,10 @@ func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent str
 	}
 
 	fmt.Fprintf(out, "🚀 开始部署 Docker Compose 项目: %s\n", name)
+	layout := c.composeLayout(ctx)
+	if layout.host {
+		return c.deployComposeOnHost(ctx, layout, name, yamlContent, out)
+	}
 
 	// 1. Repair the shared root as well as creating the project directory. Older
 	// VM images created the compose directory as root:root/0755, which prevents
@@ -482,7 +630,7 @@ func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent str
 
 	// 3. Run docker compose up -d with streaming logs
 	fmt.Fprintln(out, "⚙️ 正在执行 docker compose up -d ...")
-	if err := c.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", composePath, "up", "-d", "--remove-orphans"); err != nil {
+	if err := c.runDockerStream(ctx, out, "compose", "-f", composePath, "up", "-d", "--remove-orphans"); err != nil {
 		fmt.Fprintf(out, "❌ 部署执行失败: %v\n", err)
 		return err
 	}
@@ -497,6 +645,31 @@ func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent str
 		return err
 	}
 
+	fmt.Fprintf(out, "✅ Docker Compose 项目 [%s] 部署完成并已启动！\n", name)
+	return nil
+}
+
+// deployComposeOnHost stores the project under the macOS data root and runs
+// `docker compose` against the host engine. Ports publish on the host
+// directly, so no Lima port-forward registration or VM restart is needed.
+func (c *Client) deployComposeOnHost(ctx context.Context, layout composeLayout, name, yamlContent string, out io.Writer) error {
+	if err := os.MkdirAll(layout.composeRoot, 0o755); err != nil {
+		fmt.Fprintf(out, "❌ 创建项目目录失败: %v\n", err)
+		return err
+	}
+	projectDir := layout.projectPath(name)
+	composePath := filepath.Join(projectDir, "compose.yaml")
+	if err := writeHostComposeFile(ctx, composePath, yamlContent); err != nil {
+		fmt.Fprintf(out, "❌ 写入 compose.yaml 失败: %v\n", err)
+		return err
+	}
+	fmt.Fprintf(out, "📝 已写入项目配置文件: %s\n", composePath)
+
+	fmt.Fprintln(out, "⚙️ 正在执行 docker compose up -d ...")
+	if err := c.runDockerStream(ctx, out, "compose", "-f", composePath, "up", "-d", "--remove-orphans"); err != nil {
+		fmt.Fprintf(out, "❌ 部署执行失败: %v\n", err)
+		return err
+	}
 	fmt.Fprintf(out, "✅ Docker Compose 项目 [%s] 部署完成并已启动！\n", name)
 	return nil
 }
@@ -534,7 +707,8 @@ func (c *Client) ComposeAction(ctx context.Context, name string, action string, 
 	}
 
 	var portsChanged bool
-	if action == "start" || action == "restart" {
+	layout := c.composeLayout(ctx)
+	if !layout.host && (action == "start" || action == "restart") {
 		yamlContent, readErr := c.vmMgr.Exec(ctx, "cat", filePath)
 		if readErr != nil {
 			return fmt.Errorf("读取 Compose 配置失败: %w", readErr)
@@ -545,15 +719,16 @@ func (c *Client) ComposeAction(ctx context.Context, name string, action string, 
 		// Registration is intentionally done before the action. If the action
 		// succeeds, the VM can be restarted immediately; if it fails, the
 		// saved forwarding entry is harmless and will be usable on the next
-		// start.
+		// start. Host engines publish ports on macOS directly and need no
+		// Lima forwarding.
 		portsChanged, err = c.registerPublishedPorts(yamlContent, out)
 		if err != nil {
 			return err
 		}
 	}
 
-	commandArgs := append([]string{"docker", "compose", "-f", filePath}, composeArgs...)
-	if err := c.vmMgr.ExecStream(ctx, out, commandArgs...); err != nil {
+	commandArgs := append([]string{"compose", "-f", filePath}, composeArgs...)
+	if err := c.runDockerStream(ctx, out, commandArgs...); err != nil {
 		fmt.Fprintf(out, "❌ 操作失败: %v\n", err)
 		return err
 	}
@@ -570,8 +745,9 @@ func (c *Client) DeleteComposeProject(ctx context.Context, name string, deleteVo
 	if err != nil {
 		return err
 	}
+	layout := c.composeLayout(ctx)
 	resolvedFilePath := filePath
-	deletePaths, err := composeProjectDeleteTargets(resolvedFilePath)
+	deletePaths, err := composeProjectDeleteTargetsIn(layout.composeRoot, resolvedFilePath)
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(name))
 	}
@@ -581,23 +757,41 @@ func (c *Client) DeleteComposeProject(ctx context.Context, name string, deleteVo
 	// ComposeAction("down") and RemoveContainer, it also removes compose.yaml.
 	// Keep those operations separate so users can delete/recreate containers
 	// while retaining the configuration for the next deployment.
-	// Down containers
-	dockerArgs := append([]string{"docker"}, composeDownArgs(resolvedFilePath, deleteVolumes)...)
-	if out, err := c.vmMgr.Exec(ctx, dockerArgs...); err != nil {
-		return fmt.Errorf("停止 Compose 项目失败: %s (%w)", out, err)
+	// Down containers. The Compose file is read by the CLI, so the command
+	// must run on the same machine as the file: host CLI for host projects,
+	// limactl inside the guest for VM projects.
+	if layout.host {
+		if out, err := c.runDockerCmd(ctx, composeDownArgs(resolvedFilePath, deleteVolumes)...); err != nil {
+			return fmt.Errorf("停止 Compose 项目失败: %s (%w)", out, err)
+		}
+	} else {
+		dockerArgs := append([]string{"docker"}, composeDownArgs(resolvedFilePath, deleteVolumes)...)
+		if out, err := c.vmMgr.Exec(ctx, dockerArgs...); err != nil {
+			return fmt.Errorf("停止 Compose 项目失败: %s (%w)", out, err)
+		}
 	}
 
 	// Remove only the compose file we resolved. A project directory may contain
 	// user-managed files, so recursive deletion is intentionally not used.
-	if isUserComposeConfigPath(resolvedFilePath) {
+	if isComposeConfigPathUnder(layout.composeRoot, resolvedFilePath) {
 		for _, deletePath := range deletePaths {
+			if layout.host {
+				if err := os.Remove(deletePath); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("删除 Compose 配置文件失败: %w", err)
+				}
+				continue
+			}
 			if out, err := c.vmMgr.Exec(ctx, "rm", "-f", deletePath); err != nil {
 				return fmt.Errorf("删除 Compose 配置文件失败: %s (%w)", out, err)
 			}
 		}
 		// Keep the directory only when it still contains user files. rmdir is
 		// non-recursive; failure here is safe and does not invalidate the delete.
-		_, _ = c.vmMgr.Exec(ctx, "rmdir", workDir)
+		if layout.host {
+			_ = os.Remove(workDir)
+		} else {
+			_, _ = c.vmMgr.Exec(ctx, "rmdir", workDir)
+		}
 	}
 
 	return nil

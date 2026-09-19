@@ -8,16 +8,21 @@ import (
 
 func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
 	vmStatus, vmStatusErr := c.vmMgr.GetStatusContext(ctx)
-	dockerReady := vmStatusErr == nil && vmStatus != nil && vmStatus.DockerReady
+	hostEngine := c.HostEngineActive(ctx)
+	dockerReady := hostEngine || (vmStatusErr == nil && vmStatus != nil && vmStatus.DockerReady)
+	storageLocation := "存储空间 1 (MacBox 虚拟专有卷)"
+	if hostEngine {
+		storageLocation = "本机容器引擎数据目录"
+	}
 
 	containers, err := c.ListContainers(ctx)
 	if err != nil {
 		return &DockerOverview{
 			Healthy:         false,
 			HealthMessage:   "Docker 服务未响应或正在启动中",
-			DockerReady:     false,
+			DockerReady:     dockerReady,
 			DockerVersion:   "-",
-			StorageLocation: "/data/docker",
+			StorageLocation: storageLocation,
 		}, nil
 	}
 
@@ -127,7 +132,7 @@ func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
 		HealthMessage:     healthMsg,
 		DockerReady:       dockerReady,
 		DockerVersion:     dockerVer,
-		StorageLocation:   "存储空间 1 (MacBox 虚拟专有卷)",
+		StorageLocation:   storageLocation,
 		AutoStart:         true,
 		ContainersTotal:   len(containers),
 		ContainersRunning: runningContainers,

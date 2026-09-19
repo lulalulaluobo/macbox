@@ -7,6 +7,7 @@ import (
 	"github.com/lulalulaluobo/macbox/pkg/apps"
 	"github.com/lulalulaluobo/macbox/pkg/auth"
 	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/containerapple"
 	"github.com/lulalulaluobo/macbox/pkg/docker"
 	"github.com/lulalulaluobo/macbox/pkg/samba"
 	"github.com/lulalulaluobo/macbox/pkg/system"
@@ -26,6 +27,7 @@ type Server struct {
 	cfg             *config.Config
 	vmMgr           *vm.Manager
 	dockerClient    *docker.Client
+	appleClient     *containerapple.Client
 	appMgr          *apps.Manager
 	sambaMgr        *samba.Manager
 	powerMgr        *system.PowerManager
@@ -304,6 +306,11 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	vmMgr := vm.NewManager(cfg)
 	dockerClient := docker.NewClient(vmMgr, projectRoot)
+	dockerClient.SetDockerMode(cfg.VM.DockerMode)
+	var appleClient *containerapple.Client
+	if client, ok := containerapple.NewClient(); ok {
+		appleClient = client
+	}
 	appMgr := apps.NewManager(vmMgr, dockerClient, projectRoot)
 	sambaMgr := samba.NewManager(cfg, vmMgr)
 	powerMgr := sharedPowerMgr
@@ -336,6 +343,7 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 		cfg:             cfg,
 		vmMgr:           vmMgr,
 		dockerClient:    dockerClient,
+		appleClient:     appleClient,
 		appMgr:          appMgr,
 		sambaMgr:        sambaMgr,
 		powerMgr:        powerMgr,

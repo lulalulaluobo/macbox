@@ -1,4 +1,4 @@
-import type { SystemOverview, SystemDiagnostics, PowerStatus, ServiceStatus, VMConfigInfo, VMPrerequisites, BackgroundJob, SystemUser, SSHConfig, SSHKeyGenerationResult, VMListeningPortsResponse, VMPortForwardsResponse } from '../types';
+import type { SystemOverview, SystemDiagnostics, PowerStatus, ServiceComponents, AutostartComponent, VMConfigInfo, VMPrerequisites, BackgroundJob, SystemUser, SSHConfig, SSHKeyGenerationResult, VMListeningPortsResponse, VMPortForwardsResponse } from '../types';
 import { BASE_URL, fetchJSON } from './client';
 
 export const systemApi = {  // System Overview
@@ -28,18 +28,24 @@ export const systemApi = {  // System Overview
     body: JSON.stringify({ enable }),
   }),
 
-  // Service Management (LaunchAgent)
-  getServiceStatus: () => fetchJSON<ServiceStatus>(`${BASE_URL}/system/service`),
-  installService: () => fetchJSON<ServiceStatus>(`${BASE_URL}/system/service/install`, {
+  // Service Management (LaunchAgent, split web/vm components)
+  getServiceStatus: () => fetchJSON<ServiceComponents>(`${BASE_URL}/system/service`),
+  installService: (component: AutostartComponent, noOpen?: boolean) => fetchJSON<ServiceComponents>(`${BASE_URL}/system/service/install`, {
     method: 'POST',
+    body: JSON.stringify({ component, ...(noOpen ? { noOpen: true } : {}) }),
   }),
-  uninstallService: () => fetchJSON<ServiceStatus>(`${BASE_URL}/system/service/uninstall`, {
+  uninstallService: (component: AutostartComponent) => fetchJSON<ServiceComponents>(`${BASE_URL}/system/service/uninstall`, {
     method: 'POST',
+    body: JSON.stringify({ component }),
+  }),
+  setNoOpen: (enable: boolean) => fetchJSON<{ noOpen: boolean }>(`${BASE_URL}/system/service/no-open`, {
+    method: 'POST',
+    body: JSON.stringify({ enable }),
   }),
 
   // VM Specs
   getVMConfig: () => fetchJSON<VMConfigInfo>(`${BASE_URL}/vm/config`),
-  updateVMConfig: (cfg: { cpus: number; memory: number; diskSize: number }) => fetchJSON<{
+  updateVMConfig: (cfg: { cpus: number; memory: number; diskSize: number; dockerMode?: 'auto' | 'vm' }) => fetchJSON<{
     status: string;
     requiresRestart: boolean;
     message: string;

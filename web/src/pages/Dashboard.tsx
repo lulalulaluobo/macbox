@@ -13,7 +13,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { ContainerInfo, ServiceShortcut, ServiceShortcutInput, SystemOverview } from '../types';
+import { ContainerInfo, ServiceShortcut, ServiceShortcutInput, SystemOverview, AutostartComponent } from '../types';
 import { api } from '../api';
 import { DockerServiceIcon } from '../components/DockerServiceIcon';
 import { clearLegacyDockerServiceShortcuts, loadDockerServiceShortcuts } from '../utils/dockerServiceShortcuts';
@@ -40,18 +40,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
   const [editCPUs, setEditCPUs] = useState(2);
   const [editMemory, setEditMemory] = useState(4);
   const [editDisk, setEditDisk] = useState(20);
+  const [editDockerMode, setEditDockerMode] = useState<'auto' | 'vm'>('auto');
   const [dockerServices, setDockerServices] = useState<ContainerInfo[]>([]);
   const [serviceShortcuts, setServiceShortcuts] = useState<ServiceShortcut[]>([]);
   const [showServiceManager, setShowServiceManager] = useState(false);
   const [editingServiceShortcut, setEditingServiceShortcut] = useState<ServiceShortcut | null>(null);
   const [showServiceModal, setShowServiceModal] = useState(false);
+  const [showAutostartModal, setShowAutostartModal] = useState(false);
 
   const sys = overview?.system;
   const vm = overview?.vm;
   const selectedDisk = overview?.storage.selectedDisk;
   const isVMRunning = vm?.status === 'Running';
   const powerActive = overview?.power?.active || false;
-  const serviceInstalled = overview?.service?.installed || false;
+  // 自启拆分后 overview.services 提供 web/vm 双组件状态；旧版仅回落到
+  // overview.service（等价于 web 组件）。
+  const webAutoStartInstalled = overview?.services?.web?.installed ?? overview?.service?.installed ?? false;
+  const vmAutoStartInstalled = overview?.services?.vm?.installed ?? false;
+  const legacyAutoStartInstalled = overview?.services?.legacy?.installed ?? false;
+  const noOpenPreference = overview?.noOpen ?? false;
+  const serviceInstalled = webAutoStartInstalled || vmAutoStartInstalled;
   const currentAction = actionLoading || overview?.vmAction || '';
   const isActionBusy = Boolean(currentAction);
 
@@ -162,12 +170,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     }
   };
 
-  const handleToggleService = async () => {
+  const handleToggleAutostart = async (component: AutostartComponent, enable: boolean) => {
     setServiceLoading(true);
     try {
-      if (serviceInstalled) await api.uninstallService();
-      else await api.installService();
-      notify(serviceInstalled ? '开机自启已关闭' : '开机自启已开启');
+      if (enable) await api.installService(component, component === 'web' && noOpenPreference ? true : undefined);
+      else await api.uninstallService(component);
+      notify(`${component === 'web' ? 'Web 服务' : '虚拟机'}开机自启${enable ? '已开启' : '已关闭'}`);
+      onRefresh();
+    } catch (err: any) {
+      notify(`操作失败：${err.message}`);
+    } finally {
+      setServiceLoading(false);
+    }
+  };
+
+  const handleToggleNoOpen = async (enable: boolean) => {
+    setServiceLoading(true);
+    try {
+      await api.setNoOpen(enable);
+      notify(enable ? '启动后将不再自动打开网页' : '启动后将自动打开网页');
       onRefresh();
     } catch (err: any) {
       notify(`操作失败：${err.message}`);
@@ -184,6 +205,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
       setEditCPUs(config.cpus || 2);
       setEditMemory(config.memory || 4);
       setEditDisk(config.diskSize || 20);
+      setEditDockerMode(config.dockerMode === 'vm' ? 'vm' : 'auto');
     } catch (err: any) {
       notify(`读取规格失败：${err.message}`);
     } finally {
@@ -195,7 +217,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     event.preventDefault();
     setSpecsSaving(true);
     try {
-      const result = await api.updateVMConfig({ cpus: editCPUs, memory: editMemory, diskSize: editDisk });
+      const result = await api.updateVMConfig({ cpus: editCPUs, memory: editMemory, diskSize: editDisk, dockerMode: editDockerMode });
       notify(result.message || '规格已保存');
       setShowSpecsModal(false);
       onRefresh();
@@ -363,7 +385,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
           <ActionButton label="重启" icon={RotateCw} loading={currentAction === 'restart'} disabled={isActionBusy} onClick={() => handleVMAction('restart')} />
           <ActionButton label="规格" icon={Sliders} onClick={handleOpenSpecs} />
           <ActionButton label="常驻" icon={Coffee} active={powerActive} loading={powerLoading} onClick={handleTogglePower} />
-          <ActionButton label="自启" icon={Rocket} active={serviceInstalled} loading={serviceLoading} onClick={handleToggleService} />
+          <ActionButton label="自启" icon={Rocket} active={serviceInstalled} loading={serviceLoading} onClick={() => setShowAutostartModal(true)} />
         </div>
       </section>
 
@@ -376,8 +398,64 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
                 <SpecField label="CPU 核心" value={editCPUs} min={1} max={16} onChange={setEditCPUs} />
                 <SpecField label="内存 (GiB)" value={editMemory} min={1} max={64} onChange={setEditMemory} />
                 <SpecField label="系统盘 (GiB)" value={editDisk} min={20} max={2048} onChange={setEditDisk} />
+                <div>
+                  <label className="text-xs font-bold text-slate-500">Docker 引擎</label>
+                  <select
+                    value={editDockerMode}
+                    onChange={(e) => setEditDockerMode(e.target.value as 'auto' | 'vm')}
+                    className="mt-1.5 min-h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  >
+                    <option value="auto">自动（优先复用本机 OrbStack / Docker Desktop）</option>
+                    <option value="vm">Lima 虚拟机内置 Docker</option>
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-400">切换引擎后，容器数据使用各自独立目录；新建虚拟机时 auto 模式会跳过 VM 内 Docker 安装</p>
+                </div>
                 <button type="submit" disabled={specsSaving} className="min-h-11 w-full rounded-2xl bg-sky-500 text-sm font-bold text-white shadow-sm transition hover:bg-sky-600 disabled:opacity-50">{specsSaving ? '保存中…' : '保存规格'}</button>
               </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showAutostartModal && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/35 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="w-full max-w-lg rounded-t-[28px] border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-slate-900 sm:rounded-[28px] sm:p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">开机自启设置</h3>
+                <p className="mt-1 text-xs text-slate-500">Web 服务与虚拟机分别注册 LaunchAgent（macbox autostart 同效）</p>
+              </div>
+              <button type="button" onClick={() => setShowAutostartModal(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-5 space-y-3">
+              <AutostartSwitchRow
+                title="Web 服务自启"
+                description={`LaunchAgent com.macbox.web · 登录即启动管理后台${overview?.services?.web?.running ? '（当前已加载）' : ''}`}
+                enabled={webAutoStartInstalled}
+                disabled={serviceLoading}
+                onToggle={(next) => handleToggleAutostart('web', next)}
+              />
+              <AutostartSwitchRow
+                title="虚拟机自启"
+                description="LaunchAgent com.macbox.vm · 登录后自动 limactl 启动，不常驻守护"
+                enabled={vmAutoStartInstalled}
+                disabled={serviceLoading}
+                onToggle={(next) => handleToggleAutostart('vm', next)}
+              />
+              <AutostartSwitchRow
+                title="启动后不打开网页"
+                description="菜单栏助手/自启链路不再自动弹出浏览器（--no-open）"
+                enabled={noOpenPreference}
+                disabled={serviceLoading}
+                onToggle={(next) => handleToggleNoOpen(next)}
+              />
+            </div>
+            {legacyAutoStartInstalled && (
+              <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                检测到旧版 com.macbox.server 自启项：开启上面任一开关后会自动迁移并删除。
+              </p>
             )}
           </div>
         </div>
@@ -432,4 +510,31 @@ const SpecField: React.FC<SpecFieldProps> = ({ label, value, min, max, onChange 
     <span>{label}</span>
     <input type="number" value={value} min={min} max={max} onChange={(event) => onChange(Number(event.target.value))} className="min-h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-right outline-none focus:border-sky-400 dark:border-slate-700 dark:bg-slate-800" />
   </label>
+);
+
+interface AutostartSwitchRowProps {
+  title: string;
+  description: string;
+  enabled: boolean;
+  disabled?: boolean;
+  onToggle: (next: boolean) => void;
+}
+
+const AutostartSwitchRow: React.FC<AutostartSwitchRowProps> = ({ title, description, enabled, disabled, onToggle }) => (
+  <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/40">
+    <div className="min-w-0">
+      <p className="text-sm font-bold text-slate-900 dark:text-white">{title}</p>
+      <p className="mt-0.5 text-xs text-slate-500">{description}</p>
+    </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={enabled}
+      disabled={disabled}
+      onClick={() => onToggle(!enabled)}
+      className={`relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50 ${enabled ? 'bg-sky-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+    >
+      <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${enabled ? 'left-6' : 'left-1'}`} />
+    </button>
+  </div>
 );

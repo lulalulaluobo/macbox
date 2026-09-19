@@ -107,6 +107,8 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"system":                 sysStats,
 		"power":                  s.powerMgr.GetStatus(),
 		"service":                s.serviceMgr.GetStatus(),
+		"services":               componentServiceStatus(s),
+		"noOpen":                 cfgSnapshot.System.NoOpen,
 		"vm":                     vmStat,
 		"vmAction":               s.vmMgr.GetVMAction(),
 		"configDirty":            s.vmMgr.IsConfigDirty(),
@@ -157,34 +159,109 @@ func (s *Server) handleSystemPowerToggle(w http.ResponseWriter, r *http.Request)
 }
 
 // Service Management Handlers
+
+func componentServiceStatus(s *Server) map[string]interface{} {
+	return map[string]interface{}{
+		"web":    s.serviceMgr.StatusComponent(system.ComponentWeb),
+		"vm":     s.serviceMgr.StatusComponent(system.ComponentVM),
+		"legacy": system.AgentStatus(system.ServiceLabel),
+	}
+}
+
+// decodeServiceComponentRequest accepts an optional JSON body so older
+// frontends that POST without a payload keep targeting the web component.
+func decodeServiceComponentRequest(r *http.Request) (system.Component, map[string]bool, error) {
+	var req struct {
+		Component string `json:"component"`
+		NoOpen    *bool  `json:"noOpen"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return "", nil, fmt.Errorf("invalid request body")
+		}
+	}
+	comp := system.ComponentWeb
+	switch strings.ToLower(strings.TrimSpace(req.Component)) {
+	case "", "web":
+		comp = system.ComponentWeb
+	case "vm":
+		comp = system.ComponentVM
+	default:
+		return "", nil, fmt.Errorf("未知自启组件 %q", req.Component)
+	}
+	return comp, map[string]bool{"noOpen": req.NoOpen != nil && *req.NoOpen}, nil
+}
+
 func (s *Server) handleSystemServiceStatus(w http.ResponseWriter, r *http.Request) {
-	status := s.serviceMgr.GetStatus()
-	writeJSON(w, http.StatusOK, status)
+	writeJSON(w, http.StatusOK, componentServiceStatus(s))
 }
 
 func (s *Server) handleSystemServiceInstall(w http.ResponseWriter, r *http.Request) {
+	comp, opts, err := decodeServiceComponentRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	cfgSnapshot, err := config.Snapshot(s.cfg)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "读取系统配置失败")
 		return
 	}
-	port := cfgSnapshot.Port
-	if port <= 0 {
-		port = 19808
+	if opts["noOpen"] {
+		if err := config.Update(s.cfg, func(updated *config.Config) error {
+			updated.System.NoOpen = true
+			return nil
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
-	if err := s.serviceMgr.Install(port); err != nil {
+	installOpts := system.InstallOptions{
+		Port:   cfgSnapshot.Port,
+		Host:   config.NormalizeListenAddress(cfgSnapshot.ListenAddress),
+		NoOpen: cfgSnapshot.System.NoOpen || opts["noOpen"],
+	}
+	if installOpts.Port <= 0 {
+		installOpts.Port = 19808
+	}
+	if err := s.serviceMgr.InstallComponent(comp, installOpts); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.serviceMgr.GetStatus())
+	writeJSON(w, http.StatusOK, componentServiceStatus(s))
 }
 
 func (s *Server) handleSystemServiceUninstall(w http.ResponseWriter, r *http.Request) {
-	if err := s.serviceMgr.Uninstall(); err != nil {
+	comp, _, err := decodeServiceComponentRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.serviceMgr.UninstallComponent(comp); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.serviceMgr.GetStatus())
+	writeJSON(w, http.StatusOK, componentServiceStatus(s))
+}
+
+// handleSystemNoOpen persists the "do not auto-open the web page" preference
+// that the menu-bar helper mirrors when it polls menubar status.
+func (s *Server) handleSystemNoOpen(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enable bool `json:"enable"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := config.Update(s.cfg, func(updated *config.Config) error {
+		updated.System.NoOpen = req.Enable
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"noOpen": req.Enable})
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {

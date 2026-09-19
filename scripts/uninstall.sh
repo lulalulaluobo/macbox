@@ -5,6 +5,8 @@ INSTALL_ROOT="${HOME}/.local/share/macbox"
 COMMAND_PATH="${HOME}/.local/bin/macbox"
 MENU_APP="${HOME}/Applications/MacBoxMemu.app"
 PLIST_PATH="${HOME}/Library/LaunchAgents/com.macbox.server.plist"
+WEB_PLIST_PATH="${HOME}/Library/LaunchAgents/com.macbox.web.plist"
+VM_PLIST_PATH="${HOME}/Library/LaunchAgents/com.macbox.vm.plist"
 LIMA_INSTANCE_NAME="macbox"
 DATA_DISK_NAME="macbox-data"
 LIMA_INSTANCE_DIR="${HOME}/.lima/${LIMA_INSTANCE_NAME}"
@@ -110,9 +112,13 @@ fi
 
 uid="$(id -u)"
 if command -v launchctl >/dev/null 2>&1; then
-  launchctl bootout "gui/${uid}" "$PLIST_PATH" 2>/dev/null || true
+  for agent_plist in "$PLIST_PATH" "$WEB_PLIST_PATH" "$VM_PLIST_PATH"; do
+    launchctl bootout "gui/${uid}" "$agent_plist" 2>/dev/null || true
+    rm -f -- "$agent_plist"
+  done
+else
+  rm -f -- "$PLIST_PATH" "$WEB_PLIST_PATH" "$VM_PLIST_PATH"
 fi
-rm -f -- "$PLIST_PATH"
 
 if (( PURGE )) && command -v limactl >/dev/null 2>&1; then
   limactl stop "$LIMA_INSTANCE_NAME" --tty=false 2>/dev/null || true

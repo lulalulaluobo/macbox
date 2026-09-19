@@ -214,3 +214,10 @@ MacBox 的架构、功能边界和交互设计参考了以下优秀开源项目�
 - [BigBear Dockge](https://github.com/bigbeartechworld/big-bear-dockge) 与 [BigBear CasaOS](https://github.com/bigbeartechworld/big-bear-casaos)：应用模板、Compose 配置和元数据组织方式。
 - [copyparty](https://github.com/9001/copyparty)（MIT）：轻量文件服务、多协议共享和文件操作思路。
 - [SFTPGo](https://github.com/drakkan/sftpgo)（AGPL-3.0-only，并带附加条款）：文件服务能力和存储后端抽象思路。
+- [Apple Container](https://github.com/apple/container)（Apache-2.0）：macOS 原生容器运行时，MacBox 的实验性容器引擎目标。
+- [mocker](https://github.com/us/mocker)（AGPL-3.0）：在 Apple Container 之上提供 `docker compose` 语义的第三方兼容 CLI，MacBox 实验性 Compose 桥接完全依赖它工作。
+
+> [!IMPORTANT]
+> **关于实验性 Apple Container Compose 兼容层**
+> 该功能通过第三方 mocker 将 Compose 操作转译到 Apple Container 执行，本质是一层**脆弱的兼容**：mocker 的行为不受 MacBox 控制，其输出格式、标签语义与 Compose 规范均可能随版本变化。MacBox 只负责接入与错误边界提示，**不会为兼容层本身投入额外的适配和维护成本**。
+> 如果你在 Apple Container 的 Compose 场景遇到问题，请优先向 [mocker](https://github.com/us/mocker) 上游提交 issue，或耐心等待 Apple Container 官方内建 Compose 支持——届时 MacBox 会直接切换到官方能力。在此之前，建议将该开关视为尝鲜功能。

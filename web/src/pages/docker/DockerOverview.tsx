@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, Box, Cpu, Disc3, Layers, MemoryStick, Network, RefreshCw } from 'lucide-react';
-import { DockerOverview as DockerOverviewType } from '../../types';
+import { DockerOverview as DockerOverviewType, DockerEngineInfo } from '../../types';
 import { api } from '../../api';
 
 type DockerTarget = 'containers' | 'compose' | 'images' | 'networks';
@@ -9,13 +9,27 @@ interface DockerOverviewProps {
   onNavigateTab: (tab: DockerTarget) => void;
 }
 
+const engineBadge = (info: DockerEngineInfo | null) => {
+  if (!info) return null;
+  if (info.source === 'host') return { label: `宿主引擎 · ${info.engine?.name || 'Docker'}`, tone: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400' };
+  if (info.source === 'lima-vm') return { label: 'Lima 虚拟机', tone: 'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400' };
+  if (info.source === 'apple') return { label: 'Apple container', tone: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400' };
+  return { label: '未检测到引擎', tone: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400' };
+};
+
 export const DockerOverview: React.FC<DockerOverviewProps> = ({ onNavigateTab }) => {
   const [data, setData] = useState<DockerOverviewType | null>(null);
+  const [engine, setEngine] = useState<DockerEngineInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchOverview = async () => {
     try {
-      setData(await api.getDockerOverview());
+      const [overview, engineInfo] = await Promise.all([
+        api.getDockerOverview(),
+        api.getDockerEngine().catch(() => null),
+      ]);
+      setData(overview);
+      setEngine(engineInfo);
     } catch {
       // Keep the last available snapshot.
     } finally {
@@ -52,6 +66,10 @@ export const DockerOverview: React.FC<DockerOverviewProps> = ({ onNavigateTab })
       <section className="flex min-h-[72px] items-center gap-3 rounded-[22px] border border-slate-200/80 bg-white px-4 py-3 shadow-xs dark:border-slate-800 dark:bg-slate-900/80">
         <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${ready ? 'bg-emerald-50 text-emerald-500 dark:bg-emerald-500/10' : 'bg-amber-50 text-amber-500 dark:bg-amber-500/10'}`}><Box className="h-5 w-5" /></span>
         <div className="min-w-0 flex-1"><h2 className="text-base font-black text-slate-900 dark:text-white">Docker Engine</h2><div className="mt-1 flex items-center gap-1.5 text-xs text-slate-500"><span className={`h-2 w-2 rounded-full ${ready ? 'bg-emerald-500' : 'bg-amber-500'}`} /><span>{ready ? '运行中' : '未就绪'}</span>{data?.dockerVersion && <span className="truncate">· v{data.dockerVersion}</span>}</div></div>
+        {(() => {
+          const badge = engineBadge(engine);
+          return badge ? <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${badge.tone}`}>{badge.label}</span> : null;
+        })()}
         <button type="button" onClick={fetchOverview} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-300" aria-label="刷新 Docker 状态"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
       </section>
 

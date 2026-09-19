@@ -85,6 +85,28 @@ export interface DockerOverview {
   netTxKb: number;
 }
 
+export interface DockerEngineInfo {
+  mode: string;
+  source: 'host' | 'lima-vm' | 'apple' | 'none';
+  engine: {
+    kind: string;
+    name: string;
+    socketPath?: string;
+    cliPath?: string;
+    running: boolean;
+    detail?: string;
+  } | null;
+  appleComposeEnabled?: boolean;
+  mockerInstalled?: boolean;
+  mockerPath?: string;
+}
+
+export interface AppleComposeBridge {
+  enabled: boolean;
+  mockerInstalled: boolean;
+  mockerPath: string;
+}
+
 export interface DockerNetwork {
   id: string;
   name: string;

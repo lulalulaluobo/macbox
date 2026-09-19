@@ -8,12 +8,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lulalulaluobo/macbox/pkg/containerengine"
 	"github.com/lulalulaluobo/macbox/pkg/vm"
 )
 
 type Client struct {
 	vmMgr                 *vm.Manager
 	projectRoot           string
+	dockerMode            string
+	cachedEngine          containerengine.Engine
+	engineMu              sync.Mutex
+	engineProbedAt        time.Time
 	containerSummaryCache containerSnapshotCache
 	containerStatsCache   containerSnapshotCache
 }
@@ -135,6 +140,7 @@ func NewClient(vmMgr *vm.Manager, projectRoot ...string) *Client {
 	return &Client{
 		vmMgr:       vmMgr,
 		projectRoot: root,
+		dockerMode:  DockerModeAuto,
 	}
 }
 
@@ -150,8 +156,30 @@ func (c *Client) InvalidateContainerCaches() {
 }
 
 func (c *Client) runDockerCmd(ctx context.Context, args ...string) ([]byte, error) {
+	// Mocker Compose override: run the host CLI directly, never the VM.
+	if cli, ok := composeCLIFromContext(ctx); ok {
+		var output cappedDockerOutput
+		err := execHostCLI(ctx, cli, nil, &output, args...)
+		return output.Bytes(), err
+	}
+	// Host engines (OrbStack, Docker Desktop, docker CLI context) are reused
+	// instead of the daemon inside the Lima VM whenever they answer.
+	if engine, ok := c.hostEngine(); ok {
+		var output cappedDockerOutput
+		err := execOnEngine(ctx, engine, nil, nil, &output, args...)
+		if err == nil {
+			return output.Bytes(), nil
+		}
+		if _, isExit := asExitError(err); isExit {
+			// The daemon answered and rejected the command; the VM would only
+			// produce a second, misleading error for a different engine.
+			return output.Bytes(), err
+		}
+		c.InvalidateEngineProbe()
+	}
+
 	status, _ := c.vmMgr.GetStatusContext(ctx)
-	// If host docker socket is ready and host docker cli is available, run directly
+	// If the VM docker socket is forwarded and host docker cli is available, run directly
 	if status != nil && status.DockerReady {
 		cmdArgs := append([]string{"-H", "unix://" + status.DockerSocket}, args...)
 		cmd := exec.CommandContext(ctx, "docker", cmdArgs...)

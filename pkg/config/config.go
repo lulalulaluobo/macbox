@@ -22,6 +22,7 @@ type Config struct {
 	Port          int               `yaml:"port"`
 	ListenAddress string            `yaml:"listenAddress"`
 	VM            VMConfig          `yaml:"vm"`
+	Container     ContainerConfig   `yaml:"container"`
 	Storage       StorageConfig     `yaml:"storage"`
 	Cloud         CloudConfig       `yaml:"cloud"`
 	Terminal      TerminalConfig    `yaml:"terminal"`
@@ -37,9 +38,12 @@ type TerminalConfig struct {
 }
 
 type SystemConfig struct {
-	PreventSleep            bool `yaml:"preventSleep"`            // 24h keep-awake with caffeinate
-	AutoStart               bool `yaml:"autoStart"`               // macOS LaunchAgent autostart on boot
-	InitializationCompleted bool `yaml:"initializationCompleted"` // first-run VM/SSH bootstrap completed
+	PreventSleep            bool  `yaml:"preventSleep"`            // 24h keep-awake with caffeinate
+	AutoStartWeb            bool  `yaml:"autoStartWeb"`            // LaunchAgent com.macbox.web
+	AutoStartVM             bool  `yaml:"autoStartVM"`             // LaunchAgent com.macbox.vm
+	NoOpen                  bool  `yaml:"noOpen"`                  // 启动后端后不自动打开网页
+	AutoStart               *bool `yaml:"autoStart,omitempty"`     // legacy 单一自启字段，加载时迁移到 AutoStartWeb
+	InitializationCompleted bool  `yaml:"initializationCompleted"` // first-run VM/SSH bootstrap completed
 }
 
 // ServiceShortcut is a homepage link. Docker shortcuts carry container
@@ -64,6 +68,20 @@ type VMConfig struct {
 	DiskSize       int    `yaml:"diskSize"` // GiB rootfs
 	DataDiskName   string `yaml:"dataDiskName"`
 	ForwardedPorts []int  `yaml:"forwardedPorts"`
+	// DockerMode selects the container runtime: "auto" reuses a running host
+	// engine (OrbStack, Docker Desktop, docker CLI) and skips installing
+	// Docker in a newly created VM; "vm" always uses the Lima VM engine.
+	DockerMode string `yaml:"dockerMode"`
+}
+
+// ContainerConfig controls Apple's native `container` CLI fallback. Mode
+// "auto" uses it only when no docker engine (host or Lima VM) is reachable;
+// "apple" forces it; "docker" never selects it. AppleCompose is the
+// experimental toggle that lets Compose run through the third-party Mocker
+// CLI while the Apple engine is active (docker compose stays the default).
+type ContainerConfig struct {
+	Mode         string `yaml:"mode"`
+	AppleCompose bool   `yaml:"appleCompose"`
 }
 
 type LocalMount struct {
@@ -136,7 +154,9 @@ func DefaultConfig() *Config {
 			// Only forward ports used by the built-in web applications. New
 			// application ports are added explicitly during installation.
 			ForwardedPorts: []int{5244, 8082, 8085},
+			DockerMode:     "auto",
 		},
+		Container: ContainerConfig{Mode: "auto"},
 		Storage: StorageConfig{
 			SelectedDisk: "",
 			MountPoint:   "",
@@ -150,7 +170,8 @@ func DefaultConfig() *Config {
 		},
 		System: SystemConfig{
 			PreventSleep: true, // Default enabled for the MacBox home server
-			AutoStart:    false,
+			AutoStartWeb: false,
+			AutoStartVM:  false,
 		},
 		ServiceNav: []ServiceShortcut{},
 	}
@@ -523,6 +544,18 @@ func Parse(data []byte) (*Config, error) {
 		cfg.VM.ForwardedPorts = append([]int(nil), DefaultConfig().VM.ForwardedPorts...)
 	}
 	cfg.VM.ForwardedPorts = NormalizeForwardedPorts(cfg.VM.ForwardedPorts)
+	switch strings.TrimSpace(cfg.VM.DockerMode) {
+	case "vm", "auto":
+		cfg.VM.DockerMode = strings.TrimSpace(cfg.VM.DockerMode)
+	default:
+		cfg.VM.DockerMode = "auto"
+	}
+	switch strings.TrimSpace(cfg.Container.Mode) {
+	case "apple", "docker":
+		cfg.Container.Mode = strings.TrimSpace(cfg.Container.Mode)
+	default:
+		cfg.Container.Mode = "auto"
+	}
 	cfg.Terminal.ManualPublishedPorts = NormalizeManualPublishedPorts(cfg.Terminal.ManualPublishedPorts, cfg.VM.ForwardedPorts)
 	if cfg.Samba.Port < 1 || cfg.Samba.Port > 65535 {
 		cfg.Samba.Port = 4455
@@ -532,6 +565,14 @@ func Parse(data []byte) (*Config, error) {
 	}
 	if cfg.Samba.User == "" {
 		cfg.Samba.User = "macbox"
+	}
+	// One-time migration from the pre-split single autostart flag. The legacy
+	// pointer is dropped so subsequent saves persist the new, explicit fields.
+	if cfg.System.AutoStart != nil {
+		if *cfg.System.AutoStart {
+			cfg.System.AutoStartWeb = true
+		}
+		cfg.System.AutoStart = nil
 	}
 	return cfg, nil
 }

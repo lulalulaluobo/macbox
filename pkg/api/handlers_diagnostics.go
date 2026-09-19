@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lulalulaluobo/macbox/pkg/config"
+	"github.com/lulalulaluobo/macbox/pkg/containerengine"
 	"github.com/lulalulaluobo/macbox/pkg/vm"
 )
 
@@ -86,11 +87,27 @@ func (s *Server) handleSystemDiagnostics(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	if vmStatus != nil && vmStatus.Status == "Running" && vmStatus.DockerReady {
+	// The Docker check follows MacBox's actual engine routing: a host engine
+	// satisfies it even when the VM has no daemon, and the Apple engine only
+	// appears after the Lima VM socket probe fails.
+	engineInfo := s.dockerClient.EngineInfo(probeCtx)
+	engineSource, _ := engineInfo["source"].(string)
+	engineName := ""
+	if engine, ok := engineInfo["engine"].(containerengine.Engine); ok {
+		engineName = engine.Name
+	}
+	switch {
+	case engineSource == "host":
+		add(diagnosticCheck{ID: "docker", Title: "Docker 服务", Status: "pass", Message: fmt.Sprintf("复用宿主容器引擎 · %s", engineName), Detail: "虚拟机内无需运行 Docker"})
+	case engineSource == "lima-vm":
+		add(diagnosticCheck{ID: "docker", Title: "Docker 服务", Status: "pass", Message: "虚拟机 Docker Socket 已就绪"})
+	case s.appleContainerActive(probeCtx):
+		add(diagnosticCheck{ID: "docker", Title: "Docker 服务", Status: "pass", Message: "使用 Apple container 引擎", Detail: "Compose 能力需在设置→实验性功能开启 mocker 兼容层", Repair: "如未启动可执行 sudo container system start"})
+	case vmStatus != nil && vmStatus.Status == "Running" && vmStatus.DockerReady:
 		add(diagnosticCheck{ID: "docker", Title: "Docker 服务", Status: "pass", Message: "Docker Socket 已就绪"})
-	} else if vmStatus != nil && vmStatus.Status == "Running" {
-		add(diagnosticCheck{ID: "docker", Title: "Docker 服务", Status: "warn", Message: "虚拟机已运行，但 Docker 尚未就绪", Repair: "等待服务启动完成后重新检查"})
-	} else {
+	case vmStatus != nil && vmStatus.Status == "Running":
+		add(diagnosticCheck{ID: "docker", Title: "Docker 服务", Status: "warn", Message: "虚拟机已运行，但未检测到可用容器引擎", Repair: "等待虚拟机内 Docker 启动，或运行 OrbStack / Docker Desktop 让 MacBox 复用宿主引擎"})
+	default:
 		add(diagnosticCheck{ID: "docker", Title: "Docker 服务", Status: "warn", Message: "虚拟机未运行，暂时无法检查 Docker"})
 	}
 

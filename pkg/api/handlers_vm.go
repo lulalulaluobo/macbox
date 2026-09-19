@@ -110,6 +110,8 @@ func (s *Server) handleVMStart(w http.ResponseWriter, r *http.Request) {
 		err := s.vmMgr.StartWithProgress(ctx, s.projectRoot, func(stage string, progress int, message string) {
 			s.jobs.update(job.ID, stage, progress, message)
 		})
+		// A VM start/stop changes which engine is reachable; re-probe.
+		s.dockerClient.InvalidateEngineProbe()
 		if err != nil {
 			log.Printf("[MacBox] VM Start error: %v", err)
 		} else {
@@ -142,6 +144,7 @@ func (s *Server) handleVMStop(w http.ResponseWriter, r *http.Request) {
 		defer s.vmMgr.EndVMAction()
 		defer cancel()
 		err := s.vmMgr.Stop(ctx)
+		s.dockerClient.InvalidateEngineProbe()
 		if err != nil {
 			log.Printf("[MacBox] VM Stop error: %v", err)
 		}
@@ -167,6 +170,7 @@ func (s *Server) handleVMRestart(w http.ResponseWriter, r *http.Request) {
 		defer s.vmMgr.EndVMAction()
 		defer cancel()
 		err := s.vmMgr.Restart(ctx, s.projectRoot)
+		s.dockerClient.InvalidateEngineProbe()
 		if err != nil {
 			log.Printf("[MacBox] VM Restart error: %v", err)
 		} else {
@@ -272,6 +276,7 @@ func (s *Server) handleVMConfigGet(w http.ResponseWriter, r *http.Request) {
 		"cpus":               cfgSnapshot.VM.CPUs,
 		"memory":             cfgSnapshot.VM.Memory,
 		"diskSize":           cfgSnapshot.VM.DiskSize,
+		"dockerMode":         cfgSnapshot.VM.DockerMode,
 		"hostCpus":           runtime.NumCPU(),
 		"hostMemoryGB":       totalMemGB,
 		"vmStatus":           vmStatus,
@@ -285,9 +290,10 @@ func (s *Server) handleVMConfigGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleVMConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		CPUs     int `json:"cpus"`
-		Memory   int `json:"memory"`
-		DiskSize int `json:"diskSize"`
+		CPUs       int    `json:"cpus"`
+		Memory     int    `json:"memory"`
+		DiskSize   int    `json:"diskSize"`
+		DockerMode string `json:"dockerMode"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -312,6 +318,24 @@ func (s *Server) handleVMConfigUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if req.DiskSize < cfgSnapshot.VM.DiskSize {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("系统盘容量只支持扩容（当前为 %d GiB，不能缩减）", cfgSnapshot.VM.DiskSize))
+		return
+	}
+
+	switch req.DockerMode {
+	case "", cfgSnapshot.VM.DockerMode:
+	case "auto", "vm":
+		mode := req.DockerMode
+		if err := config.Update(s.cfg, func(c *config.Config) error {
+			c.VM.DockerMode = mode
+			return nil
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		s.dockerClient.SetDockerMode(mode)
+		s.dockerClient.InvalidateEngineProbe()
+	default:
+		writeError(w, http.StatusBadRequest, "Docker 运行模式仅支持 auto 或 vm")
 		return
 	}
 

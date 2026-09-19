@@ -12,7 +12,6 @@ UNINSTALL_SCRIPT="${SCRIPT_DIR}/uninstall.sh"
 STATE_DIR="${HOME}/.macbox"
 PID_FILE="${STATE_DIR}/macbox.command.pid"
 LOG_FILE="${STATE_DIR}/macbox.log"
-PLIST_PATH="${HOME}/Library/LaunchAgents/com.macbox.server.plist"
 PORT="${MACBOX_PORT:-19808}"
 HOST="${MACBOX_HOST:-0.0.0.0}"
 
@@ -175,16 +174,21 @@ stop_service() {
     stopped=1
   fi
 
-  # Also stop a MacBox LaunchAgent created by the CLI service command. The
-  # exact plist path is fixed and owned by MacBox, so this cannot unload an
+  # Also stop MacBox LaunchAgents created by `macbox autostart`. The exact
+  # plist paths are fixed and owned by MacBox, so this cannot unload an
   # unrelated user service.
-  if [[ -f "$PLIST_PATH" ]]; then
-    local uid
-    uid="$(id -u)"
-    /bin/launchctl bootout "gui/${uid}" "$PLIST_PATH" >/dev/null 2>&1 || true
-    rm -f -- "$PLIST_PATH"
-    stopped=1
-  fi
+  for agent_plist in \
+    "${HOME}/Library/LaunchAgents/com.macbox.server.plist" \
+    "${HOME}/Library/LaunchAgents/com.macbox.web.plist" \
+    "${HOME}/Library/LaunchAgents/com.macbox.vm.plist"; do
+    if [[ -f "$agent_plist" ]]; then
+      local uid
+      uid="$(id -u)"
+      /bin/launchctl bootout "gui/${uid}" "$agent_plist" >/dev/null 2>&1 || true
+      rm -f -- "$agent_plist"
+      stopped=1
+    fi
+  done
 
   if (( stopped )); then
     ui_message "MacBox 已停止" "MacBox Web 服务已停止。再次双击 MacBox.command 可重新启动。"

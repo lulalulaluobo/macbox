@@ -10,20 +10,20 @@ type PortMapping struct {
 
 // ContainerInfo represents detailed information about a container
 type ContainerInfo struct {
-	ID         string        `json:"id"`
-	Names      string        `json:"name"`
-	Image      string        `json:"image"`
-	State      string        `json:"state"` // "running", "exited", "created", etc.
-	Status     string        `json:"status"`
-	Ports      string        `json:"ports"`
-	PortsMap   []PortMapping `json:"portsMap"`
-	CreatedAt  string        `json:"createdAt"`
-	CPUPerc    string        `json:"cpuPerc"`    // e.g. "0.50%"
-	MemUsage   string        `json:"memUsage"`   // e.g. "45.2MiB / 2GiB"
-	MemPerc    string        `json:"memPerc"`    // e.g. "2.25%"
-	NetIO      string        `json:"netIo"`      // e.g. "12KB / 45KB"
-	BlockIO    string        `json:"blockIo"`    // e.g. "1.2MB / 50KB"
-	Project    string        `json:"project"`    // compose project name if any
+	ID        string        `json:"id"`
+	Names     string        `json:"name"`
+	Image     string        `json:"image"`
+	State     string        `json:"state"` // "running", "exited", "created", etc.
+	Status    string        `json:"status"`
+	Ports     string        `json:"ports"`
+	PortsMap  []PortMapping `json:"portsMap"`
+	CreatedAt string        `json:"createdAt"`
+	CPUPerc   string        `json:"cpuPerc"`  // e.g. "0.50%"
+	MemUsage  string        `json:"memUsage"` // e.g. "45.2MiB / 2GiB"
+	MemPerc   string        `json:"memPerc"`  // e.g. "2.25%"
+	NetIO     string        `json:"netIo"`    // e.g. "12KB / 45KB"
+	BlockIO   string        `json:"blockIo"`  // e.g. "1.2MB / 50KB"
+	Project   string        `json:"project"`  // compose project name if any
 }
 
 // ImageInfo represents a local docker image
