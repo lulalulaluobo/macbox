@@ -128,3 +128,32 @@ func TestContainerSnapshotCacheCoalescesConcurrentLoads(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkRatesUseCounterDelta(t *testing.T) {
+	client := &Client{}
+	first := time.Unix(100, 0)
+	second := first.Add(2 * time.Second)
+
+	if rx, tx := client.networkRates([]ContainerInfo{{ID: "one", NetIO: "1000B / 2KB"}}, first); rx != 0 || tx != 0 {
+		t.Fatalf("initial network rates = (%v, %v), want (0, 0)", rx, tx)
+	}
+
+	rx, tx := client.networkRates([]ContainerInfo{{ID: "one", NetIO: "3000B / 6KB"}}, second)
+	if want := 2000.0 / 1024 / 2; rx != want {
+		t.Fatalf("receive rate = %v, want %v", rx, want)
+	}
+	if want := 4096.0 / 1024 / 2; tx != want {
+		t.Fatalf("transmit rate = %v, want %v", tx, want)
+	}
+}
+
+func TestNetworkRatesIgnoreCounterReset(t *testing.T) {
+	client := &Client{}
+	first := time.Unix(100, 0)
+	client.networkRates([]ContainerInfo{{ID: "one", NetIO: "10MB / 10MB"}}, first)
+
+	rx, tx := client.networkRates([]ContainerInfo{{ID: "one", NetIO: "1MB / 1MB"}}, first.Add(time.Second))
+	if rx != 0 || tx != 0 {
+		t.Fatalf("rates after counter reset = (%v, %v), want (0, 0)", rx, tx)
+	}
+}

@@ -34,6 +34,13 @@ export const DockerOverview: React.FC<DockerOverviewProps> = ({ onNavigateTab })
     };
   }, []);
 
+  const networkRateKb = Math.max(0, (data?.netRxKb || 0) + (data?.netTxKb || 0));
+  const formatNetworkRate = (kbPerSecond: number) => {
+    if (kbPerSecond >= 1024 * 1024) return `${(kbPerSecond / (1024 * 1024)).toFixed(1)} GB/s`;
+    if (kbPerSecond >= 1024) return `${(kbPerSecond / 1024).toFixed(1)} MB/s`;
+    return `${kbPerSecond.toFixed(1)} KB/s`;
+  };
+
   const ready = Boolean(data?.dockerReady);
   const launches = [
     { id: 'containers' as const, label: '容器', value: `${data?.containersRunning || 0}/${data?.containersTotal || 0}`, icon: Box, tone: 'bg-sky-50 text-sky-500 dark:bg-sky-500/10' },
@@ -44,7 +51,7 @@ export const DockerOverview: React.FC<DockerOverviewProps> = ({ onNavigateTab })
   const metrics = [
     { label: 'CPU', value: `${(data?.cpuPerc || 0).toFixed(1)}%`, progress: data?.cpuPerc || 0, icon: Cpu, color: 'text-sky-500', bar: 'bg-sky-500' },
     { label: '内存', value: `${(data?.memPerc || 0).toFixed(1)}%`, progress: data?.memPerc || 0, icon: MemoryStick, color: 'text-violet-500', bar: 'bg-violet-500' },
-    { label: '网络', value: `${((data?.netRxKb || 0) + (data?.netTxKb || 0)).toFixed(1)} KB/s`, progress: Math.min(((data?.netRxKb || 0) + (data?.netTxKb || 0)) / 10, 100), icon: Activity, color: 'text-emerald-500', bar: 'bg-emerald-500' },
+    { label: '网络', value: formatNetworkRate(networkRateKb), progress: Math.min(networkRateKb / 1024, 100), icon: Activity, color: 'text-emerald-500', bar: 'bg-emerald-500' },
   ];
 
   return (

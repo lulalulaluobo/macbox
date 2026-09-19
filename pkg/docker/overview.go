@@ -4,7 +4,14 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 )
+
+type networkSample struct {
+	rxBytes float64
+	txBytes float64
+	at      time.Time
+}
 
 func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
 	vmStatus, vmStatusErr := c.vmMgr.GetStatusContext(ctx)
@@ -35,8 +42,6 @@ func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
 	var totalCPU float64 = 0
 	var totalMemMB float64 = 0
 	var memMaxMB float64 = 0
-	var totalNetRxKB float64 = 0
-	var totalNetTxKB float64 = 0
 
 	for _, ct := range containers {
 		if ct.State == "running" {
@@ -67,17 +72,12 @@ func (c *Client) GetOverview(ctx context.Context) (*DockerOverview, error) {
 			}
 		}
 
-		// Parse Net: e.g. "10.8kB / 126B"
-		if strings.Contains(ct.NetIO, "/") {
-			parts := strings.Split(ct.NetIO, "/")
-			if len(parts) == 2 {
-				rx := strings.TrimSpace(parts[0])
-				tx := strings.TrimSpace(parts[1])
-				totalNetRxKB += parseSizeToKB(rx)
-				totalNetTxKB += parseSizeToKB(tx)
-			}
-		}
 	}
+
+	// Docker stats reports cumulative network counters, not a rate. Convert
+	// those counters into bytes per second before returning the overview so the
+	// UI does not mistake lifetime traffic for current throughput.
+	totalNetRxKB, totalNetTxKB := c.networkRates(containers, time.Now())
 
 	imagesInUse := 0
 	for _, img := range images {
@@ -172,22 +172,77 @@ func parseSizeToMB(s string) float64 {
 }
 
 func parseSizeToKB(s string) float64 {
+	return parseSizeToBytes(s) / 1024
+}
+
+func parseSizeToBytes(s string) float64 {
 	s = strings.TrimSpace(s)
 	lower := strings.ToLower(s)
+	if strings.HasSuffix(lower, "tb") || strings.HasSuffix(lower, "tib") {
+		numStr := strings.TrimSuffix(strings.TrimSuffix(lower, "tib"), "tb")
+		val, _ := strconv.ParseFloat(numStr, 64)
+		return val * 1024 * 1024 * 1024 * 1024
+	}
+	if strings.HasSuffix(lower, "gb") || strings.HasSuffix(lower, "gib") {
+		numStr := strings.TrimSuffix(strings.TrimSuffix(lower, "gib"), "gb")
+		val, _ := strconv.ParseFloat(numStr, 64)
+		return val * 1024 * 1024 * 1024
+	}
 	if strings.HasSuffix(lower, "mb") || strings.HasSuffix(lower, "mib") {
 		numStr := strings.TrimSuffix(strings.TrimSuffix(lower, "mib"), "mb")
 		val, _ := strconv.ParseFloat(numStr, 64)
-		return val * 1024
+		return val * 1024 * 1024
 	}
 	if strings.HasSuffix(lower, "kb") || strings.HasSuffix(lower, "kib") {
 		numStr := strings.TrimSuffix(strings.TrimSuffix(lower, "kib"), "kb")
 		val, _ := strconv.ParseFloat(numStr, 64)
-		return val
+		return val * 1024
 	}
 	if strings.HasSuffix(lower, "b") {
 		numStr := strings.TrimSuffix(lower, "b")
 		val, _ := strconv.ParseFloat(numStr, 64)
-		return val / 1024
+		return val
 	}
 	return 0
+}
+
+func (c *Client) networkRates(containers []ContainerInfo, now time.Time) (float64, float64) {
+	current := make(map[string]networkSample)
+	for _, ct := range containers {
+		if strings.TrimSpace(ct.ID) == "" || !strings.Contains(ct.NetIO, "/") {
+			continue
+		}
+		parts := strings.SplitN(ct.NetIO, "/", 2)
+		rxBytes := parseSizeToBytes(strings.TrimSpace(parts[0]))
+		txBytes := parseSizeToBytes(strings.TrimSpace(parts[1]))
+		if rxBytes == 0 && txBytes == 0 && strings.TrimSpace(ct.NetIO) != "0B / 0B" {
+			continue
+		}
+		current[ct.ID] = networkSample{rxBytes: rxBytes, txBytes: txBytes, at: now}
+	}
+
+	c.networkRateMu.Lock()
+	defer c.networkRateMu.Unlock()
+	previous := c.networkSamples
+	c.networkSamples = current
+
+	var rxBytesPerSecond, txBytesPerSecond float64
+	for id, sample := range current {
+		old, ok := previous[id]
+		if !ok {
+			continue
+		}
+		seconds := sample.at.Sub(old.at).Seconds()
+		if seconds <= 0 {
+			continue
+		}
+		if sample.rxBytes >= old.rxBytes {
+			rxBytesPerSecond += (sample.rxBytes - old.rxBytes) / seconds
+		}
+		if sample.txBytes >= old.txBytes {
+			txBytesPerSecond += (sample.txBytes - old.txBytes) / seconds
+		}
+	}
+
+	return rxBytesPerSecond / 1024, txBytesPerSecond / 1024
 }

@@ -16,6 +16,8 @@ type Client struct {
 	projectRoot           string
 	containerSummaryCache containerSnapshotCache
 	containerStatsCache   containerSnapshotCache
+	networkRateMu         sync.Mutex
+	networkSamples        map[string]networkSample
 }
 
 const (
