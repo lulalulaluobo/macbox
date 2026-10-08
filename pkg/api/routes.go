@@ -9,6 +9,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/system/update/rollback", s.adminOnly(s.handleUpdateRollback))
 	s.mux.HandleFunc("GET /api/vm/network", s.handleNetwork)
 	s.mux.HandleFunc("POST /api/vm/network/setup", s.adminOnly(s.handleNetworkSetup))
+	s.mux.HandleFunc("GET /api/remote/tailscale", s.adminOnly(s.handleTailscaleStatus))
+	s.mux.HandleFunc("POST /api/remote/tailscale/{action}", s.adminOnly(s.handleTailscaleAction))
 	// 1. System
 	s.mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
 	s.mux.HandleFunc("GET /api/system/menubar-status", s.handleSystemMenubarStatus)

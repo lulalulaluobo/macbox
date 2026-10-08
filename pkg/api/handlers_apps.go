@@ -14,7 +14,7 @@ import (
 
 // Apps Handlers
 func (s *Server) handleAppsList(w http.ResponseWriter, r *http.Request) {
-	primaryIP := s.vmMgr.NetworkStatus(r.Context()).IP
+	primaryIP := s.applicationHostIP(r)
 	appList, err := s.appMgr.ListApps(r.Context(), primaryIP)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

@@ -1,8 +1,11 @@
 import type { SystemOverview, SystemDiagnostics, PowerStatus, ServiceStatus, VMConfigInfo, VMPrerequisites, BackgroundJob, SystemUser, SSHConfig, SSHKeyGenerationResult } from '../types';
 import type { NetworkStatus, VersionInfo, ReleaseInfo, UpdateState } from '../types/update';
+import type { RemoteAction, TailscaleStatus } from '../types/remote';
 import { BASE_URL, fetchJSON } from './client';
 
 export const systemApi = {
+ getTailscale: () => fetchJSON<TailscaleStatus>(`${BASE_URL}/remote/tailscale`),
+ setTailscale: (action: RemoteAction) => fetchJSON<{ jobId: string }>(`${BASE_URL}/remote/tailscale/${action}`, { method: 'POST' }),
  getVMNetwork: () => fetchJSON<NetworkStatus>(`${BASE_URL}/vm/network`),
  setupVMNetwork: () => fetchJSON<{ jobId: string }>(`${BASE_URL}/vm/network/setup`, { method: 'POST' }),
  getVersion: () => fetchJSON<VersionInfo>(`${BASE_URL}/system/version`),

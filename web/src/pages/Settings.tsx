@@ -16,6 +16,7 @@ import { BackupRestoreSection } from './settings/BackupRestoreSection';
 import { NetworkSettingsSection } from './settings/NetworkSettingsSection';
 import { VersionManagementSection } from './settings/VersionManagementSection';
 import { SettingsOverviewSection } from './settings/SettingsOverviewSection';
+import { TailscaleSettingsSection } from './settings/TailscaleSettingsSection';
 
 interface SettingsProps {
  overview?: SystemOverview | null;
@@ -552,6 +553,7 @@ export const Settings: React.FC<SettingsProps> = ({
 
       {activeSubTab === 'overview' && <SettingsOverviewSection overview={overview} isAdmin={currentUser?.role === 'admin'} onRefresh={onRefreshOverview} onSelect={setActiveSubTab} onNavigate={onNavigateTab} />}
       {activeSubTab === 'network' && <NetworkSettingsSection isAdmin={currentUser?.role === 'admin'} onRefresh={onRefreshOverview} />}
+      {activeSubTab === 'remote' && currentUser?.role === 'admin' && <TailscaleSettingsSection />}
       {activeSubTab === 'updates' && <VersionManagementSection isAdmin={currentUser?.role === 'admin'} />}
 
       {activeSubTab === 'appearance' && (

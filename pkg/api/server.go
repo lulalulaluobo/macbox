@@ -8,6 +8,7 @@ import (
 	"github.com/lulalulaluobo/macbox/pkg/auth"
 	"github.com/lulalulaluobo/macbox/pkg/config"
 	"github.com/lulalulaluobo/macbox/pkg/docker"
+	"github.com/lulalulaluobo/macbox/pkg/remote"
 	"github.com/lulalulaluobo/macbox/pkg/samba"
 	"github.com/lulalulaluobo/macbox/pkg/system"
 	"github.com/lulalulaluobo/macbox/pkg/terminal"
@@ -28,6 +29,7 @@ type Server struct {
 	updateMgr       *update.Manager
 	cfg             *config.Config
 	vmMgr           *vm.Manager
+	remoteMgr       *remote.Manager
 	dockerClient    *docker.Client
 	appMgr          *apps.Manager
 	sambaMgr        *samba.Manager
@@ -339,6 +341,7 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 		cfg:             cfg,
 		updateMgr:       update.NewManager(cfg.Port, nil),
 		vmMgr:           vmMgr,
+		remoteMgr:       remote.NewManager(vmMgr, cfg.Port),
 		dockerClient:    dockerClient,
 		appMgr:          appMgr,
 		sambaMgr:        sambaMgr,

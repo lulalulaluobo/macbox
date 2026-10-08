@@ -1,7 +1,7 @@
 import React from 'react';
-import { ArchiveRestore, Crown, LayoutDashboard, Network, Palette, RefreshCw, Shield, Terminal, UserCheck, Users } from 'lucide-react';
+import { ArchiveRestore, Crown, Globe, LayoutDashboard, Network, Palette, RefreshCw, Shield, Terminal, UserCheck, Users } from 'lucide-react';
 
-export type SettingsSubTab = 'overview' | 'network' | 'updates' | 'console_users' | 'users' | 'rootpwd' | 'ssh' | 'terminal' | 'appearance' | 'backup';
+export type SettingsSubTab = 'overview' | 'network' | 'remote' | 'updates' | 'console_users' | 'users' | 'rootpwd' | 'ssh' | 'terminal' | 'appearance' | 'backup';
 
 interface SettingsNavigationProps {
   activeSubTab: SettingsSubTab;
@@ -12,6 +12,7 @@ interface SettingsNavigationProps {
 export const settingsTabs: Array<{ id: SettingsSubTab; label: string; icon: React.ComponentType<{ className?: string }>; iconClassName?: string; advanced?: boolean; admin?: boolean }> = [
   { id: 'overview', label: '常用设置', icon: LayoutDashboard },
   { id: 'network', label: "网络连接", icon: Network },
+  { id: 'remote', label: '远程访问', icon: Globe, admin: true },
   { id: 'updates', label: '版本更新', icon: RefreshCw },
   { id: 'console_users', label: "后台账号", icon: UserCheck },
   { id: 'users', label: "系统账号", icon: Users, advanced: true, admin: true },

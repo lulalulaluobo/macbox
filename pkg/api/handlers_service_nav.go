@@ -62,11 +62,15 @@ func (s *Server) handleServiceShortcutsList(w http.ResponseWriter, r *http.Reque
 	}
 	shortcuts := cfg.ServiceNav
 	if s.vmMgr != nil {
-		ip := s.vmMgr.NetworkStatus(r.Context()).IP
+		ip := s.applicationHostIP(r)
+		localIP := ip
+		if strings.HasPrefix(ip, "100.") {
+			localIP = s.vmMgr.NetworkStatus(r.Context()).IP
+		}
 		if ip != "" {
 			for i := range shortcuts {
-				if shortcuts[i].Source == "docker" {
-					if address, err := url.Parse(shortcuts[i].URL); err == nil {
+				if address, err := url.Parse(shortcuts[i].URL); err == nil {
+					if shortcuts[i].Source == "docker" || (ip != localIP && localIP != "" && address.Hostname() == localIP) {
 						if port := address.Port(); port != "" {
 							address.Host = ip + ":" + port
 						} else {
