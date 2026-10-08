@@ -138,7 +138,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       setDataPath(storageRes.dataPath || '');
       setSamba(sambaRes);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `加载存储数据失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `加载存储数据失败，原因：${err.message}` });
     } finally {
       setLoading(false);
     }
@@ -167,7 +167,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       setRestartPrompt(true);
       loadData();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `绑定外接盘失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `绑定外接盘失败，原因：${err.message}` });
     } finally {
       setBindLoading(false);
     }
@@ -183,7 +183,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       loadData();
       if (onRefreshOverview) onRefreshOverview();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `解除绑定失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `解除绑定失败，原因：${err.message}` });
     } finally {
       setUnbindLoading(false);
     }
@@ -205,15 +205,15 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       );
       setDisks(storageRes.disks || []);
       if (!refreshedDisk) {
-        throw new Error('未重新扫描到这块磁盘，请确认磁盘仍已挂载');
+        throw new Error("没有找到这块磁盘，请确认已连接");
       }
       setSecondaryTargetDisk(refreshedDisk);
       setSecondaryCustomDir(refreshedDisk.recommendedTargetDir || '');
       if (!refreshedDisk.recommendedTargetDir) {
-        throw new Error('未找到可用的本机存储目录，请先在 macOS 中挂载可写的数据卷');
+        throw new Error("请先在Mac上连接可写磁盘");
       }
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `扫描本机存储目录失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `扫描本机存储目录失败，原因：${err.message}` });
     } finally {
       setScanningSecondaryPath(false);
     }
@@ -236,14 +236,14 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       loadData();
       if (onRefreshOverview) onRefreshOverview();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `挂载扩展盘失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `挂载扩展盘失败，原因：${err.message}` });
     } finally {
       setBindingSecondary(false);
     }
   };
 
   const handleUnbindSecondary = async () => {
-    if (!confirm('确定要解除存储空间 2 (扩展盘) 的挂载吗？')) return;
+    if (!confirm("将断开扩展存储。\n数据文件保留。\n是否解除连接？")) return;
     try {
       const res = await api.unbindSecondaryDisk();
       setAlertMsg({ type: 'success', text: res.message });
@@ -251,7 +251,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       loadData();
       if (onRefreshOverview) onRefreshOverview();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `解除挂载失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `解除挂载失败，原因：${err.message}` });
     }
   };
 
@@ -259,7 +259,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
     setRestartingVM(true);
     try {
       await api.restartVM();
-      setAlertMsg({ type: 'success', text: '正在重启虚拟机以挂载新数据盘，请稍候约 30 秒...' });
+      setAlertMsg({ type: 'success', text: "正在接入数据盘并重启，约需30秒" });
       setRestartPrompt(false);
       onRefreshOverview?.();
       setTimeout(() => {
@@ -267,7 +267,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
         setRestartingVM(false);
       }, 5000);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `重启虚拟机失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `重启运行系统失败，原因：${err.message}` });
       setRestartingVM(false);
     }
   };
@@ -297,7 +297,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       setSharePickerPath(res.path || path);
       setSharePickerFolders((res.items || []).filter((item) => item.isDir));
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `读取目录失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `读取目录失败，原因：${err.message}` });
     } finally {
       setSharePickerLoading(false);
     }
@@ -358,10 +358,10 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
 
       const updatedSamba = await api.getSambaStatus();
       setSamba(updatedSamba);
-      setAlertMsg({ type: 'success', text: `SMB 共享 [${shareFormName.trim()}] 配置已成功保存并即时生效！` });
+      setAlertMsg({ type: 'success', text: `共享“${shareFormName.trim()}”已保存并生效` });
       setShowShareModal(false);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `保存共享失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `保存共享失败，原因：${err.message}` });
     } finally {
       setShareActionLoading(null);
     }
@@ -373,16 +373,17 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       await api.toggleSMBShare(share.id);
       const updatedSamba = await api.getSambaStatus();
       setSamba(updatedSamba);
-      setAlertMsg({ type: 'success', text: `共享 [${share.name}] 已${share.enabled ? '暂停' : '开启'}` });
+      setAlertMsg({ type: 'success', text: `共享“${share.name}”已${share.enabled ? '暂停' : '开启'}` });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `切换共享状态失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `切换共享状态失败，原因：${err.message}` });
     } finally {
       setShareActionLoading(null);
     }
   };
 
   const handleDeleteShare = async (share: SMBShare) => {
-    if (!confirm(`确定要删除 SMB 共享 [${share.name}] 吗？这仅取消局域网共享，不会影响真实文件。`)) {
+    if (!confirm(`删除共享“${share.name}”？
+只取消共享，文件保持不变。`)) {
       return;
     }
     setShareActionLoading(`delete-${share.id}`);
@@ -390,9 +391,9 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       await api.deleteSMBShare(share.id);
       const updatedSamba = await api.getSambaStatus();
       setSamba(updatedSamba);
-      setAlertMsg({ type: 'success', text: `共享 [${share.name}] 已删除` });
+      setAlertMsg({ type: 'success', text: `共享“${share.name}”已删除` });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `删除共享失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `删除共享失败，原因：${err.message}` });
     } finally {
       setShareActionLoading(null);
     }
@@ -404,9 +405,9 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       await api.restartSMBService();
       const updatedSamba = await api.getSambaStatus();
       setSamba(updatedSamba);
-      setAlertMsg({ type: 'success', text: 'Samba 服务已重新加载配置并平滑重启！' });
+      setAlertMsg({ type: 'success', text: "文件共享已按新设置重启" });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `重启 Samba 失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `重启 文件共享 失败，原因：${err.message}` });
     } finally {
       setRestartingSamba(false);
     }
@@ -418,9 +419,9 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       await api.toggleSMBService(enable);
       const updatedSamba = await api.getSambaStatus();
       setSamba(updatedSamba);
-      setAlertMsg({ type: 'success', text: `Samba 服务已${enable ? '启动' : '停止'}` });
+      setAlertMsg({ type: 'success', text: `文件共享服务已${enable ? '启动' : '停止'}` });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `操作 Samba 服务失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `操作 文件共享 服务失败，原因：${err.message}` });
     } finally {
       setShareActionLoading(null);
     }
@@ -431,12 +432,12 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white sm:text-2xl">{mode === 'smb' ? 'SMB 共享' : '存储'}</h2>
-          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{mode === 'smb' ? '共享目录与访问权限' : '磁盘与本机目录'}</p>
+          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white sm:text-2xl">{mode === 'smb' ? "文件共享" : "存储管理"}</h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{mode === 'smb' ? "管理共享文件夹和访问权限" : "管理磁盘和Mac文件夹"}</p>
         </div>
         <button
           onClick={loadData}
-          aria-label="刷新存储状态"
+          aria-label="刷新状态"
           className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -463,7 +464,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
         <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm flex items-center justify-between shadow-lg">
           <div className="flex items-center space-x-2.5">
             <RotateCw className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>数据盘挂载或直通配置已变更！需要重启 Linux 虚拟机后生效；重启期间 Docker 服务会短暂离线并在完成后自动恢复。</span>
+            <span>存储设置已修改，重启后生效。<br />重启期间应用会暂时离线。<br />完成后会自动恢复运行。</span>
           </div>
           <button
             onClick={handleRestartVM}
@@ -471,7 +472,7 @@ export const StorageSettings: React.FC<StorageSettingsProps> = ({ configDirty, o
             className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow transition flex items-center space-x-1 shrink-0"
           >
             <RotateCw className={`w-3.5 h-3.5 ${restartingVM ? 'animate-spin' : ''}`} />
-            <span>{restartingVM ? '重启中...' : '立即重启 VM'}</span>
+            <span>{restartingVM ? "重启中" : "重启系统"}</span>
           </button>
         </div>
       )}

@@ -14,19 +14,19 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "jellyfin",
 				Name:        "Jellyfin",
-				Description: "自由开源的流媒体影音中心，支持电影、电视剧、音乐的集中管理、海报刮削与全端串流播放。",
+				Description: "管理电影、剧集和音乐，随时播放",
 				Version:     "10.9.11",
 				Icon:        "film",
 				Category:    "影音娱乐",
 				Port:        8096,
 				Source:      "builtin",
 				Ports: []AppPort{
-					{HostPort: 8096, ContainerPort: 8096, Protocol: "tcp", Description: "WebUI 访问与媒体串流端口"},
+					{HostPort: 8096, ContainerPort: 8096, Protocol: "tcp", Description: "媒体访问"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/jellyfin/config", Container: "/config", Description: "Jellyfin 用户与系统配置"},
-					{Host: "/data/appdata/jellyfin/cache", Container: "/cache", Description: "媒体刮削缩略图与转码缓存"},
-					{Host: "/data/media", Container: "/media", Description: "电影、美剧、音乐等媒体库主目录"},
+					{Host: "/data/appdata/jellyfin/config", Container: "/config", Description: "应用设置"},
+					{Host: "/data/appdata/jellyfin/cache", Container: "/cache", Description: "播放缓存"},
+					{Host: "/data/media", Container: "/media", Description: "媒体目录"},
 				},
 			},
 			YAML: `services:
@@ -48,23 +48,23 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "alist",
 				Name:        "Alist",
-				Description: "全能网盘聚合挂载中心，支持聚合阿里云盘、百度网盘、115、夸克、OneDrive、WebDAV 等数十种网盘到本地统一浏览与下载。",
+				Description: "在一处浏览和下载多个网盘的文件",
 				Version:     "3.36.0",
 				Icon:        "cloud",
 				Category:    "私有云盘",
 				Port:        5244,
 				Source:      "builtin",
 				Ports: []AppPort{
-					{HostPort: 5244, ContainerPort: 5244, Protocol: "tcp", Description: "Alist Web 管理与 WebDAV 端口"},
+					{HostPort: 5244, ContainerPort: 5244, Protocol: "tcp", Description: "文件访问"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/alist/data", Container: "/opt/alist/data", Description: "Alist 存储配置与 SQLite 数据库"},
-					{Host: "/data", Container: "/data", Description: "本地存储挂载穿透目录"},
+					{Host: "/data/appdata/alist/data", Container: "/opt/alist/data", Description: "应用设置"},
+					{Host: "/data", Container: "/data", Description: "本机文件"},
 				},
 				Env: []AppEnv{
-					{Key: "PUID", Value: "0", Description: "用户 ID"},
-					{Key: "PGID", Value: "0", Description: "用户组 ID"},
-					{Key: "UMASK", Value: "022", Description: "文件掩码"},
+					{Key: "PUID", Value: "0", Description: "账号编号"},
+					{Key: "PGID", Value: "0", Description: "组别编号"},
+					{Key: "UMASK", Value: "022", Description: "文件权限"},
 				},
 			},
 			YAML: `services:
@@ -93,19 +93,19 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "filebrowser",
 				Name:        "FileBrowser",
-				Description: "现代、轻量、高颜值的 Web 文件管理器，支持在线文件浏览、上传下载、文件分享与音视频直接预览。",
+				Description: "在网页中浏览、上传、下载和分享文件",
 				Version:     "2.30.0",
 				Icon:        "folder",
 				Category:    "私有云盘",
 				Port:        8082,
 				Source:      "builtin",
 				Ports: []AppPort{
-					{HostPort: 8082, ContainerPort: 80, Protocol: "tcp", Description: "Web 文件管理主界面端口"},
+					{HostPort: 8082, ContainerPort: 80, Protocol: "tcp", Description: "网页访问"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/filebrowser/database.db", Container: "/database/filebrowser.db", Description: "用户与权限数据库文件"},
-					{Host: "/data/appdata/filebrowser/config.json", Container: "/config/settings.json", Description: "主配置文件"},
-					{Host: "/data", Container: "/srv", Description: "浏览与管理的存储根路径"},
+					{Host: "/data/appdata/filebrowser/database.db", Container: "/database/filebrowser.db", Description: "账号权限"},
+					{Host: "/data/appdata/filebrowser/config.json", Container: "/config/settings.json", Description: "应用设置"},
+					{Host: "/data", Container: "/srv", Description: "文件目录"},
 				},
 			},
 			YAML: `services:
@@ -127,23 +127,23 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "qbittorrent",
 				Name:        "qBittorrent",
-				Description: "强大、高带宽利用率的离线 BT/PT 种子下载器，支持远程 Web 管理、RSS 自动订阅与磁力链高速离线下载。",
+				Description: "远程管理种子下载和自动订阅",
 				Version:     "4.6.5",
 				Icon:        "download",
 				Category:    "下载工具",
 				Port:        8085,
 				Source:      "builtin",
 				Ports: []AppPort{
-					{HostPort: 8085, ContainerPort: 8085, Protocol: "tcp", Description: "WebUI 远程下载控制界面"},
-					{HostPort: 6881, ContainerPort: 6881, Protocol: "tcp", Description: "BT 传入连接端口 (TCP)"},
-					{HostPort: 6881, ContainerPort: 6881, Protocol: "udp", Description: "BT 传入连接端口 (UDP)"},
+					{HostPort: 8085, ContainerPort: 8085, Protocol: "tcp", Description: "网页管理"},
+					{HostPort: 6881, ContainerPort: 6881, Protocol: "tcp", Description: "下载连接"},
+					{HostPort: 6881, ContainerPort: 6881, Protocol: "udp", Description: "下载连接"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/qbittorrent/config", Container: "/config", Description: "qBittorrent 客户端配置文件"},
-					{Host: "/data/downloads", Container: "/downloads", Description: "文件下载保存目录（可选用物理硬盘）"},
+					{Host: "/data/appdata/qbittorrent/config", Container: "/config", Description: "应用设置"},
+					{Host: "/data/downloads", Container: "/downloads", Description: "下载目录"},
 				},
 				Env: []AppEnv{
-					{Key: "WEBUI_PORT", Value: "8085", Description: "Web 控制台端口"},
+					{Key: "WEBUI_PORT", Value: "8085", Description: "网页管理"},
 					{Key: "TZ", Value: "Asia/Shanghai", Description: "系统时区"},
 				},
 			},
@@ -172,20 +172,20 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "syncthing",
 				Name:        "Syncthing",
-				Description: "连续、安全且去中心化的文件同步工具，在多台电脑、手机与 MacBox 之间点对点加密实时同步文件。",
+				Description: "让多台电脑和手机自动同步文件",
 				Version:     "1.27.12",
 				Icon:        "refresh-cw",
 				Category:    "私有云盘",
 				Port:        8384,
 				Source:      "builtin",
 				Ports: []AppPort{
-					{HostPort: 8384, ContainerPort: 8384, Protocol: "tcp", Description: "Web 控制台管理端口"},
-					{HostPort: 22000, ContainerPort: 22000, Protocol: "tcp", Description: "设备间数据同步监听 (TCP)"},
-					{HostPort: 21027, ContainerPort: 21027, Protocol: "udp", Description: "局域网设备发现广播 (UDP)"},
+					{HostPort: 8384, ContainerPort: 8384, Protocol: "tcp", Description: "网页管理"},
+					{HostPort: 22000, ContainerPort: 22000, Protocol: "tcp", Description: "文件同步"},
+					{HostPort: 21027, ContainerPort: 21027, Protocol: "udp", Description: "发现设备"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/syncthing", Container: "/var/syncthing", Description: "配置与证书数据库"},
-					{Host: "/data/files", Container: "/var/syncthing/files", Description: "同步数据根目录"},
+					{Host: "/data/appdata/syncthing", Container: "/var/syncthing", Description: "同步设置"},
+					{Host: "/data/files", Container: "/var/syncthing/files", Description: "同步目录"},
 				},
 			},
 			YAML: `services:
@@ -209,21 +209,21 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "vaultwarden",
 				Name:        "Vaultwarden",
-				Description: "用 Rust 编写的高性能轻量 Bitwarden 兼容密码管理器，支持全平台客户端安全同步、密码填充与双重认证。",
+				Description: "保存密码并在多个设备间同步",
 				Version:     "1.32.0",
 				Icon:        "shield",
 				Category:    "实用工具",
 				Port:        8086,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 8086, ContainerPort: 80, Protocol: "tcp", Description: "Web 密码库与 API 同步端口"},
+					{HostPort: 8086, ContainerPort: 80, Protocol: "tcp", Description: "密码同步"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/vaultwarden/data", Container: "/data", Description: "加密密码数据库与附件存储"},
+					{Host: "/data/appdata/vaultwarden/data", Container: "/data", Description: "密码数据"},
 				},
 				Env: []AppEnv{
-					{Key: "WEBSOCKET_ENABLED", Value: "true", Description: "启用客户端实时推送"},
-					{Key: "SIGNUPS_ALLOWED", Value: "true", Description: "允许用户注册 (首次创建账号后建议关闭)"},
+					{Key: "WEBSOCKET_ENABLED", Value: "true", Description: "实时通知"},
+					{Key: "SIGNUPS_ALLOWED", Value: "true", Description: "允许注册"},
 				},
 			},
 			YAML: `services:
@@ -246,17 +246,17 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "uptime-kuma",
 				Name:        "Uptime Kuma",
-				Description: "界面极度优雅的自建服务健康状态监控面板，支持 HTTP/HTTPS、TCP、Ping 等心跳监控与多渠道告警。",
+				Description: "查看服务是否正常，异常时提醒",
 				Version:     "1.23.13",
 				Icon:        "activity",
 				Category:    "实用工具",
 				Port:        3001,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 3001, ContainerPort: 3001, Protocol: "tcp", Description: "监控状态大盘 Web 端口"},
+					{HostPort: 3001, ContainerPort: 3001, Protocol: "tcp", Description: "网页管理"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/uptime-kuma/data", Container: "/app/data", Description: "监控历史与通知配置数据库"},
+					{Host: "/data/appdata/uptime-kuma/data", Container: "/app/data", Description: "监控数据"},
 				},
 			},
 			YAML: `services:
@@ -276,18 +276,18 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "navidrome",
 				Name:        "Navidrome",
-				Description: "现代、超轻量的个人音乐流媒体服务器，兼容 Subsonic/Airsonic 协议，多端随时畅听无损高保真音乐。",
+				Description: "管理音乐库，在手机和电脑上听歌",
 				Version:     "0.53.1",
 				Icon:        "music",
 				Category:    "影音娱乐",
 				Port:        4533,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 4533, ContainerPort: 4533, Protocol: "tcp", Description: "WebUI 音乐播放与 API 端口"},
+					{HostPort: 4533, ContainerPort: 4533, Protocol: "tcp", Description: "音乐访问"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/navidrome/data", Container: "/data", Description: "歌单、喜好与数据库"},
-					{Host: "/data/media/music", Container: "/music", Description: "本地无损音乐文件主目录"},
+					{Host: "/data/appdata/navidrome/data", Container: "/data", Description: "音乐数据"},
+					{Host: "/data/media/music", Container: "/music", Description: "音乐目录"},
 				},
 			},
 			YAML: `services:
@@ -311,20 +311,20 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "nginx-proxy-manager",
 				Name:        "Nginx Proxy Manager",
-				Description: "简单直观的 Nginx 反向代理可视化控制台，轻松配置公网域名穿透、SSL 免费证书自动申请与续期。",
+				Description: "管理网站访问地址和加密证书",
 				Version:     "2.11.3",
 				Icon:        "network",
 				Category:    "实用工具",
 				Port:        81,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 81, ContainerPort: 81, Protocol: "tcp", Description: "Web 可视化管理后台端口"},
-					{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", Description: "HTTP 代理流量转发端口"},
-					{HostPort: 8443, ContainerPort: 443, Protocol: "tcp", Description: "HTTPS 加密流量转发端口"},
+					{HostPort: 81, ContainerPort: 81, Protocol: "tcp", Description: "网页管理"},
+					{HostPort: 8080, ContainerPort: 80, Protocol: "tcp", Description: "网页转发"},
+					{HostPort: 8443, ContainerPort: 443, Protocol: "tcp", Description: "加密转发"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/npm/data", Container: "/data", Description: "反向代理规则配置与 SQLite 库"},
-					{Host: "/data/appdata/npm/letsencrypt", Container: "/etc/letsencrypt", Description: "Let's Encrypt SSL 证书存储"},
+					{Host: "/data/appdata/npm/data", Container: "/data", Description: "转发设置"},
+					{Host: "/data/appdata/npm/letsencrypt", Container: "/etc/letsencrypt", Description: "网站证书"},
 				},
 			},
 			YAML: `services:
@@ -347,14 +347,14 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "it-tools",
 				Name:        "IT-Tools",
-				Description: "为开发者与运维工程师打造的极其实用的在线瑞士军刀工具箱（Base64、JSON格式化、哈希生成、二维码、Docker转换等）。",
+				Description: "在线处理文本、编码和二维码",
 				Version:     "2024.5",
 				Icon:        "code",
 				Category:    "实用工具",
 				Port:        8088,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 8088, ContainerPort: 80, Protocol: "tcp", Description: "WebUI 工具箱访问端口"},
+					{HostPort: 8088, ContainerPort: 80, Protocol: "tcp", Description: "网页访问"},
 				},
 			},
 			YAML: `services:
@@ -372,17 +372,17 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "home-assistant",
 				Name:        "Home Assistant",
-				Description: "全球最著名的开源智能家居自动化控制中心，聚合米家、Apple HomeKit、Aqara、涂鸦等全屋智能设备。",
+				Description: "连接家中智能设备，设置自动操作",
 				Version:     "2024.9",
 				Icon:        "home",
 				Category:    "实用工具",
 				Port:        8123,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 8123, ContainerPort: 8123, Protocol: "tcp", Description: "智能家居控制大盘端口"},
+					{HostPort: 8123, ContainerPort: 8123, Protocol: "tcp", Description: "网页管理"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/homeassistant", Container: "/config", Description: "设备绑定与自动化流配置"},
+					{Host: "/data/appdata/homeassistant", Container: "/config", Description: "家居设置"},
 				},
 			},
 			YAML: `services:
@@ -406,19 +406,19 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "audiobookshelf",
 				Name:        "Audiobookshelf",
-				Description: "自建有声书与播客管理串流服务器，支持章节标记、进度跨设备同步以及 iOS/Android 客户端串流收听。",
+				Description: "管理有声书和播客，同步收听进度",
 				Version:     "2.12.3",
 				Icon:        "headphones",
 				Category:    "影音娱乐",
 				Port:        13378,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 13378, ContainerPort: 80, Protocol: "tcp", Description: "有声书 WebUI 访问端口"},
+					{HostPort: 13378, ContainerPort: 80, Protocol: "tcp", Description: "网页访问"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/audiobookshelf/config", Container: "/config", Description: "配置与元数据"},
-					{Host: "/data/appdata/audiobookshelf/metadata", Container: "/metadata", Description: "播客封面与音频缓存"},
-					{Host: "/data/media/audiobooks", Container: "/audiobooks", Description: "有声书音频文件存放目录"},
+					{Host: "/data/appdata/audiobookshelf/config", Container: "/config", Description: "应用设置"},
+					{Host: "/data/appdata/audiobookshelf/metadata", Container: "/metadata", Description: "播放缓存"},
+					{Host: "/data/media/audiobooks", Container: "/audiobooks", Description: "听书目录"},
 				},
 			},
 			YAML: `services:
@@ -444,22 +444,22 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "dockge",
 				Name:        "Docker Compose（Dockge）",
-				Description: "面向 compose.yaml 的可视化编排管理器，可创建、编辑、启动、停止和更新 Docker Compose 堆栈。需要访问 Docker Socket，请仅授予管理员使用。",
+				Description: "管理多个应用的安装配置。\n可控制全部应用，请仅供管理员使用。",
 				Version:     "1.x",
 				Icon:        "layers",
 				Category:    "系统运维",
 				Port:        5001,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 5001, ContainerPort: 5001, Protocol: "tcp", Description: "Dockge Compose 堆栈管理 Web 端口"},
+					{HostPort: 5001, ContainerPort: 5001, Protocol: "tcp", Description: "网页管理"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/var/run/docker.sock", Container: "/var/run/docker.sock", Description: "Docker Engine 控制套接字（高权限）"},
-					{Host: "/data/appdata/dockge/data", Container: "/app/data", Description: "Dockge 登录与界面配置"},
-					{Host: "/data", Container: "/data", Description: "Compose 堆栈目录与 MacBox 数据路径（保持宿主机路径一致）"},
+					{Host: "/var/run/docker.sock", Container: "/var/run/docker.sock", Description: "应用控制"},
+					{Host: "/data/appdata/dockge/data", Container: "/app/data", Description: "应用设置"},
+					{Host: "/data", Container: "/data", Description: "组合目录"},
 				},
 				Env: []AppEnv{
-					{Key: "DOCKGE_STACKS_DIR", Value: "/data/appdata", Description: "MacBox Compose 堆栈目录"},
+					{Key: "DOCKGE_STACKS_DIR", Value: "/data/appdata", Description: "组合目录"},
 				},
 			},
 			YAML: `services:
@@ -483,23 +483,23 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "xunlei",
 				Name:        "迅雷下载",
-				Description: "迅雷 Linux 容器版远程下载工具，支持迅雷云盘任务与本地下载目录管理。运行需要 SYS_ADMIN 能力，请仅在可信的局域网环境使用。",
+				Description: "远程管理迅雷下载和保存位置。\n需要系统管理权限。\n请仅在可信的网络中使用。",
 				Version:     "beta",
 				Icon:        "download",
 				Category:    "下载工具",
 				Port:        2345,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 2345, ContainerPort: 2345, Protocol: "tcp", Description: "迅雷远程控制 Web 面板端口"},
+					{HostPort: 2345, ContainerPort: 2345, Protocol: "tcp", Description: "网页管理"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/xunlei/data", Container: "/xunlei/data", Description: "迅雷登录信息、插件与运行数据"},
-					{Host: "/data/appdata/xunlei/cache", Container: "/xunlei/var/packages/pan-xunlei-com", Description: "迅雷套件缓存，避免重复下载"},
-					{Host: "/data/downloads", Container: "/xunlei/downloads", Description: "迅雷下载文件目录"},
+					{Host: "/data/appdata/xunlei/data", Container: "/xunlei/data", Description: "应用数据"},
+					{Host: "/data/appdata/xunlei/cache", Container: "/xunlei/var/packages/pan-xunlei-com", Description: "应用缓存"},
+					{Host: "/data/downloads", Container: "/xunlei/downloads", Description: "下载目录"},
 				},
 				Env: []AppEnv{
-					{Key: "XL_UID", Value: "0", Description: "下载目录用户 ID（MacBox 数据目录默认由 root 管理）"},
-					{Key: "XL_GID", Value: "0", Description: "下载目录用户组 ID"},
+					{Key: "XL_UID", Value: "0", Description: "账号编号"},
+					{Key: "XL_GID", Value: "0", Description: "组别编号"},
 				},
 			},
 			YAML: `services:
@@ -529,22 +529,22 @@ func GetBuiltinCatalog() []BuiltinAppDefinition {
 			Metadata: AppMetadata{
 				ID:          "baidunetdisk",
 				Name:        "百度网盘",
-				Description: "百度网盘 Linux 客户端容器，提供浏览器版远程桌面登录与下载；支持 macOS Apple Silicon 与 Intel 对应的 ARM64/AMD64 镜像，安装时会自动生成一次性 VNC 密码。",
+				Description: "在网页中登录百度网盘并下载文件。\n支持两种Mac处理器机型。\n安装时会自动生成一次性连接密码。",
 				Version:     "4.17.7",
 				Icon:        "cloud",
 				Category:    "下载工具",
 				Port:        6080,
 				Source:      "community",
 				Ports: []AppPort{
-					{HostPort: 6080, ContainerPort: 6080, Protocol: "tcp", Description: "百度网盘浏览器远程桌面入口"},
-					{HostPort: 5900, ContainerPort: 5900, Protocol: "tcp", Description: "可选 VNC 客户端连接端口"},
+					{HostPort: 6080, ContainerPort: 6080, Protocol: "tcp", Description: "网页访问"},
+					{HostPort: 5900, ContainerPort: 5900, Protocol: "tcp", Description: "远程连接"},
 				},
 				Volumes: []AppVolume{
-					{Host: "/data/appdata/baidunetdisk/config", Container: "/root/baidunetdisk", Description: "百度网盘客户端配置与登录状态"},
-					{Host: "/data/downloads", Container: "/root/baidunetdiskdownload", Description: "百度网盘下载文件目录"},
+					{Host: "/data/appdata/baidunetdisk/config", Container: "/root/baidunetdisk", Description: "应用设置"},
+					{Host: "/data/downloads", Container: "/root/baidunetdiskdownload", Description: "下载目录"},
 				},
 				Env: []AppEnv{
-					{Key: "VNC_SERVER_PASSWD", Value: "macbox-change-me", Description: "VNC 密码（保留默认标记时自动随机生成）"},
+					{Key: "VNC_SERVER_PASSWD", Value: "macbox-change-me", Description: "连接密码"},
 					{Key: "TZ", Value: "Asia/Shanghai", Description: "系统时区"},
 				},
 			},

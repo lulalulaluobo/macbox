@@ -86,7 +86,7 @@ export const DriveDetailModal: React.FC<DriveDetailModalProps> = ({ drive, onClo
   const rows: Array<{ label: string; value?: React.ReactNode }> = [
     { label: '类型', value: detail.kind },
     {
-      label: '容量',
+      label: "总容量",
       value:
         detail.total && detail.used ? (
           <span>
@@ -96,13 +96,13 @@ export const DriveDetailModal: React.FC<DriveDetailModalProps> = ({ drive, onClo
         ) : detail.total ? (
           <span>{detail.total}</span>
         ) : (
-          <span className="text-slate-400">目录直通，随来源而定</span>
+          <span className="text-slate-400">容量以来源磁盘为准</span>
         ),
     },
-    ...(detail.free ? [{ label: '可用空间', value: <span>{detail.free}</span> }] : []),
-    ...(detail.fileSystem ? [{ label: '文件系统', value: <span>{detail.fileSystem}</span> }] : []),
+    ...(detail.free ? [{ label: "剩余空间", value: <span>{detail.free}</span> }] : []),
+    ...(detail.fileSystem ? [{ label: "磁盘格式", value: <span>{detail.fileSystem}</span> }] : []),
     {
-      label: '映射路径',
+      label: "系统位置",
       value: (
         <span className="flex min-w-0 items-center gap-1.5">
           <code className="truncate font-mono text-[11px] text-slate-600 dark:text-slate-300">{drive.path}</code>
@@ -110,21 +110,21 @@ export const DriveDetailModal: React.FC<DriveDetailModalProps> = ({ drive, onClo
             type="button"
             onClick={copyPath}
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-sky-500 dark:hover:bg-slate-800"
-            aria-label="复制映射路径"
+            aria-label="复制位置"
           >
             {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
           </button>
         </span>
       ),
     },
-    ...(detail.source ? [{ label: detail.kind === '本机目录直通' ? 'Mac 来源目录' : 'Mac 来源磁盘', value: <span className="break-all">{detail.source}</span> }] : []),
-    ...(detail.writable !== undefined ? [{ label: '写入权限', value: <span>{detail.writable ? '可读写' : '只读'}</span> }] : []),
+    ...(detail.source ? [{ label: detail.writable !== undefined ? "本机目录" : "本机磁盘", value: <span className="break-all">{detail.source}</span> }] : []),
+    ...(detail.writable !== undefined ? [{ label: "文件权限", value: <span>{detail.writable ? "允许修改" : "只能读取"}</span> }] : []),
     ...(detail.description ? [{ label: '说明', value: <span className="break-all">{detail.description}</span> }] : []),
   ];
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/35 sm:items-center" role="dialog" aria-modal="true" aria-label={`${drive.name} 硬盘详情`}>
-      <button type="button" className="absolute inset-0" onClick={onClose} aria-label="关闭硬盘详情" />
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/35 sm:items-center" role="dialog" aria-modal="true" aria-label={`磁盘详情：${drive.name}`}>
+      <button type="button" className="absolute inset-0" onClick={onClose} aria-label="关闭详情" />
       <section className="relative max-h-[85dvh] w-full overflow-y-auto rounded-t-[28px] border-t border-slate-200 bg-white px-4 pb-[calc(18px+env(safe-area-inset-bottom))] pt-3 shadow-2xl dark:border-slate-700 dark:bg-slate-900 sm:mb-4 sm:max-w-md sm:rounded-[28px] sm:border">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-200 dark:bg-slate-700 sm:hidden" />
 
@@ -149,7 +149,7 @@ export const DriveDetailModal: React.FC<DriveDetailModalProps> = ({ drive, onClo
                   maxLength={24}
                   autoFocus
                   className="w-full min-w-0 rounded-lg border border-sky-300 bg-white px-2 py-1.5 text-sm font-bold text-slate-900 focus:border-sky-500 focus:outline-none dark:border-sky-500/40 dark:bg-slate-950 dark:text-white"
-                  aria-label="硬盘显示名称"
+                  aria-label="磁盘名称"
                 />
                 <button type="button" onClick={saveName} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-500 text-white hover:bg-sky-600" aria-label="保存名称">
                   <Check className="h-4 w-4" />

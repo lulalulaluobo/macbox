@@ -81,7 +81,7 @@ export const FileModals: React.FC<FileModalsProps> = ({
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-white text-sm flex items-center space-x-2">
                 <FolderPlus className="w-4 h-4 text-sky-400" />
-                <span>新建文件夹</span>
+                <span>新文件夹</span>
               </h3>
               <button onClick={onCloseMkdir} className="text-slate-400 hover:text-white">
                 <X className="w-4 h-4" />
@@ -153,7 +153,7 @@ export const FileModals: React.FC<FileModalsProps> = ({
                   disabled={!renameNewName.trim() || renameNewName === renameItem.name}
                   className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold disabled:opacity-50"
                 >
-                  确认更改
+                  保存
                 </button>
               </div>
             </form>
@@ -170,27 +170,27 @@ export const FileModals: React.FC<FileModalsProps> = ({
                 <Trash2 className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-bold text-white text-base">删除文件确认</h3>
-                <p className="text-xs text-slate-400">建议优先移入回收站，可随时安全还原</p>
+                <h3 className="font-bold text-white text-base">删除文件</h3>
+                <p className="text-xs text-slate-400">建议先移入回收站，方便还原</p>
               </div>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-              <span className="text-slate-400">即将处理: </span>
+              <span className="text-slate-400">所选内容 </span>
               {deleteTarget ? (
                 <>
                   <strong className="text-white font-mono">{deleteTarget.name}</strong>
                   <p className="text-[10px] text-slate-500 font-mono mt-1 truncate">{deleteTarget.path}</p>
                 </>
               ) : (
-                <strong className="text-white">已勾选的 {selectedCount} 个项目</strong>
+                <strong className="text-white">已选的 {selectedCount} 个项目</strong>
               )}
             </div>
 
             <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-200 text-xs flex items-start space-x-2">
               <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
               <span>
-                <strong>回收站机制</strong>: 移入回收站后文件暂存于 <code className="text-sky-300 font-mono">/data/.trash</code>，点击侧边栏回收站即可一键找回。
+                <strong>删除去向</strong>文件会暂存在回收站。 <code className="text-sky-300 font-mono">/data/.trash</code>可在回收站中还原。
               </span>
             </div>
 
@@ -208,7 +208,7 @@ export const FileModals: React.FC<FileModalsProps> = ({
                 disabled={deleting}
                 className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold transition disabled:opacity-50"
               >
-                彻底删除（不可恢复）
+                永久删除
               </button>
               <button
                 type="button"
@@ -217,7 +217,7 @@ export const FileModals: React.FC<FileModalsProps> = ({
                 className="w-full sm:w-auto px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold shadow-lg shadow-sky-600/25 flex items-center justify-center space-x-1.5 transition disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{deleting ? '处理中...' : '移入回收站 (推荐)'}</span>
+                <span>{deleting ? "处理中" : "移至回收"}</span>
               </button>
             </div>
           </div>
@@ -233,27 +233,27 @@ export const FileModals: React.FC<FileModalsProps> = ({
                 <Trash2 className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-bold text-white text-base">移入 Mac 本机废纸篓确认</h3>
-                <p className="text-xs text-slate-400">项目将安全移入 Mac 访达废纸篓 (~/.Trash)</p>
+                <h3 className="font-bold text-white text-base">移至纸篓</h3>
+                <p className="text-xs text-slate-400">文件将移入运行Mac的废纸篓</p>
               </div>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-1">
-              <span className="text-slate-400">即将处理: </span>
+              <span className="text-slate-400">所选内容 </span>
               {trashDeleteTarget ? (
                 <>
                   <strong className="text-white font-mono block">{trashDeleteTarget.name}</strong>
-                  <p className="text-[10px] text-slate-500 font-mono truncate">原路径: {trashDeleteTarget.originalPath}</p>
+                  <p className="text-[10px] text-slate-500 font-mono truncate">原位置 {trashDeleteTarget.originalPath}</p>
                 </>
               ) : (
-                <strong className="text-white">已选中的 {trashSelectedCount} 个项目</strong>
+                <strong className="text-white">已选的 {trashSelectedCount} 个项目</strong>
               )}
             </div>
 
             <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-200 text-xs flex items-start space-x-2">
               <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
               <span>
-                <strong>Mac 本机废纸篓双重保障</strong>: 从回收站删除后，文件不会直接物理抹除，而是会安全转入 Mac 系统的 <code className="text-sky-300 font-mono">~/.Trash</code>。您可随时在 Mac 访达 (Finder) 废纸篓中查阅、还原或彻底清空。
+                <strong>删除去向</strong>文件将移入运行Mac的废纸篓。 <code className="text-sky-300 font-mono">~/.Trash</code>请在运行Mac的废纸篓中查看。<br />可还原，也可彻底删除。
               </span>
             </div>
 
@@ -272,7 +272,7 @@ export const FileModals: React.FC<FileModalsProps> = ({
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/25 flex items-center space-x-1.5 transition disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{deletingTrash ? '正在转移...' : '移入 Mac 废纸篓 (删除)'}</span>
+                <span>{deletingTrash ? "转移中" : "移至纸篓"}</span>
               </button>
             </div>
           </div>
@@ -288,19 +288,19 @@ export const FileModals: React.FC<FileModalsProps> = ({
                 <Trash2 className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="font-bold text-white text-base">清空回收站确认</h3>
-                <p className="text-xs text-slate-400">所有文件将安全移入 Mac 本机废纸篓</p>
+                <h3 className="font-bold text-white text-base">清空确认</h3>
+                <p className="text-xs text-slate-400">将全部文件移入运行Mac的废纸篓</p>
               </div>
             </div>
 
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-              <p className="text-slate-300">回收站内目前共有 <strong className="text-rose-400 font-bold">{trashItemsCount}</strong> 个暂存项目。</p>
+              <p className="text-slate-300">回收站中有 <strong className="text-rose-400 font-bold">{trashItemsCount}</strong> 项内容</p>
             </div>
 
             <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-200 text-xs flex items-start space-x-2">
               <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
               <span>
-                <strong>安全声明</strong>: 清空后并非不可挽回的物理擦除，系统会自动将全部项目转移到 Mac 本机系统的 <code className="text-sky-300 font-mono">~/.Trash</code> (访达废纸篓)，保留最后的防误删安全网。
+                <strong>操作说明</strong>回收站中的文件将全部移出。<br />文件会转入运行Mac的废纸篓。 <code className="text-sky-300 font-mono">~/.Trash</code> 可在Mac废纸篓中查看和还原
               </span>
             </div>
 
@@ -319,7 +319,7 @@ export const FileModals: React.FC<FileModalsProps> = ({
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/25 flex items-center space-x-1.5 transition disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{deletingTrash ? '正在转移...' : '确认清空并移入 Mac 废纸篓'}</span>
+                <span>{deletingTrash ? "转移中" : "移至纸篓"}</span>
               </button>
             </div>
           </div>

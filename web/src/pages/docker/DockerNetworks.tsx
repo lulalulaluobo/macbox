@@ -41,11 +41,11 @@ export const DockerNetworks: React.FC = () => {
     const url = newMirror.trim();
     if (!url) return;
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      setAlertMsg({ type: 'error', text: '镜像源地址必须以 http:// 或 https:// 开头' });
+      setAlertMsg({ type: 'error', text: "地址开头只能为：\nhttp:// 或 https://" });
       return;
     }
     if (mirrors.includes(url)) {
-      setAlertMsg({ type: 'error', text: '该镜像加速地址已存在' });
+      setAlertMsg({ type: 'error', text: "这个下载来源已添加" });
       return;
     }
     setMirrors(prev => [...prev, url]);
@@ -60,9 +60,9 @@ export const DockerNetworks: React.FC = () => {
     setSavingMirrors(true);
     try {
       await api.setRegistryMirrors(mirrors);
-      setAlertMsg({ type: 'success', text: 'Docker 镜像加速源已成功保存并重新加载守护进程！' });
+      setAlertMsg({ type: 'success', text: "下载来源已保存，应用服务已重载" });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `保存失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `保存失败，原因：${err.message}` });
     } finally {
       setSavingMirrors(false);
     }
@@ -96,9 +96,9 @@ export const DockerNetworks: React.FC = () => {
             <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-2 text-amber-600 dark:text-amber-400">
               <Zap className="h-4 w-4" />
             </div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">镜像加速设置</h3>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">下载加速</h3>
           </div>
-          <span className="text-xs font-semibold text-sky-600 dark:text-sky-400">展开设置 ›</span>
+          <span className="text-xs font-semibold text-sky-600 dark:text-sky-400">展开设置</span>
         </summary>
 
         <div className="space-y-3 border-t border-slate-100 px-3.5 pb-3.5 pt-3 dark:border-slate-800">
@@ -109,13 +109,13 @@ export const DockerNetworks: React.FC = () => {
             className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow-md shadow-amber-500/20 transition disabled:opacity-50"
           >
             {savingMirrors ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-            <span>保存并生效</span>
+            <span>保存</span>
           </button>
           </div>
 
         {/* Presets */}
         <div className="hidden">
-          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">快速添加预设加速源:</span>
+          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">常用来源</span>
           <div className="flex flex-wrap gap-2">
             {REGISTRY_PRESETS.map(p => {
               const added = mirrors.includes(p.url);
@@ -140,10 +140,10 @@ export const DockerNetworks: React.FC = () => {
 
         {/* Current Active Mirrors List */}
         <div className="space-y-2 pt-2">
-          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">当前已生效加速列表:</span>
+          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">下载来源</span>
           {mirrors.length === 0 ? (
             <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-xs text-slate-500">
-              当前暂未配置第三方镜像加速源，Docker 将使用官方源拉取。
+              尚未设置加速来源，将使用官方来源
             </div>
           ) : (
             <div className="space-y-2">
@@ -172,7 +172,7 @@ export const DockerNetworks: React.FC = () => {
           <div className="flex space-x-2 pt-1">
             <input
               type="text"
-              placeholder="输入自定义加速源 URL，例如: https://dockerproxy.net"
+              placeholder="输入下载加速地址"
               value={newMirror}
               onChange={e => setNewMirror(e.target.value)}
               className="flex-1 px-3.5 py-2 text-xs font-mono bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-amber-500 transition"
@@ -196,7 +196,7 @@ export const DockerNetworks: React.FC = () => {
               <Network className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">Docker 虚拟网络</h3>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">应用网络</h3>
             </div>
           </div>
 
@@ -214,8 +214,8 @@ export const DockerNetworks: React.FC = () => {
               <tr>
                 <th className="py-3 px-4">网络名称</th>
                 <th className="py-3 px-4">Network ID</th>
-                <th className="py-3 px-4">驱动 (Driver)</th>
-                <th className="py-3 px-4">范围 (Scope)</th>
+                <th className="py-3 px-4">连接方式</th>
+                <th className="py-3 px-4">作用范围</th>
                 <th className="py-3 px-4">类型</th>
               </tr>
             </thead>
@@ -234,7 +234,7 @@ export const DockerNetworks: React.FC = () => {
                           : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60'
                       }`}
                     >
-                      {net.name.includes('default') ? 'Compose 子网' : '系统原生'}
+                      {net.name.includes('default') ? "组合网络" : "系统网络"}
                     </span>
                   </td>
                 </tr>

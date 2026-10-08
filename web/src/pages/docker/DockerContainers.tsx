@@ -90,9 +90,10 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
     try {
       await api.containerAction(id, action);
       await loadContainers();
-      setAlertMsg({ type: 'success', text: `容器已成功执行 ${action} 操作` });
+      const result = { start: '已启动', stop: '已停止', restart: '已重启' }[action];
+      setAlertMsg({ type: 'success', text: `应用${result}` });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `操作失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `操作失败，原因：${err.message}` });
     } finally {
       setActionLoading(null);
     }
@@ -115,12 +116,13 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
       setAlertMsg({
         type: 'success',
         text: container.project
-          ? `容器 ${container.name} 已删除，Compose 编排配置已保留，可修改后重新部署`
-          : `容器 ${container.name} 已成功删除`,
+          ? `应用“${container.name}”已移除。
+组合的安装配置保留，可重装。`
+          : `应用“${container.name}”已移除`,
       });
       await loadContainers();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `删除容器失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `删除应用失败，原因：${err.message}` });
     } finally {
       setActionLoading(null);
     }
@@ -131,9 +133,9 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
     setLogsLoading(true);
     try {
       const res = await api.getContainerLogs(id, 200);
-      setLogs(res.logs || '暂无日志输出');
+      setLogs(res.logs || "还没有运行记录");
     } catch (err: any) {
-      setLogs(`获取日志失败: ${err.message}`);
+      setLogs(`获取日志失败，原因：${err.message}`);
     } finally {
       setLogsLoading(false);
     }
@@ -148,7 +150,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
   const sendLogsToTerminal = (containerName: string, rawLogs: string) => {
     const cleaned = rawLogs.replace(/(?:\u001b)?\[[0-9;]*m/g, '').trim();
     if (!cleaned) {
-      setAlertMsg({ type: 'error', text: '当前容器没有可发送的日志' });
+      setAlertMsg({ type: 'error', text: "此应用还没有运行记录" });
       return;
     }
     const clipped = cleaned.length > MAX_LOGS_FOR_AI
@@ -159,7 +161,8 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
       logs: `[MacBox 容器日志] ${containerName}\n以下为最近容器输出，请先分析问题再提出或执行修复：\n\n${clipped}`,
     });
     setActiveLogContainer(null);
-    setAlertMsg({ type: 'success', text: `已将 ${containerName} 的日志放入 Web 终端输入框，请选择 AI 并发送` });
+    setAlertMsg({ type: 'success', text: `“${containerName}”的记录已放入命令输入框。
+请选择助手后发送。` });
   };
 
   const handleSendLogsToTerminal = async (id: string, containerName: string) => {
@@ -168,7 +171,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
       const res = await api.getContainerLogs(id, 200);
       sendLogsToTerminal(containerName, res.logs || '');
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `获取容器日志失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `获取应用日志失败，原因：${err.message}` });
     } finally {
       setLogsLoading(false);
     }
@@ -199,7 +202,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
       : await api.createServiceShortcut(shortcut);
     setServiceShortcuts((current) => [result.shortcut as DockerServiceShortcut, ...current.filter((item) => item.id !== shortcut.id)]);
     setServiceShortcutContainer(null);
-    setAlertMsg({ type: 'success', text: `已将 ${shortcut.name} 添加到主页服务导航` });
+    setAlertMsg({ type: 'success', text: `“${shortcut.name}”已加入主页入口` });
   };
 
   return (
@@ -236,7 +239,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              全部 ({containers.length})
+              全部{containers.length})
             </button>
             <button
               onClick={() => setFilter('running')}
@@ -246,7 +249,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              运行中 ({containers.filter(c => c.state === 'running').length})
+              运行中{containers.filter(c => c.state === 'running').length})
             </button>
             <button
               onClick={() => setFilter('stopped')}
@@ -256,7 +259,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              已停止 ({containers.filter(c => c.state !== 'running').length})
+              已停止{containers.filter(c => c.state !== 'running').length})
             </button>
           </div>
         </div>
@@ -267,7 +270,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="搜索容器名称、镜像或端口..."
+              placeholder="搜索名称、应用包或端口"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               className="min-h-9 w-full rounded-xl border border-slate-200 bg-white py-1.5 pl-9 pr-3 text-xs text-slate-900 shadow-xs transition placeholder:text-slate-400 focus:border-sky-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white sm:w-64"
@@ -277,7 +280,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
           <button
             onClick={loadContainers}
             className="p-2 rounded-xl bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 shadow-xs transition"
-            title="刷新容器"
+            title="刷新列表"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -288,8 +291,8 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
       {filteredContainers.length === 0 ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-[22px] border border-dashed border-slate-200 bg-white p-8 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900/60">
           <Box className="w-12 h-12 text-slate-400 dark:text-slate-600 mx-auto" />
-          <h3 className="text-base font-bold text-slate-700 dark:text-slate-300">暂无容器实例</h3>
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">可通过编排或应用中心部署</p>
+          <h3 className="text-base font-bold text-slate-700 dark:text-slate-300">还没有应用</h3>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">可从应用商店安装，或添加应用组合</p>
         </div>
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5 [-webkit-overflow-scrolling:touch]">
@@ -327,17 +330,17 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                       {container.project && (
                         <span className="flex items-center text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20 font-mono">
                           <Layers className="w-3 h-3 mr-1" />
-                          项目: {container.project}
+                          所属组合 {container.project}
                         </span>
                       )}
                     </div>
 
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">镜像: {container.image}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">使用包 {container.image}</p>
 
                     {/* Ports mappings with 1-click web navigation */}
                     {container.portsMap && container.portsMap.length > 0 ? (
                       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400 mr-1">Web 访问:</span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 mr-1">应用网址</span>
                         {container.portsMap.map((p, idx) => (
                           <a
                             key={idx}
@@ -345,7 +348,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-500/10 hover:bg-sky-100 dark:hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/30 text-xs font-mono transition"
-                            title={`打开服务: http://${hostIP}:${p.hostPort}`}
+                            title={`打开应用：${hostIP} · ${p.hostPort}`}
                           >
                             <span>
                               {p.hostPort} ➔ {p.containerPort}/{p.protocol}
@@ -355,7 +358,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                         ))}
                       </div>
                     ) : container.ports ? (
-                      <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">端口: {container.ports}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">访问端口 {container.ports}</p>
                     ) : null}
                   </div>
                 </div>
@@ -365,7 +368,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                   <div className="space-y-0.5">
                     <div className="flex items-center text-slate-500 dark:text-slate-400 space-x-1">
                       <Cpu className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
-                      <span>CPU 使用率</span>
+                      <span>处理器</span>
                     </div>
                     <div className="text-slate-900 dark:text-white font-bold">{container.cpuPerc || '0.00%'}</div>
                   </div>
@@ -374,7 +377,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
 
                   <div className="space-y-0.5">
                     <div className="flex items-center text-slate-500 dark:text-slate-400 space-x-1">
-                      <span>内存消耗</span>
+                      <span>内存占用</span>
                     </div>
                     <div className="text-slate-900 dark:text-white font-bold">{container.memUsage || '-'}</div>
                   </div>
@@ -414,17 +417,17 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                   <button
                     onClick={() => handleOpenLogs(container.id)}
                     className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 dark:bg-sky-500/10 dark:hover:bg-sky-500/20 text-sky-600 dark:text-sky-300 border border-sky-200 dark:border-sky-500/30 text-xs font-semibold transition"
-                    title="查看容器日志"
+                    title="运行记录"
                   >
                     <Terminal className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">日志</span>
+                    <span className="hidden sm:inline">运行记录</span>
                   </button>
 
                   <button
                     onClick={() => setServiceShortcutContainer(container)}
                     className="flex h-8 w-8 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-600 transition hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20"
-                    title="添加或编辑主页服务导航"
-                    aria-label={`添加 ${container.name} 到主页服务导航`}
+                    title="主页入口"
+                    aria-label={`添加入口：${container.name}`}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -433,7 +436,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                     onClick={() => handleSendLogsToTerminal(container.id, container.name || container.id)}
                     disabled={logsLoading}
                     className="flex items-center space-x-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300 dark:hover:bg-violet-500/20"
-                    title="获取最近 200 行日志并放入 Web 终端输入框"
+                    title="把最近200行记录放入命令输入框"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">AI</span>
@@ -443,17 +446,17 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                     <button
                       onClick={() => setActiveTerminalContainer(container.name || container.id)}
                       className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-teal-50 hover:bg-teal-100 dark:bg-teal-500/10 dark:hover:bg-teal-500/20 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-500/30 text-xs font-semibold transition shadow-xs"
-                      title="进入容器内部终端"
+                      title="命令窗口"
                     >
                       <Terminal className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">终端</span>
+                      <span className="hidden sm:inline">命令窗口</span>
                     </button>
                   )}
 
                   <button
                     onClick={() => setDeleteModalContainer(container)}
                     className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 dark:bg-slate-800 dark:hover:bg-rose-950/50 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 border border-slate-200 hover:border-rose-200 dark:border-slate-700 transition"
-                    title="删除容器"
+                    title="移除应用"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -474,7 +477,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                   <Terminal className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <span className="block text-sm font-bold text-white">容器日志</span>
+                  <span className="block text-sm font-bold text-white">运行记录</span>
                   <span className="block truncate font-mono text-[10px] text-slate-400">{activeLogContainer}</span>
                 </div>
               </div>
@@ -483,26 +486,26 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                 <button
                   onClick={handleCopyLogs}
                   className="flex h-10 items-center justify-center gap-1.5 rounded-xl bg-slate-800 px-3 text-xs text-slate-300 transition hover:bg-slate-700"
-                  aria-label={copied ? '日志已复制' : '复制日志'}
+                  aria-label={copied ? "运行记录已复制" : "复制记录"}
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span className="hidden sm:inline">{copied ? '已复制' : '复制日志'}</span>
+                  <span className="hidden sm:inline">{copied ? '已复制' : "复制记录"}</span>
                 </button>
 
                 <button
                   onClick={() => sendLogsToTerminal(activeLogContainer, logs)}
                   disabled={logsLoading || !logs}
                   className="flex h-10 items-center justify-center gap-1.5 rounded-xl bg-violet-500 px-3 text-xs font-semibold text-white transition hover:bg-violet-400 disabled:opacity-40"
-                  title="关闭日志并将内容放入 Web 终端输入框"
+                  title="将记录放入命令输入框，等待发送"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">发给终端 AI</span>
+                  <span className="hidden sm:inline">粘贴记录</span>
                 </button>
 
                 <button
                   onClick={() => handleOpenLogs(activeLogContainer)}
                   className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700"
-                  title="刷新日志"
+                  title="刷新记录"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${logsLoading ? 'animate-spin' : ''}`} />
                 </button>
@@ -510,7 +513,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                 <button
                   onClick={() => setActiveLogContainer(null)}
                   className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 hover:text-white"
-                  aria-label="关闭日志"
+                  aria-label="关闭记录"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -521,10 +524,10 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
               {logsLoading ? (
                 <div className="text-slate-400 flex items-center space-x-2">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>正在获取容器最新日志...</span>
+                  <span>正在读取最新记录</span>
                 </div>
               ) : (
-                readableLogs || '暂无容器输出日志'
+                readableLogs || "此应用还没有输出记录"
               )}
             </div>
           </div>
@@ -537,18 +540,16 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
           <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-2xl">
             <div className="flex items-center space-x-3 text-rose-500">
               <AlertCircle className="w-6 h-6" />
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">确认删除容器？</h3>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">移除应用</h3>
             </div>
 
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              确定要删除容器 <span className="font-mono font-bold text-slate-900 dark:text-white">"{deleteModalContainer.name}"</span> 吗？
-              删除后该容器实例将被移除，已持久化到宿主机挂载目录的数据不受影响。
+              移除此应用？ <span className="font-mono font-bold text-slate-900 dark:text-white">"{deleteModalContainer.name}"</span> 将移除这个应用。<br />实例内未另存的数据可能丢失。<br />外部保存目录中的数据保留。
             </p>
 
             {deleteModalContainer.project && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                此容器属于 Compose 项目 <span className="font-mono font-semibold">{deleteModalContainer.project}</span>。
-                删除容器不会删除该项目的 compose.yaml；如需删除编排配置，请到“服务编排”中使用“删除 Compose 项目及编排配置”。
+                此应用属于一个应用组合： <span className="font-mono font-semibold">{deleteModalContainer.project}</span>此操作会保留组合的安装配置。<br />如需删除配置，请到应用组合操作。
               </div>
             )}
 
@@ -561,7 +562,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                 className="rounded border-slate-300 dark:border-slate-700 text-rose-500 focus:ring-0"
               />
               <label htmlFor="forceDel" className="cursor-pointer">
-                强制删除正在运行中的容器 (-f)
+                强制删除
               </label>
             </div>
 
@@ -577,7 +578,7 @@ export const DockerContainers: React.FC<DockerContainersProps> = ({ onOpenTermin
                 disabled={actionLoading !== null}
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs text-white font-bold transition disabled:opacity-50 shadow-xs"
               >
-                确认删除
+                删除
               </button>
             </div>
           </div>

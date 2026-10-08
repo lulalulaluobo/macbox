@@ -123,11 +123,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
       const job = await api.getJob(jobId);
       if (job.status === 'succeeded') return;
       if (job.status === 'failed' || job.status === 'cancelled') {
-        throw new Error(job.error || (job.status === 'cancelled' ? '操作已取消' : '虚拟机操作失败'));
+        throw new Error(job.error || (job.status === 'cancelled' ? '操作已取消' : "系统操作未完成，请检查状态"));
       }
       await new Promise((resolve) => window.setTimeout(resolve, 1000));
     }
-    throw new Error('虚拟机操作超时，请查看任务状态或稍后重试');
+    throw new Error("操作超时，请检查状态后重试");
   };
 
   const handleVMAction = async (action: 'start' | 'stop' | 'restart') => {
@@ -137,12 +137,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
       if (action === 'start') result = await api.startVM();
       else if (action === 'stop') result = await api.stopVM();
       else result = await api.restartVM();
-      notify(action === 'start' ? '正在启动服务' : action === 'stop' ? '正在停止服务' : '正在重启虚拟机');
+      notify(action === 'start' ? "启动中" : action === 'stop' ? "停止中" : "重启中");
       await waitForJob(result.jobId);
-      notify(action === 'start' ? '服务已启动' : action === 'stop' ? '服务已停止' : '虚拟机已重启');
+      notify(action === 'start' ? "系统已启动" : action === 'stop' ? "系统已停止" : "系统已重启");
       await onRefresh();
     } catch (err: any) {
-      notify(`操作失败：${err.message}`);
+      notify(`操作失败，原因：${err.message}`);
       await onRefresh();
     } finally {
       setActionLoading(null);
@@ -153,10 +153,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     setPowerLoading(true);
     try {
       const result = await api.togglePower(!powerActive);
-      notify(result.active ? '防休眠已开启' : '防休眠已关闭');
+      notify(result.active ? "已开启保持运行" : "已关闭保持运行");
       onRefresh();
     } catch (err: any) {
-      notify(`操作失败：${err.message}`);
+      notify(`操作失败，原因：${err.message}`);
     } finally {
       setPowerLoading(false);
     }
@@ -167,10 +167,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     try {
       if (serviceInstalled) await api.uninstallService();
       else await api.installService();
-      notify(serviceInstalled ? '开机自启已关闭' : '开机自启已开启');
+      notify(serviceInstalled ? "已关闭登录后自动启动" : "已开启登录后自动启动");
       onRefresh();
     } catch (err: any) {
-      notify(`操作失败：${err.message}`);
+      notify(`操作失败，原因：${err.message}`);
     } finally {
       setServiceLoading(false);
     }
@@ -185,7 +185,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
       setEditMemory(config.memory || 4);
       setEditDisk(config.diskSize || 20);
     } catch (err: any) {
-      notify(`读取规格失败：${err.message}`);
+      notify(`读取资源设置失败，原因：${err.message}`);
     } finally {
       setSpecsLoading(false);
     }
@@ -196,20 +196,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
     setSpecsSaving(true);
     try {
       const result = await api.updateVMConfig({ cpus: editCPUs, memory: editMemory, diskSize: editDisk });
-      notify(result.message || '规格已保存');
+      notify(result.message || "资源设置已保存");
       setShowSpecsModal(false);
       onRefresh();
     } catch (err: any) {
-      notify(`保存失败：${err.message}`);
+      notify(`保存失败，原因：${err.message}`);
     } finally {
       setSpecsSaving(false);
     }
   };
 
   const metrics = [
-    { label: 'CPU', value: `${sys ? sys.cpuPercent.toFixed(0) : '--'}%`, progress: sys?.cpuPercent || 0, icon: Cpu, color: 'text-sky-500', bar: 'from-sky-400 to-blue-500' },
-    { label: '内存', value: `${sys ? sys.memPercent.toFixed(0) : '--'}%`, progress: sys?.memPercent || 0, icon: Server, color: 'text-violet-500', bar: 'from-violet-400 to-purple-500' },
-    { label: '存储', value: selectedDisk?.totalSizeString || '--', progress: selectedDisk?.usedPercent || 0, icon: HardDrive, color: 'text-cyan-500', bar: 'from-cyan-400 to-sky-500' },
+    { label: "处理器", value: `${sys ? sys.cpuPercent.toFixed(0) : '--'}%`, progress: sys?.cpuPercent || 0, icon: Cpu, color: 'text-sky-500', bar: 'from-sky-400 to-blue-500' },
+    { label: "内存占用", value: `${sys ? sys.memPercent.toFixed(0) : '--'}%`, progress: sys?.memPercent || 0, icon: Server, color: 'text-violet-500', bar: 'from-violet-400 to-purple-500' },
+    { label: "存储管理", value: selectedDisk?.totalSizeString || '--', progress: selectedDisk?.usedPercent || 0, icon: HardDrive, color: 'text-cyan-500', bar: 'from-cyan-400 to-sky-500' },
   ];
 
   const serviceEntries = serviceShortcuts.filter((shortcut) => shortcut.enabled).map((shortcut) => ({
@@ -225,10 +225,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
 
   const openService = (shortcut: ServiceShortcut, container?: ContainerInfo) => {
     if (shortcut.source === 'docker' && container?.state !== 'running') {
-      notify(container ? `容器 ${container.name} 当前未运行，请先启动容器` : `未找到容器 ${shortcut.containerName || shortcut.name}，请重新配置服务导航`);
+      notify(container ? `应用“${container.name}”未运行，请先启动` : `未找到应用“${shortcut.containerName || shortcut.name}”，请修改入口`);
       return;
     }
-    window.open(shortcut.url, '_blank', 'noopener,noreferrer');
+    let address = shortcut.url;
+    if (shortcut.source === 'docker') {
+      if (!overview?.vm.bridgeIP) { notify("系统还没有地址，请到网络连接设置"); return; }
+      try { const url = new URL(address); url.hostname = overview.vm.bridgeIP; address = url.toString(); } catch { notify("访问网址无效，请重新填写"); return; }
+    }
+    window.open(address, '_blank', 'noopener,noreferrer');
   };
 
   const handleSaveManualService = async (shortcut: ServiceShortcutInput) => {
@@ -240,16 +245,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
       : [...current, result.shortcut]);
     setShowServiceModal(false);
     setEditingServiceShortcut(null);
-    notify(shortcut.id ? '服务导航已更新' : '服务导航已添加');
+    notify(shortcut.id ? "入口已更新" : "入口已添加");
   };
 
   const handleDeleteService = async (id: string) => {
     try {
       await api.deleteServiceShortcut(id);
       setServiceShortcuts((current) => current.filter((item) => item.id !== id));
-      notify('服务导航已删除');
+      notify("入口已删除");
     } catch (err: any) {
-      notify(`删除失败：${err?.message || '服务导航操作失败'}`);
+      notify(`删除失败，原因：${err?.message || '服务导航操作失败'}`);
     }
   };
 
@@ -265,7 +270,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
       await api.reorderServiceShortcuts(next.map((item) => item.id));
     } catch (err: any) {
       setServiceShortcuts(previous);
-      notify(`排序失败：${err?.message || '服务导航操作失败'}`);
+      notify(`排序失败，原因：${err?.message || '服务导航操作失败'}`);
     }
   };
 
@@ -283,7 +288,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h1 className="truncate text-lg font-black tracking-tight text-slate-900 dark:text-white">MacBox</h1>
-            {overview?.configDirty && <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-bold text-amber-600 dark:bg-amber-500/10 dark:text-amber-300">待重启</span>}
+            {overview?.configDirty && <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-bold text-amber-600 dark:bg-amber-500/10 dark:text-amber-300">需重启</span>}
           </div>
           <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-slate-500"><span className={`h-2 w-2 rounded-full ${isVMRunning ? 'bg-emerald-500' : 'bg-amber-500'}`} /><span className="truncate">{isVMRunning ? `运行中 · ${sys?.uptimeString || '状态稳定'}` : vm?.status || '未启动'}</span></div>
         </div>
@@ -294,7 +299,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
         {metrics.map((metric) => {
           const Icon = metric.icon;
           return (
-            <button key={metric.label} type="button" onClick={metric.label === '存储' ? () => onNavigateTab('storage') : undefined} className="min-w-0 rounded-[20px] border border-slate-200/80 bg-white p-3 text-left shadow-xs dark:border-slate-800 dark:bg-slate-900/75 sm:p-4">
+            <button key={metric.label} type="button" onClick={metric.icon === HardDrive ? () => onNavigateTab('storage') : undefined} className="min-w-0 rounded-[20px] border border-slate-200/80 bg-white p-3 text-left shadow-xs dark:border-slate-800 dark:bg-slate-900/75 sm:p-4">
               <div className="flex items-center justify-between gap-1"><span className="truncate text-[10px] font-bold text-slate-500 sm:text-xs">{metric.label}</span><Icon className={`h-4 w-4 shrink-0 ${metric.color}`} /></div>
               <p className="mt-2 truncate text-xl font-black leading-none text-slate-900 dark:text-white sm:text-2xl">{metric.value}</p>
               <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"><div className={`h-full rounded-full bg-gradient-to-r ${metric.bar}`} style={{ width: `${Math.min(metric.progress, 100)}%` }} /></div>
@@ -306,17 +311,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
       <section className="rounded-[22px] border border-slate-200/80 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900/75 sm:p-4">
         <div className="flex items-center justify-between gap-3 px-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h2 className="text-xs font-black text-slate-900 dark:text-white">服务导航</h2>
-            {serviceEntries.length > 0 && <span className="shrink-0 text-[10px] font-semibold text-slate-400">{serviceEntries.length} 个服务</span>}
+            <h2 className="text-xs font-black text-slate-900 dark:text-white">常用入口</h2>
+            {serviceEntries.length > 0 && <span className="shrink-0 text-[10px] font-semibold text-slate-400">{serviceEntries.length} 个入口</span>}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {isAdmin && (
-              <button type="button" onClick={() => { setEditingServiceShortcut(null); setShowServiceModal(true); }} className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 transition hover:bg-sky-100 dark:bg-sky-500/10 dark:text-sky-300 dark:hover:bg-sky-500/20" aria-label="添加手动服务" title="添加手动服务">
+              <button type="button" onClick={() => { setEditingServiceShortcut(null); setShowServiceModal(true); }} className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 transition hover:bg-sky-100 dark:bg-sky-500/10 dark:text-sky-300 dark:hover:bg-sky-500/20" aria-label="添加入口" title="添加入口">
                 <Plus className="h-4 w-4" />
               </button>
             )}
             {isAdmin && (serviceShortcuts.length > 0 || !serviceEntries.length) && (
-              <button type="button" onClick={() => setShowServiceManager(true)} className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-sky-600 dark:hover:bg-slate-800 dark:hover:text-sky-300" aria-label="管理服务导航" title="管理服务导航">
+              <button type="button" onClick={() => setShowServiceManager(true)} className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-sky-600 dark:hover:bg-slate-800 dark:hover:text-sky-300" aria-label="管理入口" title="管理入口">
                 <Settings2 className="h-4 w-4" />
               </button>
             )}
@@ -325,7 +330,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
 
         {serviceEntries.length === 0 ? (
           <div className="mt-2 flex min-h-20 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 text-center text-[11px] text-slate-500 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-400">
-            暂无主页服务；管理员可点击右上角「+」添加，Docker 服务可在容器页面加入
+            还没有入口，管理员可点“＋”添加
           </div>
         ) : (
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -338,16 +343,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
                     <DockerServiceIcon name={shortcut.icon} className="h-5 w-5" />
                   </span>
                   <span className={`mt-1.5 max-w-full truncate text-xs font-bold ${isRunning ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'}`} title={shortcut.name}>{shortcut.name}</span>
-                  <span className={`mt-0.5 max-w-full truncate text-[9px] ${isRunning ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>{isManual ? '外部服务 · 点击打开' : isRunning ? '运行中 · 点击打开' : '容器未运行'}</span>
+                  <span className={`mt-0.5 max-w-full truncate text-[9px] ${isRunning ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>{isManual ? "自建入口，点击打开" : isRunning ? "应用运行中，点击打开" : "应用未运行"}</span>
                 </>
               );
 
               return isRunning ? (
-                <button key={shortcut.id} type="button" onClick={() => openService(shortcut, container)} className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-sky-50 dark:hover:bg-sky-500/10" title={`打开 ${shortcut.name}：${shortcut.url}`}>
+                <button key={shortcut.id} type="button" onClick={() => openService(shortcut, container)} className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-sky-50 dark:hover:bg-sky-500/10" title={`打开${shortcut.name}：${shortcut.url}`}>
                   {serviceContent}
                 </button>
               ) : (
-                <button key={shortcut.id} type="button" onClick={() => openService(shortcut, container)} className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-slate-50 dark:hover:bg-slate-800/60" title={`${shortcut.name} 当前不可用`}>
+                <button key={shortcut.id} type="button" onClick={() => openService(shortcut, container)} className="flex min-w-0 flex-col items-center rounded-2xl px-1 py-2 text-center transition hover:bg-slate-50 dark:hover:bg-slate-800/60" title={`“${shortcut.name}”当前不可用`}>
                   {serviceContent}
                 </button>
               );
@@ -357,26 +362,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ overview, onRefresh, onNav
       </section>
 
       <section className="rounded-[22px] border border-slate-200/80 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900/75 sm:p-4">
-        <h2 className="px-1 text-xs font-black text-slate-900 dark:text-white">关键操作</h2>
+        <h2 className="px-1 text-xs font-black text-slate-900 dark:text-white">系统运行</h2>
         <div className="mt-2 grid grid-cols-5 gap-1.5 sm:gap-2">
           <ActionButton label={isVMRunning ? '停止' : '启动'} icon={isVMRunning ? Square : Play} active={!isVMRunning} loading={currentAction === (isVMRunning ? 'stop' : 'start')} disabled={isActionBusy} onClick={() => handleVMAction(isVMRunning ? 'stop' : 'start')} />
           <ActionButton label="重启" icon={RotateCw} loading={currentAction === 'restart'} disabled={isActionBusy} onClick={() => handleVMAction('restart')} />
-          <ActionButton label="规格" icon={Sliders} onClick={handleOpenSpecs} />
-          <ActionButton label="常驻" icon={Coffee} active={powerActive} loading={powerLoading} onClick={handleTogglePower} />
-          <ActionButton label="自启" icon={Rocket} active={serviceInstalled} loading={serviceLoading} onClick={handleToggleService} />
+          <ActionButton label="资源设置" icon={Sliders} onClick={handleOpenSpecs} />
+          <ActionButton label="保持运行" icon={Coffee} active={powerActive} loading={powerLoading} onClick={handleTogglePower} />
+          <ActionButton label="自动启动" icon={Rocket} active={serviceInstalled} loading={serviceLoading} onClick={handleToggleService} />
         </div>
       </section>
 
       {showSpecsModal && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/35 p-0 backdrop-blur-sm sm:items-center sm:p-4">
           <div className="w-full max-w-lg rounded-t-[28px] border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-800 dark:bg-slate-900 sm:rounded-[28px] sm:p-6">
-            <div className="flex items-center justify-between"><div><h3 className="text-lg font-black text-slate-900 dark:text-white">虚拟机规格</h3><p className="mt-1 text-xs text-slate-500">修改后可能需要重启生效</p></div><button type="button" onClick={() => setShowSpecsModal(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800"><X className="h-4 w-4" /></button></div>
+            <div className="flex items-center justify-between"><div><h3 className="text-lg font-black text-slate-900 dark:text-white">资源设置</h3><p className="mt-1 text-xs text-slate-500">修改后可能需要重启系统</p></div><button type="button" onClick={() => setShowSpecsModal(false)} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800"><X className="h-4 w-4" /></button></div>
             {specsLoading ? <div className="flex h-44 items-center justify-center"><RotateCw className="h-5 w-5 animate-spin text-sky-500" /></div> : (
               <form onSubmit={handleSaveSpecs} className="mt-5 space-y-4">
-                <SpecField label="CPU 核心" value={editCPUs} min={1} max={16} onChange={setEditCPUs} />
-                <SpecField label="内存 (GiB)" value={editMemory} min={1} max={64} onChange={setEditMemory} />
-                <SpecField label="系统盘 (GiB)" value={editDisk} min={20} max={2048} onChange={setEditDisk} />
-                <button type="submit" disabled={specsSaving} className="min-h-11 w-full rounded-2xl bg-sky-500 text-sm font-bold text-white shadow-sm transition hover:bg-sky-600 disabled:opacity-50">{specsSaving ? '保存中…' : '保存规格'}</button>
+                <SpecField label="处理器" value={editCPUs} min={1} max={16} onChange={setEditCPUs} />
+                <SpecField label="内存大小" value={editMemory} min={1} max={64} onChange={setEditMemory} />
+                <SpecField label="系统空间" value={editDisk} min={20} max={2048} onChange={setEditDisk} />
+                <button type="submit" disabled={specsSaving} className="min-h-11 w-full rounded-2xl bg-sky-500 text-sm font-bold text-white shadow-sm transition hover:bg-sky-600 disabled:opacity-50">{specsSaving ? "保存中" : "保存设置"}</button>
               </form>
             )}
           </div>

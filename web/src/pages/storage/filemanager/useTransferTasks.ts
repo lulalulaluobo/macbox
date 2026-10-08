@@ -101,7 +101,7 @@ export const useTransferTasks = ({
       setSelectedFids(new Set());
       await refreshJobs();
     } catch (error: unknown) {
-      throw new Error(getErrorMessage(error, '创建下载任务失败'));
+      throw new Error(getErrorMessage(error, "未能创建下载任务，请重试"));
     }
   };
 
@@ -112,7 +112,7 @@ export const useTransferTasks = ({
       await refreshJobs();
       await loadFiles();
     } catch (error: unknown) {
-      onError(getErrorMessage(error, '创建云盘上传任务失败'));
+      onError(getErrorMessage(error, "未能创建网盘上传任务，请重试"));
     }
   };
 

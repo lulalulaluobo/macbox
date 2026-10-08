@@ -11,6 +11,7 @@ import (
 	"github.com/lulalulaluobo/macbox/pkg/samba"
 	"github.com/lulalulaluobo/macbox/pkg/system"
 	"github.com/lulalulaluobo/macbox/pkg/terminal"
+	"github.com/lulalulaluobo/macbox/pkg/update"
 	"github.com/lulalulaluobo/macbox/pkg/vm"
 	"log"
 	"net"
@@ -23,6 +24,8 @@ import (
 )
 
 type Server struct {
+	controlMu       sync.RWMutex
+	updateMgr       *update.Manager
 	cfg             *config.Config
 	vmMgr           *vm.Manager
 	dockerClient    *docker.Client
@@ -334,6 +337,7 @@ func newServer(cfg *config.Config, projectRoot string, sharedPowerMgr *system.Po
 
 	s := &Server{
 		cfg:             cfg,
+		updateMgr:       update.NewManager(cfg.Port, nil),
 		vmMgr:           vmMgr,
 		dockerClient:    dockerClient,
 		appMgr:          appMgr,
@@ -524,6 +528,10 @@ func (s *Server) endDockerOperation() {
 	}
 }
 
+func (s *Server) ConfigureUpdates(port int, args []string) {
+	s.updateMgr = update.NewManager(port, args)
+}
+
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Keep browser defaults restrictive for both the SPA and API responses.
@@ -563,7 +571,7 @@ func (s *Server) Handler() http.Handler {
 		// API Authentication Interceptor
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			// Whitelisted unauthenticated endpoints
-			if r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" ||
+			if (r.URL.Path == "/api/health" && directRequestIP(r) != nil && directRequestIP(r).IsLoopback()) || r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" ||
 				(r.URL.Path == "/api/system/backup/restore" && s.authMgr != nil && s.authMgr.NeedsSetup() && s.isLoopbackRequest(r)) ||
 				(r.URL.Path == "/api/system/menubar-status" && s.isLoopbackRequest(r)) {
 				s.mux.ServeHTTP(w, r)
@@ -589,6 +597,14 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 
+			if (r.Method != "GET" && r.Method != "HEAD" || r.URL.Path == "/api/terminal/ws") && r.URL.Path != "/api/system/update/start" && r.URL.Path != "/api/system/update/rollback" && r.URL.Path != "/api/auth/logout" {
+				s.controlMu.RLock()
+				defer s.controlMu.RUnlock()
+				if s.updateMgr != nil && s.updateMgr.Active() {
+					writeError(w, http.StatusConflict, "版本切换中，请等待完成后再操作")
+					return
+				}
+			}
 			ctx := context.WithValue(r.Context(), userContextKey, user)
 			s.mux.ServeHTTP(w, r.WithContext(ctx))
 			return

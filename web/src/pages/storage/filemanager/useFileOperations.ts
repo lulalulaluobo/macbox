@@ -81,10 +81,10 @@ export const useFileOperations = ({
       await api.createFolder(targetDir);
       setShowMkdirModal(false);
       setNewFolderName('');
-      onSuccess('文件夹创建成功');
+      onSuccess("文件夹已创建");
       await loadFiles(currentPath);
     } catch (error: unknown) {
-      onError(`创建文件夹失败: ${getErrorMessage(error)}`);
+      onError(`创建文件夹失败，原因：${getErrorMessage(error)}`);
     }
   };
 
@@ -106,10 +106,10 @@ export const useFileOperations = ({
       await api.renameFile(renameItem.path, newPath);
       setShowRenameModal(false);
       setRenameItem(null);
-      onSuccess('重命名成功');
+      onSuccess("名称已修改");
       await loadFiles(currentPath);
     } catch (error: unknown) {
-      onError(`重命名失败: ${getErrorMessage(error)}`);
+      onError(`重命名失败，原因：${getErrorMessage(error)}`);
     }
   };
 
@@ -151,7 +151,7 @@ export const useFileOperations = ({
       await loadFiles(currentPath);
       await loadTrash();
     } catch (error: unknown) {
-      onError(`移入回收站失败: ${getErrorMessage(error)}`);
+      onError(`移入回收站失败，原因：${getErrorMessage(error)}`);
     } finally {
       setDeleting(false);
     }
@@ -169,10 +169,10 @@ export const useFileOperations = ({
       setDeleteTarget(null);
       setSelectedPaths(new Set());
       setSelectionMode(false);
-      onSuccess(`已彻底删除 ${targets.length} 个项目`);
+      onSuccess(`已永久删除${targets.length}项内容`);
       await loadFiles(currentPath);
     } catch (error: unknown) {
-      onError(`删除失败: ${getErrorMessage(error)}`);
+      onError(`删除失败，原因：${getErrorMessage(error)}`);
     } finally {
       setDeleting(false);
     }

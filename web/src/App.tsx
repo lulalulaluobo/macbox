@@ -55,7 +55,7 @@ export const App: React.FC = () => {
       setOverview(over);
       setError(null);
     } catch (err: any) {
-      setError(err.message || '无法连接到 MacBox 后端服务');
+      setError(err.message || "无法连接后台，请确认MacBox在运行");
     }
   };
 
@@ -170,15 +170,15 @@ export const App: React.FC = () => {
   const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!oldPassword || !newPassword) {
-      setChangePwdMsg({ type: 'error', text: '请填写所有密码输入框' });
+      setChangePwdMsg({ type: 'error', text: "请填写原密码、新密码和确认密码" });
       return;
     }
 	if (Array.from(newPassword).length < 8) {
-	  setChangePwdMsg({ type: 'error', text: '新密码长度至少需要 8 个字符' });
+	  setChangePwdMsg({ type: 'error', text: "新密码至少8个字符" });
       return;
     }
     if (newPassword !== confirmPassword) {
-      setChangePwdMsg({ type: 'error', text: '两次输入的新密码不一致' });
+      setChangePwdMsg({ type: 'error', text: "两次输入的密码不一致" });
       return;
     }
 
@@ -190,7 +190,7 @@ export const App: React.FC = () => {
 			setChangePwdMsg({ type: 'warning', text: `${result.message}。${result.warning}` });
 			return;
 		}
-		setChangePwdMsg({ type: 'success', text: '密码修改成功！下次登录请使用新密码' });
+		setChangePwdMsg({ type: 'success', text: "密码已修改，下次请用新密码登录" });
       setTimeout(() => {
         setShowChangePwdModal(false);
         setOldPassword('');
@@ -199,7 +199,7 @@ export const App: React.FC = () => {
         setChangePwdMsg(null);
       }, 1500);
     } catch (err: any) {
-      setChangePwdMsg({ type: 'error', text: err.message || '修改密码失败' });
+      setChangePwdMsg({ type: 'error', text: err.message || "密码未能修改，请重试" });
     } finally {
       setChangePwdLoading(false);
     }
@@ -210,7 +210,7 @@ export const App: React.FC = () => {
       <div className="min-h-[100dvh] flex items-center justify-center bg-slate-50 dark:bg-[#090d16] text-slate-500">
         <div className="flex flex-col items-center space-y-3">
           <div className="w-10 h-10 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-medium tracking-wide">正在加载 MacBox 安全环境...</span>
+          <span className="text-xs font-medium tracking-wide">连接中</span>
         </div>
       </div>
     );
@@ -227,7 +227,7 @@ export const App: React.FC = () => {
         setActiveTab={navigate}
         vmStatus={overview?.vm}
         dockerReady={overview?.docker.ready}
-        primaryIP={overview?.system.primaryIP}
+        primaryIP={overview?.vm.bridgeIP || overview?.system.primaryIP}
         currentUser={currentUser}
         onLogout={handleLogout}
         onOpenChangePwd={() => setShowChangePwdModal(true)}
@@ -235,15 +235,15 @@ export const App: React.FC = () => {
 
       {swUpdateReady && (
         <div className="pwa-update-banner mx-auto mt-3 flex max-w-6xl flex-col items-stretch gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900 shadow-sm dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-100 sm:flex-row sm:items-center sm:justify-between" role="status">
-          <span className="min-w-0 break-words">新版本已经准备好，更新后即可使用最新功能。</span>
-          <button type="button" onClick={applySWUpdate} className="min-h-11 shrink-0 rounded-xl bg-sky-500 px-4 font-bold text-white transition hover:bg-sky-600">立即更新</button>
+          <span className="min-w-0 break-words">页面更新已就绪，刷新即可使用</span>
+          <button type="button" onClick={applySWUpdate} className="min-h-11 shrink-0 rounded-xl bg-sky-500 px-4 font-bold text-white transition hover:bg-sky-600">更新页面</button>
         </div>
       )}
 
       {!isOnline && (
         <div className="mx-auto mt-3 flex w-[calc(100%-1.75rem)] max-w-6xl items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-900 shadow-sm dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100" role="status">
           <WifiOff className="h-4 w-4 shrink-0" />
-          <span className="min-w-0 break-words">当前处于离线状态。已缓存的界面仍可浏览，设备数据和操作将在恢复网络后可用。</span>
+          <span className="min-w-0 break-words">网络已断开。<br />已保存的页面仍可浏览。<br />联网后可读取设备数据和操作。</span>
         </div>
       )}
 
@@ -256,7 +256,7 @@ export const App: React.FC = () => {
         }`}>
         {error && overview && (
           <div className="mb-6 flex flex-col items-stretch gap-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-600 dark:text-rose-300 sm:flex-row sm:items-center sm:justify-between">
-            <span className="min-w-0 break-words">警告: {error}</span>
+            <span className="min-w-0 break-words">操作提醒 {error}</span>
             <button onClick={refreshData} className="min-h-11 shrink-0 rounded-xl border border-rose-500/20 px-4 text-xs font-bold hover:bg-rose-500/10 hover:text-slate-900 dark:hover:text-white">重新连接</button>
           </div>
         )}
@@ -279,7 +279,7 @@ export const App: React.FC = () => {
             <Storage />
           )}
 
-          {activeTab === 'docker' && <Docker onOpenTerminalWithLogs={openTerminalWithContainerLogs} primaryIP={overview?.system.primaryIP} />}
+          {activeTab === 'docker' && <Docker onOpenTerminalWithLogs={openTerminalWithContainerLogs} primaryIP={overview?.vm.bridgeIP || overview?.system.primaryIP} />}
 
           {activeTab === 'apps' && <Apps />}
 
@@ -291,7 +291,10 @@ export const App: React.FC = () => {
 
           {activeTab === 'settings' && (
             <Settings
-              primaryIP={overview?.system.primaryIP}
+               overview={overview}
+               onRefreshOverview={refreshData}
+               onNavigateTab={navigate}
+              primaryIP={overview?.vm.bridgeIP || overview?.system.primaryIP}
               currentUser={currentUser}
               onCurrentUserUpdated={(updated) => setCurrentUser(updated)}
             />
@@ -311,8 +314,8 @@ export const App: React.FC = () => {
                   <Key className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">修改个人登录密码</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">当前账户: {currentUser.username}</p>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">修改密码</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">当前账号 {currentUser.username}</p>
                 </div>
               </div>
               <button
@@ -343,7 +346,7 @@ export const App: React.FC = () => {
                   type="password"
                   value={oldPassword}
                   onChange={(e) => setOldPassword(e.target.value)}
-                  placeholder="请输入当前原密码"
+                  placeholder="输入当前密码"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
                   required
                 />
@@ -355,19 +358,19 @@ export const App: React.FC = () => {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="请输入至少 8 位新密码"
+                  placeholder="输入新密码，至少8个字符"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">确认新密码</label>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">确认密码</label>
                 <input
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="请再次输入新密码"
+                  placeholder="再次输入新密码"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-sky-500"
                   required
                 />
@@ -386,7 +389,7 @@ export const App: React.FC = () => {
                   disabled={changePwdLoading}
                   className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold shadow-xs transition disabled:opacity-50"
                 >
-                  {changePwdLoading ? '保存中...' : '确认修改'}
+                  {changePwdLoading ? "保存中" : "保存"}
                 </button>
               </div>
             </form>
@@ -409,8 +412,8 @@ const ConnectionState: React.FC<ConnectionStateProps> = ({ error, onRetry }) => 
       <div className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${error ? 'bg-rose-50 text-rose-500 dark:bg-rose-500/10 dark:text-rose-300' : 'bg-sky-50 text-sky-500 dark:bg-sky-500/10 dark:text-sky-300'}`}>
         {error ? <AlertCircle className="h-6 w-6" /> : <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />}
       </div>
-      <h1 className="mt-5 text-lg font-black text-slate-950 dark:text-white">{error ? '正在等待 MacBox 后台' : '正在连接 MacBox'}</h1>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">{error ? '后台服务暂时没有返回状态，系统会自动重试。请确认 MacBox 后台仍在运行。' : '正在读取虚拟机和本机环境状态…'}</p>
+      <h1 className="mt-5 text-lg font-black text-slate-950 dark:text-white">{error ? "等待后台" : "连接中"}</h1>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">{error ? "后台暂未响应，正在重试。\n请确认MacBox仍在运行。" : "正在读取本机和运行系统的状态"}</p>
       {error && <p className="mt-3 break-words text-xs text-rose-600 dark:text-rose-300">{error}</p>}
       <button type="button" onClick={() => void onRetry()} className="mt-6 inline-flex min-h-11 items-center justify-center rounded-2xl bg-sky-500 px-5 text-sm font-bold text-white shadow-sm shadow-sky-500/20 transition hover:bg-sky-600">重新连接</button>
     </section>
@@ -421,7 +424,7 @@ const PageLoadingState: React.FC = () => (
   <div className="flex min-h-[calc(100dvh-220px)] items-center justify-center">
     <div className="flex flex-col items-center gap-3 text-slate-500 dark:text-slate-400">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
-      <span className="text-sm">正在加载页面…</span>
+      <span className="text-sm">加载中</span>
     </div>
   </div>
 );
@@ -455,19 +458,19 @@ class PageLoadBoundary extends React.Component<React.PropsWithChildren, PageLoad
           <section className="w-full max-w-lg rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-sm dark:border-rose-900/70 dark:bg-slate-900">
             <AlertCircle className="mx-auto h-8 w-8 text-rose-500" />
             <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-white">
-              {isChunkLoadError ? '页面资源加载失败' : '页面运行异常'}
+              {isChunkLoadError ? "页面未能加载，请刷新重试" : "页面出错，请刷新后重试"}
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
               {isChunkLoadError
-                ? '页面版本资源可能未加载完整，请刷新页面后重试。'
-                : '页面组件发生异常，请刷新页面后重试；如果问题持续，请保留控制台错误信息。'}
+                ? "页面未加载完整，请刷新重试"
+                : "页面出错，请刷新重试。\n仍有问题时请保留浏览器报错。"}
             </p>
             <button
               type="button"
               onClick={() => window.location.reload()}
               className="mt-5 rounded-2xl bg-sky-500 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-sky-600"
             >
-              重新加载页面
+              刷新页面
             </button>
           </section>
         </div>

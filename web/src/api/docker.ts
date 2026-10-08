@@ -48,7 +48,7 @@ export const dockerApi = {  // Docker Overview & Containers
     }
     if (!response.ok || !response.body) {
       const payload = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error(payload.error || '无法建立部署日志连接');
+      throw new Error(payload.error || "无法读取安装记录，请检查应用状态");
     }
 
     const reader = response.body.getReader();
@@ -70,9 +70,9 @@ export const dockerApi = {  // Docker Overview & Containers
         completed = true;
       } else if (event === 'error') {
         try {
-          streamError = JSON.parse(value).error || 'Compose 部署失败';
+          streamError = JSON.parse(value).error || "应用组合安装失败，请查看记录";
         } catch {
-          streamError = value || 'Compose 部署失败';
+          streamError = value || "应用组合安装失败，请查看记录";
         }
       } else if (value) {
         onLog(value);
@@ -93,7 +93,7 @@ export const dockerApi = {  // Docker Overview & Containers
     buffer += decoder.decode();
     if (buffer.trim()) processFrame(buffer);
     if (streamError) throw new Error(streamError);
-    if (!completed) throw new Error('部署连接已结束，但服务端没有返回完成确认');
+    if (!completed) throw new Error("连接已结束，安装结果暂未确认");
   },
   composeAction: (name: string, action: 'start' | 'stop' | 'restart' | 'down' | 'pull') =>
     fetchJSON<{ status: string; output: string }>(`${BASE_URL}/docker/compose/${name}/action`, {

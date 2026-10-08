@@ -57,7 +57,7 @@ export const useTrash = ({ onSuccess, onError }: UseTrashOptions): TrashState =>
       onSuccess(response.message);
       await loadTrash();
     } catch (error: unknown) {
-      onError(`还原失败: ${getErrorMessage(error)}`);
+      onError(`还原失败，原因：${getErrorMessage(error)}`);
     }
   };
 
@@ -78,7 +78,7 @@ export const useTrash = ({ onSuccess, onError }: UseTrashOptions): TrashState =>
       setTrashSelectedIds(new Set());
       await loadTrash();
     } catch (error: unknown) {
-      onError(`从回收站删除失败: ${getErrorMessage(error)}`);
+      onError(`从回收站删除失败，原因：${getErrorMessage(error)}`);
     } finally {
       setDeletingTrash(false);
     }
@@ -93,7 +93,7 @@ export const useTrash = ({ onSuccess, onError }: UseTrashOptions): TrashState =>
       setTrashSelectedIds(new Set());
       await loadTrash();
     } catch (error: unknown) {
-      onError(`清空回收站失败: ${getErrorMessage(error)}`);
+      onError(`清空回收站失败，原因：${getErrorMessage(error)}`);
     } finally {
       setDeletingTrash(false);
     }

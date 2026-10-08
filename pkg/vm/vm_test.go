@@ -43,11 +43,11 @@ func TestGenerateConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read rendered yaml error: %v", err)
 	}
-	if strings.Contains(string(content), "guestPortRange") || strings.Contains(string(content), "hostPortRange") {
-		t.Fatal("rendered VM config must not expose a broad port range")
+	if !strings.Contains(string(content), "lima: macbox-bridged") || !strings.Contains(string(content), "interface: lima0") {
+		t.Fatal("missing automatic bridge")
 	}
-	if !strings.Contains(string(content), "guestPort: 5244") {
-		t.Fatal("rendered VM config is missing the default Alist port forward")
+	if !strings.Contains(string(content), "ignore: true") || strings.Contains(string(content), "guestPort: 5244") || strings.Contains(string(content), "hostPortRange") {
+		t.Fatal("TCP forwarding must be disabled in bridged mode")
 	}
 	if !strings.Contains(string(content), "name: macboxctl") || strings.Contains(string(content), os.Getenv("USER")+".guest") {
 		t.Fatal("rendered VM config must use the fixed internal Lima management user")

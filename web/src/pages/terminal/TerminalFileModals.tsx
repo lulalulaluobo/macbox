@@ -41,15 +41,15 @@ export const TerminalFileModals: React.FC<TerminalFileModalsProps> = ({
         <div className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-2xl">
           <h3 className="flex items-center space-x-2 text-base font-bold text-white">
             <FolderPlus className="h-4 w-4 text-sky-400" />
-            <span>新建文件夹</span>
+            <span>新文件夹</span>
           </h3>
-          <p className="text-xs text-slate-400">将在目录 <code className="text-sky-300">{currentPath}</code> 下创建新文件夹：</p>
+          <p className="text-xs text-slate-400">将保存到： <code className="text-sky-300">{currentPath}</code> 新文件夹名称：</p>
           <form onSubmit={onCreateFolder} className="space-y-4">
             <input
               type="text"
               value={newFolderName}
               onChange={(event) => onNewFolderNameChange(event.target.value)}
-              placeholder="例如: documents 或 backup"
+              placeholder="例如：文档或备份"
               className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-sky-500 focus:outline-none"
               autoFocus
             />
@@ -79,7 +79,7 @@ export const TerminalFileModals: React.FC<TerminalFileModalsProps> = ({
                 </p>
               </div>
             </div>
-            <button onClick={onCloseEditor} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-800 hover:text-white" aria-label="关闭文件编辑器">
+            <button onClick={onCloseEditor} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-800 hover:text-white" aria-label="关闭编辑">
               <X className="h-5 w-5" />
             </button>
           </header>
@@ -94,14 +94,14 @@ export const TerminalFileModals: React.FC<TerminalFileModalsProps> = ({
 
           <footer className="flex shrink-0 flex-col gap-2 border-t border-slate-800 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
             <span className="hidden text-xs leading-5 text-slate-500 sm:block">
-              {editingFile.readOnly ? 'VM 系统目录仅支持查看；如需修改，请使用 root 终端命令并确认风险' : '支持直接在线修改文件并写回虚拟机文件系统'}
+              {editingFile.readOnly ? "系统文件仅能查看。\n修改需用最高权限账号执行命令。\n操作前请确认风险。" : "保存后会修改运行系统中的原文件"}
             </span>
             <div className={`grid w-full gap-2 sm:flex sm:w-auto ${editingFile.readOnly ? 'grid-cols-1' : 'grid-cols-2'}`}>
               <button onClick={onCloseEditor} className="min-h-11 rounded-xl bg-slate-800 px-4 text-xs font-medium text-slate-300 hover:text-white">{editingFile.readOnly ? '关闭' : '取消'}</button>
               {!editingFile.readOnly && (
                 <button onClick={onSaveFile} disabled={savingFile} className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-sky-600 px-4 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
                   <Save className="h-3.5 w-3.5" />
-                  <span>{savingFile ? '保存中...' : '保存更改'}</span>
+                  <span>{savingFile ? "保存中" : "保存"}</span>
                 </button>
               )}
             </div>

@@ -49,7 +49,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
 
   const cpuMax = useMemo(() => Math.max(1, Math.min(16, vmConfig?.hostCpus || 16)), [vmConfig]);
   const diskMin = Math.max(20, vmConfig?.diskSize || 20);
-  const selectedDisk = overview?.storage.selectedDisk?.name || 'Mac 默认存储';
+  const selectedDisk = overview?.storage.selectedDisk?.name || "本机存储";
   const storageReady = prerequisites?.storageReady !== false;
   const installCommand = prerequisites?.installCommand || 'brew install lima';
 
@@ -84,7 +84,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
         setLimaInstallJobId(activeLimaInstall.id);
       }
     } catch (err: any) {
-      setError(err.message || '无法读取初始化环境');
+      setError(err.message || "未能读取准备情况，请重新检查");
     } finally {
       setLoading(false);
     }
@@ -107,11 +107,11 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
           setLimaInstallJobId(null);
           await loadRequirements();
         } else if (nextJob.status === 'failed' || nextJob.status === 'cancelled') {
-          setError(nextJob.error || 'Lima 安装失败，请查看提示后重试');
+          setError(nextJob.error || "运行工具安装失败，请查看提示");
           setLimaInstallJobId(null);
         }
       } catch (err: any) {
-        if (active) setError(err.message || '无法读取 Lima 安装进度');
+        if (active) setError(err.message || "未能读取安装进度，请重新检查");
       }
     };
 
@@ -140,17 +140,17 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
             if (active) setSSHReady(true);
             if (active) await onRefresh();
           } catch (err: any) {
-            if (active) setError(err.message || '虚拟机已启动，但 SSH 初始化失败');
+            if (active) setError(err.message || "系统已启动，远程登录设置未完成");
           } finally {
             if (active) setJobId(null);
           }
         } else if ((nextJob.status === 'failed' || nextJob.status === 'cancelled') && active) {
-          setError(nextJob.error || (nextJob.status === 'cancelled' ? '初始化任务已取消' : '虚拟机启动失败'));
+          setError(nextJob.error || (nextJob.status === 'cancelled' ? "首次设置已取消" : "系统启动失败，请查看提示"));
           void api.getDiagnostics().then(setDiagnostics).catch(() => undefined);
           setJobId(null);
         }
       } catch (err: any) {
-        if (active) setError(err.message || '无法读取初始化进度');
+        if (active) setError(err.message || "未能读取设置进度，请重新检查");
       }
     };
 
@@ -192,7 +192,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
       setJobId(result.jobId);
       setStep('start');
     } catch (err: any) {
-      setError(err.message || '无法开始初始化');
+      setError(err.message || "未能开始设置，请查看提示");
     } finally {
       setSaving(false);
     }
@@ -216,7 +216,8 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
       setInstallCommandCopied(true);
       window.setTimeout(() => setInstallCommandCopied(false), 1800);
     } catch {
-      setError(`无法自动复制，请手动执行：${installCommand}`);
+      setError(`无法复制，请手动执行：
+${installCommand}`);
     }
   };
 
@@ -235,7 +236,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
       });
       setLimaInstallJobId(result.jobId);
     } catch (err: any) {
-      setError(err.message || '无法开始安装 Lima');
+      setError(err.message || "未能安装运行工具，请查看提示");
     }
   };
 
@@ -246,20 +247,20 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   const vmIsRunning = overview?.vm.status === 'Running';
   const elapsedLabel = `${Math.floor(startElapsedSeconds / 60)}分${String(startElapsedSeconds % 60).padStart(2, '0')}秒`;
   const stageLabel: Record<string, string> = {
-    starting: '准备启动',
-    checking: '环境与配置检查',
-    'waiting-ssh': '等待 SSH 与系统服务',
-    'syncing-mounts': '同步本机目录直通',
-    'verifying-services': '校验 Docker 与文件服务',
-    completed: '服务已就绪',
+    starting: "准备中",
+    checking: "检查中",
+    'waiting-ssh': "等待服务",
+    'syncing-mounts': "接入目录",
+    'verifying-services': "检查服务",
+    completed: "已就绪",
     failed: '启动失败',
-    cancelled: '任务已取消',
+    cancelled: "已取消",
   };
   const startProgressDetail = job?.error || (
     isStarting
       ? job?.message || (vmIsRunning
-        ? 'Lima 虚拟机已启动，正在等待 SSH 和 MacBox 服务就绪。请保持 MacBox 运行。'
-        : '正在启动虚拟机，可能正在下载 Ubuntu、Docker 和 Samba，首次启动通常需要 1–5 分钟。')
+        ? "系统已启动，正在等待服务。\n请保持MacBox运行。"
+        : "首次下载并启动，通常需要1至5分钟")
       : job?.message
   );
 
@@ -275,9 +276,9 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
   }, [isComplete, startStartedAt, step]);
 
   const stepItems: Array<{ key: WizardStep; label: string }> = [
-    { key: 'check', label: '环境检查' },
-    { key: 'config', label: '虚拟机配置' },
-    { key: 'start', label: '启动服务' },
+    { key: 'check', label: "准备检查" },
+    { key: 'config', label: "资源设置" },
+    { key: 'start', label: "启动系统" },
   ];
 
   return (
@@ -290,8 +291,8 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-black uppercase tracking-[0.2em] text-sky-600 dark:text-sky-300">MacBox first run</p>
-              <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">初始化 MacBox</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">完成一次环境配置后，MacBox 会自动启动 Lima 虚拟机并进入控制台。</p>
+              <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950 dark:text-white sm:text-3xl">首次设置</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">完成设置后自动启动并进入后台</p>
             </div>
           </div>
 
@@ -322,7 +323,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
           {step === 'start' && job?.stage && !isComplete && (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 dark:border-sky-900/70 dark:bg-sky-950/25">
               <div className="flex items-center justify-between gap-3 text-xs font-bold text-sky-800 dark:text-sky-200">
-                <span>当前阶段：{stageLabel[job.stage] || job.stage}</span>
+                <span>当前进度{stageLabel[job.stage] || job.stage}</span>
                 <span>{Math.max(0, Math.min(100, job.progress || 0))}%</span>
               </div>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/80 dark:bg-slate-800">
@@ -334,45 +335,45 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
           {step === 'check' && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-lg font-black text-slate-950 dark:text-white">先检查本机环境</h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">初始化需要 Mac 已安装 Lima。检测结果会持续显示，启动失败时也会保留具体错误。</p>
+                <h2 className="text-lg font-black text-slate-950 dark:text-white">准备检查</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">先检查运行工具，有问题时显示原因</p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <StatusCard
                   icon={Terminal}
-                  title="Lima 虚拟化环境"
-                  value={loading ? '检查中…' : isInstallingLima ? '安装中…' : limaInstallAwaitingCheck ? '安装完成，正在复核' : prerequisites?.limaInstalled ? '已安装' : '未找到'}
-                  detail={isInstallingLima || limaInstallAwaitingCheck ? (limaInstallJob?.message || '正在重新检测 limactl，请稍候…') : prerequisites?.version || prerequisites?.limaPath || '需要先安装 limactl'}
+                  title="运行工具"
+                  value={loading ? "检查中" : isInstallingLima ? "安装中" : limaInstallAwaitingCheck ? "复查中" : prerequisites?.limaInstalled ? '已安装' : '未找到'}
+                  detail={isInstallingLima || limaInstallAwaitingCheck ? (limaInstallJob?.message || "检查中") : prerequisites?.version || prerequisites?.limaPath || "请先安装运行工具"}
                   ok={!isInstallingLima && Boolean(prerequisites?.limaInstalled)}
                 />
                 <StatusCard
                   icon={HardDrive}
-                  title="Mac 数据盘"
-                  value={loading ? '检查中…' : storageReady ? selectedDisk : '需要修复'}
-                  detail={prerequisites?.storageMessage || '初始化后可在更多 → 存储管理中调整'}
+                  title="数据磁盘"
+                  value={loading ? "检查中" : storageReady ? selectedDisk : "需修复"}
+                  detail={prerequisites?.storageMessage || "设置后可在“更多”中管理存储"}
                   ok={!loading && storageReady}
                 />
                 <StatusCard
                   icon={KeyRound}
-                  title="控制台管理员"
-                  value="首次登录设置"
-                  detail="请在登录页自行设置管理员用户名和密码（不使用固定默认账号）"
+                  title="后台账号"
+                  value="首次登录时创建账号"
+                  detail="请在登录页创建自己的管理账号"
                   ok
                 />
                 <StatusCard
                   icon={ShieldCheck}
-                  title="SSH 安全策略"
-                  value="root 密钥登录"
-                  detail="密码认证关闭，不创建 SSH 密码"
+                  title="远程登录"
+                  value="密钥登录"
+                  detail="远程登录仅用密钥，无需设置密码"
                   ok
                 />
               </div>
 
               {!loading && prerequisites && !prerequisites.limaInstalled && !limaInstallAwaitingCheck && (
                 <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200">
-                  <p className="font-black">需要先安装 Lima</p>
-                  <p className="leading-6">{prerequisites.message || '请在 Mac 终端安装 Lima，安装完成后返回这里重新检查。'} {prerequisites.installHint}</p>
+                  <p className="font-black">安装工具</p>
+                  <p className="leading-6">{prerequisites.message || "在Mac终端安装运行工具。\n安装后返回并重新检查。"} {prerequisites.installHint}</p>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                     <code className="min-w-0 flex-1 break-all rounded-xl bg-white/80 px-3 py-2 font-mono text-xs dark:bg-slate-900/60">{installCommand}</code>
                     <button type="button" onClick={() => void copyInstallCommand()} className="min-h-10 shrink-0 rounded-xl border border-amber-300 px-3 text-xs font-bold transition hover:bg-amber-100 dark:border-amber-800 dark:hover:bg-amber-900/40">
@@ -382,7 +383,7 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
                   {prerequisites.canInstall && (
                     <button type="button" onClick={() => void installLima()} disabled={isInstallingLima} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl bg-sky-500 px-5 text-sm font-bold text-white shadow-sm shadow-sky-500/20 transition hover:bg-sky-600 disabled:cursor-wait disabled:opacity-55 sm:w-auto">
                       {isInstallingLima ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4" />}
-                      {isInstallingLima ? '正在安装 Lima…' : '通过 Homebrew 安装 Lima'}
+                      {isInstallingLima ? "安装中" : "安装工具"}
                     </button>
                   )}
                   {limaInstallJob?.message && (
@@ -393,11 +394,11 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
 
               {!loading && prerequisites && prerequisites.storageReady === false && (
                 <div className="space-y-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-800 dark:border-rose-900/70 dark:bg-rose-950/25 dark:text-rose-200" role="alert">
-                  <p className="font-black">数据盘当前无法访问</p>
+                  <p className="font-black">数据盘无法读取，请检查连接</p>
                   <p className="break-words leading-6">{prerequisites.storageMessage}</p>
-                  <p className="leading-6">请重新挂载原数据盘，或解除外接盘绑定并恢复本机内部备份；修复前不会启动虚拟机。</p>
+                  <p className="leading-6">请重新连接原数据盘。<br />也可解除外接盘并恢复本机备份。<br />修复前无法启动系统。</p>
                   <div className="flex flex-col gap-2 sm:flex-row">
-                    {onOpenStorageSettings && <button type="button" onClick={onOpenStorageSettings} className="min-h-10 rounded-xl bg-white px-3 text-xs font-bold text-rose-700 shadow-sm transition hover:bg-rose-100 dark:bg-slate-900 dark:text-rose-200 dark:hover:bg-rose-900/40">打开存储设置</button>}
+                    {onOpenStorageSettings && <button type="button" onClick={onOpenStorageSettings} className="min-h-10 rounded-xl bg-white px-3 text-xs font-bold text-rose-700 shadow-sm transition hover:bg-rose-100 dark:bg-slate-900 dark:text-rose-200 dark:hover:bg-rose-900/40">存储管理</button>}
                     <button type="button" onClick={() => void loadRequirements()} className="min-h-10 rounded-xl border border-rose-300 px-3 text-xs font-bold transition hover:bg-rose-100 dark:border-rose-800 dark:hover:bg-rose-900/40">重新检查</button>
                   </div>
                 </div>
@@ -419,25 +420,25 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
           {step === 'config' && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-lg font-black text-slate-950 dark:text-white">设置虚拟机规格</h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">这是首次启动使用的上限配置，后续仍可在主页调整。</p>
+                <h2 className="text-lg font-black text-slate-950 dark:text-white">资源设置</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">设置系统可用资源，之后仍可调整</p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-3">
-                <NumberField icon={Cpu} label="CPU 核心" value={cpus} min={1} max={cpuMax} onChange={setCPUs} />
-                <NumberField icon={ServerCog} label="内存 GiB" value={memory} min={2} max={64} onChange={setMemory} />
-                <NumberField icon={HardDrive} label="系统盘 GiB" value={diskSize} min={diskMin} max={2048} onChange={setDiskSize} />
+                <NumberField icon={Cpu} label="处理器" value={cpus} min={1} max={cpuMax} onChange={setCPUs} />
+                <NumberField icon={ServerCog} label="内存大小" value={memory} min={2} max={64} onChange={setMemory} />
+                <NumberField icon={HardDrive} label="系统空间" value={diskSize} min={diskMin} max={2048} onChange={setDiskSize} />
               </div>
 
               <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-200">
-                初始化会创建名为 <span className="font-bold">macbox</span> 的 Lima 虚拟机。SSH 服务使用 root 密钥登录，密码认证保持关闭；需要密钥时可在设置页生成或导入。
+                运行系统名称： <span className="font-bold">macbox</span> 远程登录仅用密钥。<br />可在设置页生成或导入密钥。
               </div>
 
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <button type="button" onClick={() => setStep('check')} className="min-h-11 rounded-2xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">返回检查</button>
+                <button type="button" onClick={() => setStep('check')} className="min-h-11 rounded-2xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">上一步</button>
                 <button type="button" onClick={() => void handleStart()} disabled={saving} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-sky-500 px-5 text-sm font-bold text-white shadow-sm shadow-sky-500/20 transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-50">
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ServerCog className="h-4 w-4" />}
-                  {saving ? '准备中…' : '开始初始化'}
+                  {saving ? "准备中" : "开始设置"}
                 </button>
               </div>
             </div>
@@ -446,27 +447,27 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
           {step === 'start' && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-lg font-black text-slate-950 dark:text-white">正在完成初始化</h2>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">MacBox 正在依次启动虚拟机、配置 SSH 并检查服务，请不要关闭窗口。</p>
+                <h2 className="text-lg font-black text-slate-950 dark:text-white">设置中</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">正在启动系统并检查服务。<br />请保持窗口打开。</p>
               </div>
 
               {!isComplete && (
                 <div className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800 dark:border-sky-900/70 dark:bg-sky-950/25 dark:text-sky-200" role="status">
                   <Clock3 className="mt-0.5 h-5 w-5 shrink-0 text-sky-500" />
                   <div className="min-w-0">
-                    <p className="font-bold">后台仍在运行 · 已等待 {elapsedLabel}</p>
+                    <p className="font-bold">后台仍在运行，已等待 {elapsedLabel}</p>
                     <p className="mt-1 leading-5">
-                      {vmIsRunning ? '虚拟机已经启动，正在完成 SSH 和服务探测。' : '虚拟机正在启动，首次安装可能需要下载系统和服务组件。'}
-                      {' '}如果超过 10 分钟仍未完成，再点击“返回并重试”。
+                      {vmIsRunning ? "系统已启动，正在检查登录和服务" : "首次启动需下载系统和服务组件"}
+                      {' '}超过10分钟未完成可返回重试
                     </p>
                   </div>
                 </div>
               )}
 
               <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/30">
-                <ProgressRow label="启动 Lima 虚拟机" status={job?.status === 'failed' || job?.status === 'cancelled' ? 'error' : job?.status === 'succeeded' ? 'done' : isStarting ? 'running' : 'waiting'} detail={startProgressDetail} />
-                <ProgressRow label="配置 root 密钥登录" status={isComplete ? 'done' : job?.status === 'succeeded' ? 'running' : 'waiting'} detail={isComplete ? '密码认证已关闭' : job?.stage === 'waiting-ssh' ? '正在等待并配置 SSH' : undefined} />
-                <ProgressRow label="进入 MacBox 控制台" status={isComplete ? 'done' : 'waiting'} />
+                <ProgressRow label="启动系统" status={job?.status === 'failed' || job?.status === 'cancelled' ? 'error' : job?.status === 'succeeded' ? 'done' : isStarting ? 'running' : 'waiting'} detail={startProgressDetail} />
+                <ProgressRow label="登录设置" status={isComplete ? 'done' : job?.status === 'succeeded' ? 'running' : 'waiting'} detail={isComplete ? "密码禁用" : job?.stage === 'waiting-ssh' ? "配置中" : undefined} />
+                <ProgressRow label="进入后台" status={isComplete ? 'done' : 'waiting'} />
               </div>
 
               {diagnostics && (
@@ -476,11 +477,11 @@ export const InitializationWizard: React.FC<InitializationWizardProps> = ({ over
               {isComplete ? (
                 <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/25 dark:text-emerald-300">
                   <CheckCircle2 className="h-5 w-5 shrink-0" />
-                  初始化完成，正在进入控制台…
+                  设置完成，正在进入后台
                 </div>
               ) : (
                 <div className="flex justify-end">
-                  <button type="button" onClick={retry} disabled={isStarting} className="min-h-11 rounded-2xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">返回并重试</button>
+                  <button type="button" onClick={retry} disabled={isStarting} className="min-h-11 rounded-2xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">返回重试</button>
                 </div>
               )}
             </div>
@@ -510,11 +511,11 @@ const DiagnosticPanel: React.FC<{ diagnostics: SystemDiagnostics }> = ({ diagnos
     <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-950/30" role="status">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-black text-slate-900 dark:text-white">诊断中心</h3>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">按环境、虚拟机、数据盘、Docker 和直通目录逐项核对</p>
+          <h3 className="text-sm font-black text-slate-900 dark:text-white">问题检查</h3>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">检查运行工具、磁盘、应用和目录</p>
         </div>
         <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${diagnostics.ok ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300'}`}>
-          {diagnostics.ok ? '未发现阻断项' : '发现阻断项'}
+          {diagnostics.ok ? "检查通过" : "需要处理"}
         </span>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
@@ -525,7 +526,7 @@ const DiagnosticPanel: React.FC<{ diagnostics: SystemDiagnostics }> = ({ diagnos
               <div className="min-w-0">
                 <p className="text-xs font-bold">{check.title}</p>
                 <p className="mt-1 break-words text-[11px] leading-5">{check.message}</p>
-                {check.repair && <p className="mt-1 break-words text-[11px] leading-5 opacity-80">建议：{check.repair}</p>}
+                {check.repair && <p className="mt-1 break-words text-[11px] leading-5 opacity-80">处理建议{check.repair}</p>}
               </div>
             </div>
           </div>
@@ -566,7 +567,7 @@ const NumberField: React.FC<NumberFieldProps> = ({ icon: Icon, label, value, min
   <label className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/60">
     <span className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400"><Icon className="h-4 w-4 text-sky-500" />{label}</span>
     <input type="number" value={value} min={min} max={max} onChange={(event) => onChange(Math.min(max, Math.max(min, Number(event.target.value) || min)))} className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-lg font-black text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/15 dark:border-slate-700 dark:bg-slate-800 dark:text-white" />
-    <span className="mt-2 block text-[11px] text-slate-400">范围 {min}–{max}</span>
+    <span className="mt-2 block text-[11px] text-slate-400">检查范围 {min}–{max}</span>
   </label>
 );
 
@@ -585,6 +586,6 @@ const ProgressRow: React.FC<ProgressRowProps> = ({ label, status, detail }) => (
       <p className={`text-sm font-bold ${status === 'error' ? 'text-rose-700 dark:text-rose-300' : 'text-slate-800 dark:text-slate-100'}`}>{label}</p>
       {detail && <p className="mt-1 break-words text-xs text-slate-500 dark:text-slate-400">{detail}</p>}
     </div>
-    <span className="shrink-0 pt-0.5 text-[11px] font-bold text-slate-400">{status === 'done' ? '完成' : status === 'error' ? '失败' : status === 'running' ? '处理中' : '等待'}</span>
+    <span className="shrink-0 pt-0.5 text-[11px] font-bold text-slate-400">{status === 'done' ? '完成' : status === 'error' ? '失败' : status === 'running' ? '处理中' : "等待中"}</span>
   </div>
 );

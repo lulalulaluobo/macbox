@@ -10,9 +10,9 @@ export const useFileActions = ({ selectedPaths, onSuccess, onError }: UseFileAct
   const handleCopyPath = async (path: string) => {
     try {
       await navigator.clipboard.writeText(path);
-      onSuccess('路径已复制');
+      onSuccess("文件位置已复制");
     } catch {
-      onError('复制路径失败，请检查浏览器剪贴板权限');
+      onError("复制失败，请允许浏览器使用剪贴板");
     }
   };
 

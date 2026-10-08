@@ -3,6 +3,12 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 VERSION="${MACBOX_VERSION:-$(awk -F'"' '/"version"[[:space:]]*:/ { print $4; exit }' "$ROOT_DIR/web/package.json")}"
+BUILD_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
+if ! git -C "$ROOT_DIR" diff --quiet HEAD --; then
+  BUILD_COMMIT="$BUILD_COMMIT-local"
+fi
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+BUILD_FLAGS="-s -w -X github.com/lulalulaluobo/macbox/pkg/buildinfo.Version=$VERSION -X github.com/lulalulaluobo/macbox/pkg/buildinfo.Commit=$BUILD_COMMIT -X github.com/lulalulaluobo/macbox/pkg/buildinfo.BuiltAt=$BUILD_TIME"
 DIST_DIR="$ROOT_DIR/dist"
 SIGN_IDENTITY="${MACBOX_CODESIGN_IDENTITY:--}"
 NOTARY_PROFILE="${MACBOX_NOTARY_PROFILE:-}"
@@ -215,7 +221,7 @@ build_dmg() {
 
   log "编译 $release_arch Go 后端..."
   CGO_ENABLED=0 GOOS=darwin GOARCH="$goarch" go build \
-    -trimpath -ldflags='-s -w' \
+    -trimpath -ldflags="$BUILD_FLAGS" \
     -o "$helper_path" "$ROOT_DIR/cmd/macbox"
 
   cp -R "$ROOT_DIR/templates" "$runtime_dir/templates"

@@ -4,18 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/lulalulaluobo/macbox/pkg/config"
-	"github.com/lulalulaluobo/macbox/pkg/system"
 	"net/http"
 )
 
 // Samba Handlers
 func (s *Server) handleSambaStatus(w http.ResponseWriter, r *http.Request) {
-	sysStats, _ := system.GetSystemStats()
-	primaryIP := "localhost"
-	if sysStats != nil && sysStats.PrimaryIP != "" {
-		primaryIP = sysStats.PrimaryIP
-	}
-
+	primaryIP := s.vmMgr.NetworkStatus(r.Context()).IP
 	status, err := s.sambaMgr.GetStatus(r.Context(), primaryIP)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

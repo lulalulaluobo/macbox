@@ -38,6 +38,12 @@
     -moz-osx-font-smoothing: grayscale;
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   }
+
+  p,
+  [role="alert"],
+  [role="status"] {
+    white-space: pre-line;
+  }
 }
 
 html {

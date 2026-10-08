@@ -52,7 +52,7 @@ export const Apps: React.FC = () => {
       const data = await api.getApps();
       setApps(data || []);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `加载应用列表失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `加载应用列表失败，原因：${err.message}` });
     } finally {
       setLoading(false);
     }
@@ -66,10 +66,10 @@ export const Apps: React.FC = () => {
     setSyncing(true);
     try {
       const res = await api.syncAppStore();
-      setAlertMsg({ type: 'success', text: `社区应用商城同步成功！共载入 ${res.count} 款精选拓展应用。` });
+      setAlertMsg({ type: 'success', text: `社区列表已更新，共${res.count}款应用` });
       await loadApps();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `同步社区源失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `更新社区列表失败，原因：${err.message}` });
     } finally {
       setSyncing(false);
     }
@@ -77,7 +77,9 @@ export const Apps: React.FC = () => {
 
   const handleAppAction = async (id: string, action: 'start' | 'stop' | 'restart' | 'uninstall') => {
     if (action === 'uninstall') {
-      if (!confirm(`确定要卸载应用 [${id}] 吗？容器将被移除，已有数据挂载目录与配置仍将完整保留。`)) return;
+      if (!confirm(`卸载应用“${id}”？
+将移除运行应用。
+外部保存目录和安装配置保留。`)) return;
     }
     setActionLoading(`${action}-${id}`);
     try {
@@ -85,23 +87,23 @@ export const Apps: React.FC = () => {
       if (action === 'stop') await api.stopApp(id);
       if (action === 'restart') await api.restartApp(id);
       if (action === 'uninstall') await api.uninstallApp(id);
-      setAlertMsg({ type: 'success', text: `操作成功完成！` });
+      setAlertMsg({ type: 'success', text: "操作已完成" });
       await loadApps();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `操作失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `操作失败，原因：${err.message}` });
     } finally {
       setActionLoading(null);
     }
   };
 
   const handleDeleteCustomApp = async (id: string) => {
-    if (!confirm(`确定要从商城中移除自定义应用 [${id}] 吗？`)) return;
+    if (!confirm(`删除自建应用模板“${id}”？`)) return;
     try {
       await api.deleteCustomApp(id);
-      setAlertMsg({ type: 'success', text: `自定义应用已成功删除` });
+      setAlertMsg({ type: 'success', text: "自建应用模板已删除" });
       await loadApps();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `删除失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `删除失败，原因：${err.message}` });
     }
   };
 
@@ -110,9 +112,9 @@ export const Apps: React.FC = () => {
     setLogsLoading(true);
     try {
       const res = await api.getAppLogs(id, 200);
-      setLogs(res.logs || '暂无日志输出');
+      setLogs(res.logs || "还没有运行记录");
     } catch (err: any) {
-      setLogs(`获取日志失败: ${err.message}`);
+      setLogs(`获取日志失败，原因：${err.message}`);
     } finally {
       setLogsLoading(false);
     }
@@ -129,14 +131,14 @@ export const Apps: React.FC = () => {
   const categories = [
     { id: 'all', name: '全部' },
     { id: '影音娱乐', name: '影音娱乐' },
-    { id: '私有云盘', name: '私有云盘' },
+    { id: '私有云盘', name: "个人网盘" },
     { id: '文件存储', name: '文件存储' },
     { id: '下载工具', name: '下载工具' },
     { id: '网络工具', name: '网络工具' },
-    { id: '系统运维', name: '系统运维' },
+    { id: '系统运维', name: "系统管理" },
     { id: '实用工具', name: '实用工具' },
     { id: '智能家居', name: '智能家居' },
-    { id: '我的自定义', name: '我的自定义' },
+    { id: '我的自定义', name: "自建应用" },
   ];
 
   // Filtering
@@ -179,9 +181,9 @@ export const Apps: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-3">
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">应用商城</h2>
+            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">应用商店</h2>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 font-medium">
-              Docker 容器引擎
+              应用服务
             </span>
           </div>
         </div>
@@ -191,10 +193,10 @@ export const Apps: React.FC = () => {
             onClick={handleSyncCommunity}
             disabled={syncing}
             className="flex min-h-10 min-w-10 flex-none items-center justify-center space-x-1.5 rounded-full border border-slate-200/80 bg-slate-100 px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-xs transition hover:bg-slate-200 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800/90 dark:text-slate-200 dark:hover:bg-slate-700"
-            title="同步并加载开源社区开源应用商城"
+            title="获取最新社区应用列表"
           >
             <Layers className={`w-3.5 h-3.5 text-amber-500 dark:text-amber-400 ${syncing ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">{syncing ? '同步中...' : '同步社区源'}</span>
+            <span className="hidden sm:inline">{syncing ? "获取中" : "更新列表"}</span>
           </button>
 
           <button
@@ -202,13 +204,13 @@ export const Apps: React.FC = () => {
             className="flex min-h-10 flex-1 items-center justify-center space-x-1.5 rounded-full bg-[#ff7d9a] px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-[#ff7d9a]/20 transition hover:bg-[#f36f8d] sm:flex-none"
           >
             <Plus className="w-4 h-4" />
-            <span>导入 Compose 应用</span>
+            <span>添加应用</span>
           </button>
 
           <button
             onClick={loadApps}
             className="flex min-h-10 min-w-10 items-center justify-center rounded-full border border-slate-200/80 bg-slate-100 text-slate-600 transition hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-            title="刷新商城列表"
+            title="刷新列表"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -223,7 +225,7 @@ export const Apps: React.FC = () => {
           </div>
           <div>
             <div className="text-xl font-black text-slate-900 dark:text-white">{totalAppsCount}</div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">商城可用项目</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">可装应用</div>
           </div>
         </div>
 
@@ -233,7 +235,7 @@ export const Apps: React.FC = () => {
           </div>
           <div>
             <div className="text-xl font-black text-emerald-600 dark:text-emerald-400">{runningAppsCount}</div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">正在运行服务</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">运行应用</div>
           </div>
         </div>
 
@@ -243,7 +245,7 @@ export const Apps: React.FC = () => {
           </div>
           <div>
             <div className="text-xl font-black text-indigo-600 dark:text-indigo-300">{installedAppsCount}</div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">已部署安装</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">已装应用</div>
           </div>
         </div>
 
@@ -253,7 +255,7 @@ export const Apps: React.FC = () => {
           </div>
           <div>
             <div className="text-xl font-black text-amber-600 dark:text-amber-300">{customAppsCount}</div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">我的自定义 Compose</div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">自建应用</div>
           </div>
         </div>
       </div>
@@ -285,7 +287,7 @@ export const Apps: React.FC = () => {
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="搜索应用名称、描述、端口 (如: jellyfin, 8096)..."
+              placeholder="搜索应用名称、用途或端口"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-xs placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-sky-500 transition"
@@ -303,7 +305,7 @@ export const Apps: React.FC = () => {
           {/* Source filters are secondary and stay collapsed until needed. */}
           <details className="group rounded-xl border border-slate-200 bg-slate-50 text-xs dark:border-slate-800 dark:bg-slate-950">
             <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 px-3 font-semibold text-slate-600 dark:text-slate-300">
-              <span>来源：{selectedSource === 'all' ? '全部' : selectedSource === 'builtin' ? '官方精选' : selectedSource === 'community' ? '社区商城' : '我的自定义'}</span>
+              <span>应用来源{selectedSource === 'all' ? '全部' : selectedSource === 'builtin' ? '官方精选' : selectedSource === 'community' ? "社区应用" : "自建应用"}</span>
               <span className="text-sky-600 group-open:hidden dark:text-sky-400">筛选</span>
               <span className="hidden text-slate-400 group-open:block">收起</span>
             </summary>
@@ -336,7 +338,7 @@ export const Apps: React.FC = () => {
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
               }`}
             >
-              社区商城
+              社区应用
             </button>
             <button
               onClick={() => setSelectedSource('custom')}
@@ -346,7 +348,7 @@ export const Apps: React.FC = () => {
                   : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
               }`}
             >
-              我的自定义
+              自建应用
             </button>
           </div>
           </details>
@@ -376,9 +378,9 @@ export const Apps: React.FC = () => {
           <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 mx-auto flex items-center justify-center text-slate-400 dark:text-slate-500">
             <Server className="w-6 h-6" />
           </div>
-          <h4 className="text-base font-bold text-slate-900 dark:text-white">未找到匹配的应用</h4>
+          <h4 className="text-base font-bold text-slate-900 dark:text-white">没有找到相关应用</h4>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-            未发现与当前分类或关键词匹配的应用
+            换个关键词或清除筛选试试
           </p>
           <div className="pt-2 flex justify-center space-x-3">
             {(selectedCategory !== 'all' || selectedSource !== 'all' || searchQuery) && (
@@ -390,14 +392,14 @@ export const Apps: React.FC = () => {
                 }}
                 className="px-4 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-medium border border-slate-200 dark:border-slate-700 transition"
               >
-                重置所有筛选
+                清除筛选
               </button>
             )}
             <button
               onClick={() => setShowCustomModal(true)}
               className="px-4 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold transition"
             >
-              导入自定义应用
+              添加应用
             </button>
           </div>
         </div>
@@ -436,7 +438,7 @@ export const Apps: React.FC = () => {
         onClose={() => setShowCustomModal(false)}
         onSuccess={() => {
           setShowCustomModal(false);
-          setAlertMsg({ type: 'success', text: '自定义 Docker Compose 应用已成功加入商城！' });
+          setAlertMsg({ type: 'success', text: "自建应用已加入商店" });
           loadApps();
         }}
       />
@@ -448,14 +450,14 @@ export const Apps: React.FC = () => {
             <div className="px-5 py-3.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center space-x-2.5">
                 <Terminal className="w-4 h-4 text-sky-400" />
-                <span className="font-bold text-sm text-white font-mono">{activeLogApp} 应用运行日志</span>
+                <span className="font-bold text-sm text-white font-mono">{activeLogApp} 运行记录</span>
               </div>
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => handleViewLogs(activeLogApp)}
                   disabled={logsLoading}
                   className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center space-x-1 transition"
-                  title="刷新日志"
+                  title="刷新记录"
                 >
                   <RefreshCw className={`w-3 h-3 ${logsLoading ? 'animate-spin' : ''}`} />
                   <span>刷新</span>
@@ -463,7 +465,7 @@ export const Apps: React.FC = () => {
                 <button
                   onClick={handleCopyLogs}
                   className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center space-x-1 transition"
-                  title="复制日志"
+                  title="复制记录"
                 >
                   {copiedLogs ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                   <span>{copiedLogs ? '已复制' : '复制'}</span>
@@ -481,10 +483,10 @@ export const Apps: React.FC = () => {
               {logsLoading ? (
                 <div className="text-slate-400 flex items-center space-x-2">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>正在获取最新日志...</span>
+                  <span>正在读取最新记录</span>
                 </div>
               ) : (
-                logs || '暂无日志输出'
+                logs || "还没有运行记录"
               )}
             </div>
           </div>

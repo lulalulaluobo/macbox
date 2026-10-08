@@ -39,15 +39,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     e.preventDefault();
     const setupMode = setupRequired === true;
     if (!username.trim() || !password) {
-      setError('请输入用户名和登录密码');
+      setError("请填写账号和密码");
       return;
     }
     if (setupMode && Array.from(password).length < 8) {
-      setError('管理员密码至少需要 8 个字符，请设置更难猜的密码');
+      setError("密码至少8个字符，请避免常见密码");
       return;
     }
     if (setupMode && password !== confirmPassword) {
-      setError('两次输入的管理员密码不一致');
+      setError("两次输入的密码不一致");
       return;
     }
 
@@ -61,7 +61,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       const res = await api.login(username.trim(), password, rememberMe);
 		onLoginSuccess(res.user, res.warning);
     } catch (err: any) {
-      setError(err.message || '登录失败，请检查用户名或密码');
+      setError(err.message || "登录失败，请检查账号和密码");
     } finally {
       setLoading(false);
     }
@@ -71,7 +71,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    if (!window.confirm('恢复会覆盖当前配置和账号，但不会覆盖 /data 数据文件。确定继续吗？')) return;
+    if (!window.confirm("将替换当前账号和设置。\n数据文件保持不变。\n是否恢复备份？")) return;
     setRestoring(true);
     setRestoreMessage(null);
     try {
@@ -79,7 +79,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setRestoreMessage(result.message);
       window.setTimeout(() => window.location.reload(), 1200);
     } catch (err: any) {
-      setRestoreMessage(err.message || '恢复备份失败');
+      setRestoreMessage(err.message || "未能恢复备份，请检查文件");
     } finally {
       setRestoring(false);
     }
@@ -97,18 +97,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       <div className="absolute right-4 top-4 z-20 sm:right-8 sm:top-8">
         <button
           onClick={toggleTheme}
-          title={isDark ? '切换到日间模式' : '切换到夜间模式'}
+          title={isDark ? "浅色外观" : "深色外观"}
           className="flex min-h-10 items-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-3.5 text-xs font-bold text-slate-700 shadow-sm backdrop-blur-md transition hover:bg-white dark:border-slate-700/80 dark:bg-slate-800/90 dark:text-slate-300"
         >
           {isDark ? (
             <>
               <Sun className="w-3.5 h-3.5 text-amber-400" />
-              <span>日间模式</span>
+              <span>浅色外观</span>
             </>
           ) : (
             <>
               <Moon className="w-3.5 h-3.5 text-sky-500" />
-              <span>夜间模式</span>
+              <span>深色外观</span>
             </>
           )}
         </button>
@@ -126,7 +126,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               🥕
             </div>
             <h1 className="text-2xl font-black tracking-tight text-[#24324a] dark:text-white">
-              MacBox 控制台
+              管理后台
             </h1>
           </div>
 
@@ -140,7 +140,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
           {setupRequired && (
             <div className="mb-6 rounded-xl border border-sky-200 bg-sky-50 p-3.5 text-xs text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-              首次使用请现场创建管理员账号和密码。密码至少 8 个字符且不能使用常见弱密码，初始化只允许在运行 MacBox 的 Mac 本机完成。
+              首次使用请创建管理账号。<br />密码至少8个字符，避免常见密码。<br />请在运行MacBox的Mac上完成。
             </div>
           )}
 
@@ -148,7 +148,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                {setupRequired ? '管理员账号' : '账号名称'}
+                {setupRequired ? "管理账号" : '账号名称'}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -158,7 +158,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="请输入用户名"
+                  placeholder="输入账号名称"
                   className="min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-400 transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-800/60 dark:text-white"
                   autoFocus
                   required
@@ -168,7 +168,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                {setupRequired ? '设置管理员密码' : '登录密码'}
+                {setupRequired ? "登录密码" : '登录密码'}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -178,7 +178,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="请输入密码"
+                  placeholder="输入登录密码"
                   className="min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pl-10 pr-10 text-sm text-slate-900 placeholder-slate-400 transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-800/60 dark:text-white"
                   required
                 />
@@ -195,7 +195,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             {setupRequired && (
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                  确认管理员密码
+                  确认密码
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -205,7 +205,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     type={showPassword ? 'text' : 'password'}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="请再次输入密码"
+                    placeholder="再次输入密码"
                     className="min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-400 transition focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20 dark:border-slate-700 dark:bg-slate-800/60 dark:text-white"
                     required
                   />
@@ -221,7 +221,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   onChange={(e) => setRememberMe(e.target.checked)}
                   className="rounded border-slate-300 dark:border-slate-700 text-sky-500 focus:ring-sky-400"
                 />
-                <span>保持登录状态</span>
+                <span>保持登录</span>
               </label>
             </div>
 
@@ -231,10 +231,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               className="mt-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#ee8b2b] text-sm font-bold text-white shadow-md shadow-[#ee8b2b]/25 transition hover:bg-[#d97706] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? (
-                <span>{setupRequired ? '正在初始化…' : '正在验证登录…'}</span>
+                <span>{setupRequired ? "设置中" : "登录中"}</span>
               ) : (
                 <>
-                  <span>{setupRequired ? '初始化并进入控制台' : '进入管理控制台'}</span>
+                  <span>{setupRequired ? "开始使用" : "登录"}</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -246,10 +246,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <div className="flex items-start gap-3">
                 <ArchiveRestore className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-300" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-bold text-emerald-900 dark:text-emerald-200">已有 MacBox 配置？直接恢复</div>
-                  <p className="mt-1 text-xs leading-5 text-emerald-800/80 dark:text-emerald-300/80">如果这是重装后的 MacBox，可以上传之前下载的配置备份，不必重新创建管理员账号。首次恢复仅允许在运行 MacBox 的 Mac 本机执行。</p>
+                  <div className="text-sm font-bold text-emerald-900 dark:text-emerald-200">恢复备份</div>
+                  <p className="mt-1 text-xs leading-5 text-emerald-800/80 dark:text-emerald-300/80">重装后可恢复原账号和设置。<br />首次恢复请在运行Mac上完成。</p>
                   <input ref={restoreInputRef} type="file" accept=".macbox-backup,.zip,application/zip" onChange={(event) => void handleRestoreBackup(event)} className="hidden" />
-                  <button type="button" onClick={() => restoreInputRef.current?.click()} disabled={restoring} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-xl bg-emerald-500 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-50"><Upload className="h-3.5 w-3.5" />{restoring ? '正在恢复…' : '选择备份文件'}</button>
+                  <button type="button" onClick={() => restoreInputRef.current?.click()} disabled={restoring} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-xl bg-emerald-500 px-4 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-50"><Upload className="h-3.5 w-3.5" />{restoring ? "恢复中" : "选择备份"}</button>
                   {restoreMessage && <div className="mt-2 break-words text-xs font-semibold text-emerald-800 dark:text-emerald-200">{restoreMessage}</div>}
                 </div>
               </div>

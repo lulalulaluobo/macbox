@@ -312,7 +312,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       {isDragging && !activeCloudMount && (
         <div className="fixed inset-0 z-50 bg-sky-500/20 backdrop-blur-sm border-4 border-dashed border-sky-400 flex flex-col items-center justify-center pointer-events-none">
           <Upload className="w-16 h-16 text-sky-400 animate-bounce mb-3" />
-          <p className="text-xl font-bold text-white">松开鼠标将文件上传到当前目录</p>
+          <p className="text-xl font-bold text-white">松开文件，上传到当前文件夹</p>
           <p className="text-sm text-sky-200 mt-1 font-mono">{currentPath}</p>
         </div>
       )}
@@ -385,9 +385,9 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         {/* Action Toolbar */}
         {viewingFavorites ? (
           <section className="flex min-h-14 shrink-0 items-center gap-3 rounded-[22px] border border-slate-200/80 bg-white px-3 dark:border-slate-800 dark:bg-slate-900/80">
-            <button type="button" onClick={() => setViewingFavorites(false)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" aria-label="返回文件列表"><ArrowLeft className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setViewingFavorites(false)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300" aria-label="返回列表"><ArrowLeft className="h-4 w-4" /></button>
             <Star className="h-5 w-5 shrink-0 fill-amber-400 text-amber-400" />
-            <div className="min-w-0 flex-1"><h2 className="text-sm font-bold text-slate-900 dark:text-white">收藏的文件夹</h2><p className="text-[11px] text-slate-400">{favoriteItems.length} 个文件夹</p></div>
+            <div className="min-w-0 flex-1"><h2 className="text-sm font-bold text-slate-900 dark:text-white">收藏夹</h2><p className="text-[11px] text-slate-400">{favoriteItems.length} 个文件夹</p></div>
           </section>
         ) : <FileToolbar
           currentPath={currentPath}
@@ -574,7 +574,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
             setCloudMounts((current) => [...current.filter((item) => item.id !== mount.id), mount]);
             setShowCloudMountModal(false);
             setActiveCloudMountId(mount.id);
-            setAlertMsg({ type: 'success', text: '夸克云盘已挂载' });
+            setAlertMsg({ type: 'success', text: "已接入" });
           },
         } : undefined}
         archive={{

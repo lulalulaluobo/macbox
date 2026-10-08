@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -361,83 +360,6 @@ func (c *Client) GetComposeYaml(ctx context.Context, name string) (string, error
 	return "", err
 }
 
-func (c *Client) registerPublishedPorts(content string, out io.Writer) (bool, error) {
-	ports, err := PublishedHostPorts(content)
-	if err != nil {
-		return false, fmt.Errorf("解析 Compose 端口失败: %w", err)
-	}
-	if len(ports) == 0 {
-		return false, nil
-	}
-
-	changed, err := c.vmMgr.AddForwardedPortsChanged(ports...)
-	if err != nil {
-		return false, err
-	}
-	if changed {
-		fmt.Fprintf(out, "🔌 检测到并登记局域网端口: %v\n", ports)
-	}
-	// A previous operation may have persisted forwarding entries while the
-	// running VM still uses an older Lima configuration. Apply that pending
-	// configuration on the next Compose start/deploy too.
-	return changed || c.vmMgr.IsConfigDirty(), nil
-}
-
-func (c *Client) restartForPublishedPorts(ctx context.Context, changed bool, out io.Writer) error {
-	if !changed {
-		return nil
-	}
-	if strings.TrimSpace(c.projectRoot) == "" {
-		return fmt.Errorf("无法启用局域网端口：缺少项目配置目录")
-	}
-
-	fmt.Fprintln(out, "🔄 检测到新端口，正在重启虚拟机以启用局域网访问...")
-	if err := c.vmMgr.RestartForPortForwarding(ctx, c.projectRoot); err != nil {
-		return fmt.Errorf("启用局域网端口失败: %w", err)
-	}
-	fmt.Fprintln(out, "✅ 新端口已绑定到局域网地址")
-	return nil
-}
-
-// restoreComposeAfterPortRestart waits for Docker after Lima has restarted and
-// then reapplies the project. A Compose file is not required to define a
-// restart policy, so relying on the daemon restart can leave an otherwise
-// successful first deployment stopped. It also prevents the UI from observing
-// the short post-restart SSH/Docker gap as a failed project start.
-func (c *Client) restoreComposeAfterPortRestart(ctx context.Context, changed bool, composePath string, out io.Writer) error {
-	if !changed {
-		return nil
-	}
-	if err := c.restartForPublishedPorts(ctx, true, out); err != nil {
-		return err
-	}
-
-	fmt.Fprintln(out, "⏳ 正在等待 Docker 恢复并重新确认项目状态...")
-	var lastOutput string
-	for attempt := 0; attempt < 30; attempt++ {
-		probeOutput, err := c.vmMgr.Exec(ctx, "docker", "info", "--format", "{{.ServerVersion}}")
-		if err == nil {
-			if err := c.vmMgr.ExecStream(ctx, out, "docker", "compose", "-f", composePath, "up", "-d", "--remove-orphans"); err != nil {
-				return fmt.Errorf("虚拟机重启后恢复 Compose 项目失败: %w", err)
-			}
-			fmt.Fprintln(out, "✅ 虚拟机重启后 Compose 项目已恢复")
-			return nil
-		}
-		lastOutput = strings.TrimSpace(probeOutput)
-		timer := time.NewTimer(500 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	if lastOutput != "" {
-		return fmt.Errorf("虚拟机重启后 Docker 未及时就绪: %s", lastOutput)
-	}
-	return fmt.Errorf("虚拟机重启后 Docker 未及时就绪")
-}
-
 func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent string, out io.Writer) error {
 	name = strings.TrimSpace(name)
 	if !validProjectName.MatchString(name) {
@@ -487,16 +409,6 @@ func (c *Client) DeployCompose(ctx context.Context, name string, yamlContent str
 		return err
 	}
 
-	portsChanged, err := c.registerPublishedPorts(yamlContent, out)
-	if err != nil {
-		fmt.Fprintf(out, "⚠️ 项目已启动，但登记局域网端口失败: %v\n", err)
-		return err
-	}
-	if err := c.restoreComposeAfterPortRestart(ctx, portsChanged, composePath, out); err != nil {
-		fmt.Fprintf(out, "❌ 项目已启动，但局域网端口尚未生效: %v\n", err)
-		return err
-	}
-
 	fmt.Fprintf(out, "✅ Docker Compose 项目 [%s] 部署完成并已启动！\n", name)
 	return nil
 }
@@ -533,32 +445,9 @@ func (c *Client) ComposeAction(ctx context.Context, name string, action string, 
 		return fmt.Errorf("不支持的项目动作: %s", action)
 	}
 
-	var portsChanged bool
-	if action == "start" || action == "restart" {
-		yamlContent, readErr := c.vmMgr.Exec(ctx, "cat", filePath)
-		if readErr != nil {
-			return fmt.Errorf("读取 Compose 配置失败: %w", readErr)
-		}
-		if _, parseErr := PublishedHostPorts(yamlContent); parseErr != nil {
-			return fmt.Errorf("解析 Compose 端口失败: %w", parseErr)
-		}
-		// Registration is intentionally done before the action. If the action
-		// succeeds, the VM can be restarted immediately; if it fails, the
-		// saved forwarding entry is harmless and will be usable on the next
-		// start.
-		portsChanged, err = c.registerPublishedPorts(yamlContent, out)
-		if err != nil {
-			return err
-		}
-	}
-
 	commandArgs := append([]string{"docker", "compose", "-f", filePath}, composeArgs...)
 	if err := c.vmMgr.ExecStream(ctx, out, commandArgs...); err != nil {
 		fmt.Fprintf(out, "❌ 操作失败: %v\n", err)
-		return err
-	}
-	if err := c.restoreComposeAfterPortRestart(ctx, portsChanged, filePath, out); err != nil {
-		fmt.Fprintf(out, "❌ 项目操作已完成，但局域网端口尚未生效: %v\n", err)
 		return err
 	}
 	fmt.Fprintf(out, "✅ 操作 [%s] 成功完成\n", action)

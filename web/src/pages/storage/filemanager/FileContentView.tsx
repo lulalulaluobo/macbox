@@ -114,21 +114,21 @@ export const FileContentView: React.FC<FileContentViewProps> = ({
         />
       ) : viewingFavorites ? (
         favoritesLoading ? (
-          <div className="flex flex-col items-center justify-center space-y-3 py-24 text-slate-400"><div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" /><p className="text-xs">正在读取收藏…</p></div>
+          <div className="flex flex-col items-center justify-center space-y-3 py-24 text-slate-400"><div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" /><p className="text-xs">读取中</p></div>
         ) : favoriteItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center space-y-3 py-24 text-center text-slate-400"><Star className="h-12 w-12" /><p className="text-sm font-semibold text-slate-700 dark:text-slate-300">还没有收藏文件夹</p><p className="text-xs">只能在文件夹的三点菜单中添加收藏</p></div>
+          <div className="flex flex-col items-center justify-center space-y-3 py-24 text-center text-slate-400"><Star className="h-12 w-12" /><p className="text-sm font-semibold text-slate-700 dark:text-slate-300">还没有收藏文件夹</p><p className="text-xs">在文件夹的“…”菜单中添加收藏</p></div>
         ) : viewMode === 'grid' ? (
           <FileGridView {...fileViewProps} files={favoriteItems} selectionMode={false} />
         ) : (
           <FileListView {...fileViewProps} files={favoriteItems} selectionMode={false} />
         )
       ) : loading ? (
-        <div className="flex flex-col items-center justify-center space-y-3 py-24 text-slate-400"><div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" /><p className="text-xs">加载文件列表中...</p></div>
+        <div className="flex flex-col items-center justify-center space-y-3 py-24 text-slate-400"><div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" /><p className="text-xs">读取中</p></div>
       ) : filteredFiles.length === 0 ? (
         <div className="flex flex-col items-center justify-center space-y-4 py-24 text-slate-400">
           <div className="rounded-2xl bg-slate-100 p-4 text-slate-400 dark:bg-slate-800/50 dark:text-slate-500"><Folder className="h-12 w-12 stroke-[1.5]" /></div>
-          <div className="text-center"><p className="text-sm font-semibold text-slate-700 dark:text-slate-300">当前目录为空</p><p className="mt-1 text-xs text-slate-400 dark:text-slate-500">可点击上方上传或新建文件夹</p></div>
-          <button type="button" onClick={onUploadEmpty} className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-semibold text-white shadow-md shadow-sky-500/20 transition hover:bg-sky-600">立即上传文件</button>
+          <div className="text-center"><p className="text-sm font-semibold text-slate-700 dark:text-slate-300">这个文件夹是空的</p><p className="mt-1 text-xs text-slate-400 dark:text-slate-500">可以上传文件或新建文件夹</p></div>
+          <button type="button" onClick={onUploadEmpty} className="rounded-xl bg-sky-500 px-4 py-2 text-xs font-semibold text-white shadow-md shadow-sky-500/20 transition hover:bg-sky-600">上传文件</button>
         </div>
       ) : viewMode === 'grid' ? (
         <FileGridView {...fileViewProps} files={filteredFiles} selectionMode={selectionMode} />
@@ -136,9 +136,9 @@ export const FileContentView: React.FC<FileContentViewProps> = ({
         <FileListView {...fileViewProps} files={filteredFiles} selectionMode={selectionMode} />
       )}
       {!viewingTrash && !viewingFavorites && hasMoreFiles && !loading && (
-        <button type="button" disabled={loadingMore} onClick={onLoadMore} className="mx-auto mt-3 flex min-h-10 items-center justify-center rounded-xl bg-slate-100 px-5 text-xs font-semibold text-slate-600 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-300">{loadingMore ? '正在加载…' : '加载更多'}</button>
+        <button type="button" disabled={loadingMore} onClick={onLoadMore} className="mx-auto mt-3 flex min-h-10 items-center justify-center rounded-xl bg-slate-100 px-5 text-xs font-semibold text-slate-600 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-300">{loadingMore ? "加载中" : "显示更多"}</button>
       )}
-      <span className="sr-only">当前目录：{currentPath}</span>
+      <span className="sr-only">当前目录{currentPath}</span>
     </div>
   );
 };

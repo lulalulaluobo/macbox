@@ -42,7 +42,7 @@ export const useStorageDriveOptions = ({
   const driveOptions: StorageDriveOption[] = [
     {
       id: primaryDisk?.identifier || 'primary',
-      defaultName: '硬盘 1',
+      defaultName: "主存储",
       path: '/data',
       detail: {
         kind: '主存储',
@@ -59,10 +59,10 @@ export const useStorageDriveOptions = ({
       const matchedMount = localMounts.find((mount) => mount.enabled && toGuestPath(mount.guestTarget) === drive.path);
       return {
         id: drive.id,
-        defaultName: matchedMount?.name || `硬盘 ${index + 2}`,
+        defaultName: matchedMount?.name || `磁盘：${index + 2}`,
         path: drive.path,
         detail: {
-          kind: matchedDisk ? '扩展存储' : matchedMount ? '本机目录直通' : '已发现目录',
+          kind: matchedDisk ? '扩展存储' : matchedMount ? "本机文件" : "已找到",
           source: matchedDisk?.name ?? matchedMount?.hostPath,
           total: matchedDisk?.totalSizeString,
           used: matchedDisk?.usedSpaceString,

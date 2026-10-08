@@ -16,7 +16,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({ visible, selecte
   const actions = [
     { label: '移动', icon: Scissors, onClick: onCut },
     { label: '复制', icon: Copy, onClick: onCopy },
-    { label: '下载 ZIP', icon: Download, onClick: onDownload },
+    { label: "打包下载", icon: Download, onClick: onDownload },
     { label: '删除', icon: Trash2, onClick: onDelete, danger: true },
   ];
 

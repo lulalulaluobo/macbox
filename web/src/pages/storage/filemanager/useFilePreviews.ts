@@ -67,7 +67,7 @@ export const useFilePreviews = ({
         const result = await api.readFile(item.path);
         setTextPreview({ item, content: result.content || '' });
       } catch (err: any) {
-        onError(`读取文本失败: ${err.message}`);
+        onError(`读取文本失败，原因：${err.message}`);
       }
     } else {
       const link = document.createElement('a');
@@ -84,11 +84,11 @@ export const useFilePreviews = ({
     setSavingText(true);
     try {
       await api.writeFile(textPreview.item.path, textPreview.content);
-      onSuccess('文件保存成功');
+      onSuccess("文件已保存");
       setTextPreview(null);
       onReload();
     } catch (err: any) {
-      onError(`保存失败: ${err.message}`);
+      onError(`保存失败，原因：${err.message}`);
     } finally {
       setSavingText(false);
     }

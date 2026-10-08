@@ -59,7 +59,7 @@ export function useLocalMountSettings({
       onRestartRequired();
       onAlert({ type: 'success', text: res.message });
     } catch (err: any) {
-      onAlert({ type: 'error', text: `操作失败: ${err.message}` });
+      onAlert({ type: 'error', text: `操作失败，原因：${err.message}` });
     }
   };
 
@@ -72,12 +72,13 @@ export function useLocalMountSettings({
       onAlert({ type: 'success', text: res.message });
       onRefreshOverview?.();
     } catch (err: any) {
-      onAlert({ type: 'error', text: `切换权限失败: ${err.message}` });
+      onAlert({ type: 'error', text: `切换权限失败，原因：${err.message}` });
     }
   };
 
   const handleDeleteMount = async (id: string, name: string) => {
-    if (!confirm(`确定要移除「${name}」的直通挂载配置吗？（您的 Mac 本地原始文件不会受到任何影响）`)) return;
+    if (!confirm(`移除“${name}”的文件接入？
+Mac上的原始文件保持不变。`)) return;
     try {
       const res = await api.deleteLocalMount(id);
       setLocalMounts(res.mounts);
@@ -86,7 +87,7 @@ export function useLocalMountSettings({
       onRestartRequired();
       onAlert({ type: 'success', text: res.message });
     } catch (err: any) {
-      onAlert({ type: 'error', text: `删除失败: ${err.message}` });
+      onAlert({ type: 'error', text: `删除失败，原因：${err.message}` });
     }
   };
 
@@ -96,7 +97,7 @@ export function useLocalMountSettings({
     setNewMountName(candidate.name);
     if (candidate.category === 'media' || candidate.category === 'downloads' || candidate.category === 'pictures' || candidate.category === 'custom') {
       setNewMountCategory(candidate.category);
-      const targetName = candidate.name || '本机直通';
+      const targetName = candidate.name || "本机文件";
       setNewMountGuestTarget(
         candidate.category === 'media'
           ? `media/${targetName}`
@@ -112,7 +113,7 @@ export function useLocalMountSettings({
   const handleAddCustomMount = async (e: FormEvent) => {
     e.preventDefault();
     if (!newMountPath.trim()) {
-      onAlert({ type: 'error', text: '请先填写一个 Mac 本地文件夹路径。' });
+      onAlert({ type: 'error', text: "请先填写本机文件夹的完整位置" });
       return;
     }
     setMountsLoading(true);
@@ -130,7 +131,7 @@ export function useLocalMountSettings({
       }
 
       const res = await api.addLocalMount({
-        name: newMountName.trim() || newMountPath.split('/').pop() || '本地直通',
+        name: newMountName.trim() || newMountPath.split('/').pop() || "本机文件",
         hostPath: newMountPath.trim(),
         guestTarget: targetSub,
         category: newMountCategory,
@@ -145,9 +146,9 @@ export function useLocalMountSettings({
       setNewMountName('');
       setNewMountGuestTarget('media/MacMedia');
       onRestartRequired();
-      onAlert({ type: 'success', text: '已保存本机目录直通配置。请重启 VM 后再访问；重启期间 Docker 服务会短暂离线并自动恢复。' });
+      onAlert({ type: 'success', text: "设置已保存，重启系统后生效。\n重启期间应用会暂时离线。\n完成后会自动恢复运行。" });
     } catch (err: any) {
-      onAlert({ type: 'error', text: `添加直通失败: ${err.message}` });
+      onAlert({ type: 'error', text: `添加文件接入失败，原因：${err.message}` });
     } finally {
       setMountsLoading(false);
     }
@@ -165,7 +166,7 @@ export function useLocalMountSettings({
         if (leaf) setNewMountName(leaf);
       }
     } catch (err: any) {
-      onAlert({ type: 'error', text: `选择本机目录失败: ${err.message}` });
+      onAlert({ type: 'error', text: `选择本机目录失败，原因：${err.message}` });
     } finally {
       setPickingHostDirectory(false);
     }

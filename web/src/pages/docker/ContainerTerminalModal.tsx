@@ -157,7 +157,7 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
                 <span className="truncate font-mono text-sm font-bold text-white">{containerName}</span>
                 <span className={`h-2 w-2 shrink-0 rounded-full ${connected ? 'bg-emerald-400' : 'bg-rose-500'}`} />
               </div>
-              <p className="truncate text-[10px] text-slate-400">{connected ? '终端已连接' : '连接已断开'}</p>
+              <p className="truncate text-[10px] text-slate-400">{connected ? "已连接" : "已断开"}</p>
             </div>
           </div>
 
@@ -165,7 +165,7 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
             <button
               onClick={() => xtermInstance.current?.clear()}
               className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 hover:text-white"
-              title="清屏"
+              title="清空显示"
             >
               <RefreshCw className="w-4 h-4" />
             </button>
@@ -173,7 +173,7 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
             <button
               onClick={() => setFullscreen(!fullscreen)}
               className="hidden h-10 w-10 items-center justify-center rounded-xl bg-slate-800 text-slate-300 transition hover:bg-slate-700 hover:text-white sm:flex"
-              title={fullscreen ? '还原窗口' : '全屏模式'}
+              title={fullscreen ? "退出全屏" : "全屏显示"}
             >
               {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
@@ -181,7 +181,7 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
             <button
               onClick={onClose}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800 text-slate-300 transition hover:bg-rose-950/60 hover:text-rose-400"
-              title="关闭终端"
+              title="结束会话"
             >
               <X className="w-4 h-4" />
             </button>
@@ -198,7 +198,7 @@ export const ContainerTerminalModal: React.FC<ContainerTerminalModalProps> = ({
         <TerminalInputBar
           onSendRaw={handleSendRaw}
           disabled={!connected}
-          placeholder="输入命令…"
+          placeholder="输入命令"
         />
       </div>
     </div>

@@ -41,14 +41,15 @@ export const useFileUpload = ({
     try {
       for (let i = 0; i < fileArray.length; i += 1) {
         const file = fileArray[i];
-        setUploadProgress(`正在上传 (${i + 1}/${fileArray.length}): ${file.name}`);
+        setUploadProgress(`上传中：${i + 1}/${fileArray.length}
+${file.name}`);
         await api.uploadFile(file, targetPath);
         successCount += 1;
       }
-      onSuccess(`成功上传 ${successCount} 个文件`);
+      onSuccess(`已上传${successCount}个文件`);
       onReload();
     } catch (error: unknown) {
-      onError(`上传过程中断: ${getErrorMessage(error)}`);
+      onError(`上传过程中断，原因：${getErrorMessage(error)}`);
     } finally {
       setUploading(false);
       setUploadProgress('');

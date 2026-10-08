@@ -89,10 +89,10 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
                       ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30'
                       : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25'
                   }`}
-                  title="切换静音/开启声音"
+                  title="声音开关"
                 >
                   {videoMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-                  <span>{videoMuted ? '点击开启声音' : `音量 ${Math.round(videoVolume * 100)}%`}</span>
+                  <span>{videoMuted ? "打开声音" : `音量：${Math.round(videoVolume * 100)}`}</span>
                 </button>
                 <a
                   href={api.getFileDownloadUrl(videoPreview.path)}
@@ -121,7 +121,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
                 onVolumeChange={onVolumeChange}
                 className="w-full h-auto max-h-[70dvh] rounded-xl"
               >
-                您的浏览器不支持流式播放此视频。
+                浏览器无法播放，请下载后查看
               </video>
             </div>
           </div>
@@ -145,7 +145,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
               <button
                 onClick={onCloseImage}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white"
-                aria-label="关闭图片预览"
+                aria-label="关闭预览"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -192,8 +192,8 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
               {imageError && (
                 <div className="flex flex-col items-center gap-2 text-center text-slate-400">
                   <Image className="h-10 w-10" />
-                  <p className="text-sm font-semibold">图片加载失败</p>
-                  <p className="text-xs text-slate-500">可尝试下载后查看</p>
+                  <p className="text-sm font-semibold">图片未能加载</p>
+                  <p className="text-xs text-slate-500">可以下载后查看</p>
                 </div>
               )}
               <img
@@ -240,7 +240,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
                 autoPlay
                 className="w-full mt-2"
               >
-                您的浏览器不支持在线音频播放。
+                浏览器无法播放，请下载后收听
               </audio>
             </div>
           </div>
@@ -264,7 +264,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
               <button
                 onClick={onCloseText}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white"
-                aria-label="关闭文档"
+                aria-label="关闭预览"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -278,7 +278,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             />
 
             <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 px-3 py-3 dark:border-slate-800 sm:px-4">
-              <span className="mr-auto hidden text-xs text-slate-500 sm:block">保存后直接写入 MacBox</span>
+              <span className="mr-auto hidden text-xs text-slate-500 sm:block">保存后会修改原文件</span>
               <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
                 <button
                   onClick={onCloseText}
@@ -292,7 +292,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
                   className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-sky-600 px-4 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>{savingText ? '保存中...' : '保存更改'}</span>
+                  <span>{savingText ? "保存中" : "保存"}</span>
                 </button>
               </div>
             </footer>

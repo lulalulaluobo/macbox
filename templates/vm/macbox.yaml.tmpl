@@ -14,6 +14,9 @@ user:
   passwordlessSudo: true
 
 vmType: "vz"
+networks:
+- lima: macbox-bridged
+  interface: lima0
 vmOpts:
   vz:
     rosetta:
@@ -246,14 +249,7 @@ probes:
 portForwards:
 - guestSocket: "/var/run/docker.sock"
   hostSocket: "{{ "{{.Dir}}" }}/sock/docker.sock"
-{{ $hostBindAddress := .HostBindAddress }}
-{{range .ForwardedPorts}}
-- guestPort: {{.}}
-  hostIP: "{{$hostBindAddress}}"
-  hostPort: {{.}}
-{{end}}
-{{if ne .SambaPort 0}}
-- guestPort: 445
-  hostIP: "{{.HostBindAddress}}"
-  hostPort: {{.SambaPort}}
-{{end}}
+# Services use the bridged guest IP. Keep only the Docker management socket;
+# suppress Lima's implicit localhost TCP forwarding rules.
+- guestPortRange: [1, 65535]
+  ignore: true

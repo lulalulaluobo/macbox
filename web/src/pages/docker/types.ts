@@ -1,6 +1,7 @@
 export interface ComposeTemplate {
   id: string;
   name: string;
+  brand: string;
   category: string;
   description: string;
   defaultProjectName: string;
@@ -10,9 +11,10 @@ export interface ComposeTemplate {
 export const PRESET_COMPOSE_TEMPLATES: ComposeTemplate[] = [
   {
     id: 'nginx',
-    name: 'Nginx Web / 反代服务',
+    brand: 'Nginx',
+    name: "网站服务",
     category: '网络工具',
-    description: '全球最流行的轻量、高性能 HTTP 服务器与反向代理服务。',
+    description: "运行网站并转发访问请求",
     defaultProjectName: 'my-nginx',
     yaml: `version: '3.8'
 services:
@@ -28,9 +30,10 @@ services:
   },
   {
     id: 'redis',
-    name: 'Redis 极速缓存数据库',
+    brand: 'Redis',
+    name: "内存缓存",
     category: '数据库',
-    description: '开源的高性能内存键值存储，常用于缓存、会话管理与消息队列。',
+    description: "用内存暂存数据，加快读取",
     defaultProjectName: 'my-redis',
     yaml: `version: '3.8'
 services:
@@ -47,9 +50,10 @@ services:
   },
   {
     id: 'postgres',
-    name: 'PostgreSQL 关系型数据库',
+    brand: 'PostgreSQL',
+    name: "数据存储",
     category: '数据库',
-    description: '功能强大、高度可扩展的开源对象关系型数据库系统。',
+    description: "保存和查询应用数据",
     defaultProjectName: 'my-postgres',
     yaml: `version: '3.8'
 services:
@@ -69,9 +73,10 @@ services:
   },
   {
     id: 'uptime-kuma',
-    name: 'Uptime Kuma 状态监控',
+    brand: 'Uptime Kuma',
+    name: "服务监控",
     category: '运维监控',
-    description: '开箱即用、界面极度优雅的服务健康心跳与在线率监控面板。',
+    description: "查看服务是否正常，异常时提醒",
     defaultProjectName: 'my-uptime-kuma',
     yaml: `version: '3.8'
 services:
@@ -87,9 +92,10 @@ services:
   },
   {
     id: 'vaultwarden',
-    name: 'Vaultwarden 密码管理器',
+    brand: 'Vaultwarden',
+    name: "密码管理",
     category: '安全工具',
-    description: '用 Rust 编写的高性能轻量 Bitwarden 兼容服务端，全端密码同步。',
+    description: "保存密码并在多个设备间同步",
     defaultProjectName: 'my-vaultwarden',
     yaml: `version: '3.8'
 services:
@@ -107,9 +113,10 @@ services:
   },
   {
     id: 'qbittorrent',
-    name: 'qBittorrent 高速下载器',
+    brand: 'qBittorrent',
+    name: "种子下载",
     category: '下载工具',
-    description: '经典 BT/PT 种子下载利器，配备功能完善的 Web 远程控制界面。',
+    description: "在网页中管理种子下载",
     defaultProjectName: 'my-qbittorrent',
     yaml: `version: '3.8'
 services:
@@ -134,20 +141,20 @@ services:
 ];
 
 export const POPULAR_IMAGES = [
-  { name: 'nginx:alpine', desc: '轻量高性能 Web 服务' },
-  { name: 'redis:alpine', desc: '极速内存缓存' },
-  { name: 'postgres:16-alpine', desc: '工业级 SQL 数据库' },
-  { name: 'mysql:8.0', desc: '经典关系数据库' },
-  { name: 'node:20-alpine', desc: 'Node.js 运行时' },
-  { name: 'python:3.11-slim', desc: 'Python 运行环境' },
-  { name: 'alpine:latest', desc: '仅 5MB 的微型 Linux 镜像' },
-  { name: 'ubuntu:22.04', desc: '标准 Ubuntu 基础镜像' },
+  { name: 'nginx:alpine', desc: "运行网站" },
+  { name: 'redis:alpine', desc: "用内存暂存数据" },
+  { name: 'postgres:16-alpine', desc: "保存和查询应用数据" },
+  { name: 'mysql:8.0', desc: "保存和查询应用数据" },
+  { name: 'node:20-alpine', desc: "运行网页服务和脚本" },
+  { name: 'python:3.11-slim', desc: "运行脚本和程序" },
+  { name: 'alpine:latest', desc: "体积较小的基础系统包" },
+  { name: 'ubuntu:22.04', desc: "常用的基础系统包" },
 ];
 
 export const REGISTRY_PRESETS = [
-  { name: 'Docker Hub 官方源', url: 'https://registry-1.docker.io' },
-  { name: '网易云镜像加速', url: 'https://hub-mirror.c.163.com' },
-  { name: '中科大镜像加速', url: 'https://docker.mirrors.ustc.edu.cn' },
-  { name: '上海交大镜像源', url: 'https://docker.m.daocloud.io' },
-  { name: '腾讯云公有镜像源', url: 'https://mirror.ccs.tencentyun.com' },
+  { name: "官方来源", url: 'https://registry-1.docker.io' },
+  { name: "网易", url: 'https://hub-mirror.c.163.com' },
+  { name: "中科大", url: 'https://docker.mirrors.ustc.edu.cn' },
+  { name: "上海交大", url: 'https://docker.m.daocloud.io' },
+  { name: "腾讯云", url: 'https://mirror.ccs.tencentyun.com' },
 ];

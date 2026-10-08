@@ -1,7 +1,7 @@
 import React from 'react';
-import { ArchiveRestore, Crown, Palette, RadioTower, Shield, Terminal, UserCheck, Users } from 'lucide-react';
+import { ArchiveRestore, Crown, LayoutDashboard, Network, Palette, RefreshCw, Shield, Terminal, UserCheck, Users } from 'lucide-react';
 
-export type SettingsSubTab = 'console_users' | 'users' | 'rootpwd' | 'ssh' | 'terminal' | 'service_publish' | 'appearance' | 'backup';
+export type SettingsSubTab = 'overview' | 'network' | 'updates' | 'console_users' | 'users' | 'rootpwd' | 'ssh' | 'terminal' | 'appearance' | 'backup';
 
 interface SettingsNavigationProps {
   activeSubTab: SettingsSubTab;
@@ -9,31 +9,27 @@ interface SettingsNavigationProps {
   isAdmin?: boolean;
 }
 
-const tabs: Array<{ id: SettingsSubTab; label: string; icon: React.ComponentType<{ className?: string }>; iconClassName?: string }> = [
-  { id: 'console_users', label: 'MacBox 用户', icon: UserCheck },
-  { id: 'users', label: '系统用户', icon: Users, iconClassName: 'text-slate-500' },
-  { id: 'rootpwd', label: 'Root 密码', icon: Crown, iconClassName: 'text-amber-500' },
-  { id: 'ssh', label: 'SSH', icon: Shield, iconClassName: 'text-teal-500' },
-  { id: 'terminal', label: '终端', icon: Terminal, iconClassName: 'text-sky-500' },
-  { id: 'service_publish', label: '服务发布', icon: RadioTower, iconClassName: 'text-cyan-500' },
+export const settingsTabs: Array<{ id: SettingsSubTab; label: string; icon: React.ComponentType<{ className?: string }>; iconClassName?: string; advanced?: boolean; admin?: boolean }> = [
+  { id: 'overview', label: '常用设置', icon: LayoutDashboard },
+  { id: 'network', label: "网络连接", icon: Network },
+  { id: 'updates', label: '版本更新', icon: RefreshCw },
+  { id: 'console_users', label: "后台账号", icon: UserCheck },
+  { id: 'users', label: "系统账号", icon: Users, advanced: true, admin: true },
+  { id: 'rootpwd', label: "管理密码", icon: Crown, advanced: true, admin: true },
+  { id: 'ssh', label: "远程登录", icon: Shield, advanced: true, admin: true },
+  { id: 'terminal', label: "命令窗口", icon: Terminal, advanced: true, admin: true },
   { id: 'appearance', label: '外观', icon: Palette, iconClassName: 'text-indigo-500' },
-  { id: 'backup', label: '备份', icon: ArchiveRestore, iconClassName: 'text-emerald-500' },
+  { id: 'backup', label: "备份恢复", icon: ArchiveRestore, admin: true },
 ];
 
 export const SettingsNavigation: React.FC<SettingsNavigationProps> = ({ activeSubTab, onChange, isAdmin = false }) => (
-  <div className={`grid grid-cols-3 gap-1 rounded-2xl border border-slate-200 bg-slate-100/80 p-1.5 text-xs font-semibold dark:border-slate-800 dark:bg-slate-900/70 ${isAdmin ? 'sm:grid-cols-8' : 'sm:grid-cols-6'}`}>
-    {tabs.filter(({ id }) => (id !== 'backup' && id !== 'service_publish') || isAdmin).map(({ id, label, icon: Icon, iconClassName }) => (
-      <button
-        key={id}
-        onClick={() => onChange(id)}
-        className={`flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 py-2 transition ${activeSubTab === id
-          ? 'bg-sky-500 text-white shadow-md shadow-sky-500/25 font-semibold'
-          : 'text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-white'
-        }`}
-      >
-        <Icon className={`h-4 w-4 ${iconClassName || ''}`} />
-        <span>{label}</span>
-      </button>
-    ))}
-  </div>
+  <nav aria-label="设置分类" className="space-y-3">
+    {[false, true].map(advanced => {
+      const tabs = settingsTabs.filter(tab => !!tab.advanced === advanced && (!tab.admin || isAdmin));
+      return !!tabs.length && <div key={String(advanced)} className="flex flex-wrap items-center gap-2">
+        {advanced && <span className="text-xs text-slate-400 mr-1">高级设置</span>}
+        {tabs.map(({ id, label, icon: Icon }) => <button key={id} aria-current={activeSubTab === id ? 'page' : undefined} onClick={() => onChange(id)} className={`min-h-10 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium transition ${activeSubTab === id ? 'bg-sky-500 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-800'}`}><Icon className="h-4 w-4"/>{label}</button>)}
+      </div>;
+    })}
+  </nav>
 );

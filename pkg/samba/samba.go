@@ -169,11 +169,8 @@ func (m *Manager) GetStatus(ctx context.Context, hostIP string) (*SambaStatus, e
 	}
 	shareName := cfgSnapshot.Samba.ShareName
 	user := cfgSnapshot.Samba.User
-	port := cfgSnapshot.Samba.Port
+	port := 445
 	shares := append([]config.SMBShare(nil), cfgSnapshot.Samba.Shares...)
-	if port <= 0 {
-		port = 4455
-	}
 
 	defaultAddr := fmt.Sprintf("smb://%s/MacBox", hostIP)
 	if port != 445 {
@@ -193,6 +190,12 @@ func (m *Manager) GetStatus(ctx context.Context, hostIP string) (*SambaStatus, e
 		})
 	}
 
+	if hostIP == "" {
+		defaultAddr = ""
+		for i := range shareItems {
+			shareItems[i].Address = ""
+		}
+	}
 	return &SambaStatus{
 		ShareName:        shareName,
 		Path:             "/data",
@@ -201,7 +204,7 @@ func (m *Manager) GetStatus(ctx context.Context, hostIP string) (*SambaStatus, e
 		Port:             port,
 		Status:           statusStr,
 		HasConflict:      false,
-		Message:          "Samba 服务已配置并映射至局域网",
+		Message:          "通过虚拟机桥接 IP 访问 Samba 文件共享",
 		Shares:           shareItems,
 		AvailableTargets: m.GetAvailableTargets(ctx),
 	}, nil

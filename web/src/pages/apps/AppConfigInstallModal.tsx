@@ -26,6 +26,8 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
 }) => {
   const [configData, setConfigData] = useState<AppMetadata | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(false);
+  const [serviceIP, setServiceIP] = useState('');
+
 
   // Customization States
   const [portsMap, setPortsMap] = useState<Record<string, number>>({});
@@ -44,6 +46,8 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
     useYamlMode,
     customYaml,
   });
+
+  useEffect(() => { api.getVMNetwork().then(network => setServiceIP(network.ip)).catch(() => setServiceIP('')); }, [app, installStatus]);
 
   useEffect(() => {
     const requestId = ++configRequestIdRef.current;
@@ -120,9 +124,9 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
   };
 
   const currentMeta = configData || app;
-  const hostIP = window.location.hostname;
+  const hostIP = serviceIP;
   const mainHostPort = portsMap[currentMeta.port?.toString()] || currentMeta.port;
-  const webAccessUrl = `http://${hostIP}:${mainHostPort}`;
+  const webAccessUrl = hostIP ? `http://${hostIP}:${mainHostPort}` : '';
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/55 sm:items-center sm:p-4">
@@ -140,14 +144,14 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                   v{currentMeta.version}
                 </span>
               </div>
-              <p className="mt-0.5 truncate text-[11px] text-slate-500">安装配置 · {currentMeta.category}</p>
+              <p className="mt-0.5 truncate text-[11px] text-slate-500">安装设置 {currentMeta.category}</p>
             </div>
           </div>
 
           <button
             onClick={installStatus === 'done' ? handleFinishedClose : onClose}
             disabled={installStatus === 'installing'}
-            aria-label="关闭配置"
+            aria-label="关闭"
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-900 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"
           >
             <X className="w-4 h-4" />
@@ -159,7 +163,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
           {loadingConfig ? (
             <div className="h-64 flex items-center justify-center space-x-2 text-slate-400 text-xs">
               <RefreshCw className="w-4 h-4 animate-spin text-sky-500" />
-              <span>正在读取配置模板...</span>
+              <span>读取中</span>
             </div>
           ) : installStatus === 'idle' ? (
             <AppInstallForm
@@ -187,10 +191,10 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-white px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 dark:border-slate-800 dark:bg-slate-950/70 sm:justify-between sm:px-6 sm:py-4">
           <span className="hidden text-xs text-slate-500 sm:inline">
             {installStatus === 'idle'
-              ? `预计 WebUI 端口: ${mainHostPort || '默认'}`
+              ? `网页端口：${mainHostPort || '默认'}`
               : installStatus === 'installing'
-              ? '部署中，正在下载镜像...'
-              : '操作完成'}
+              ? "下载中"
+              : "操作已完成"}
           </span>
 
           <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:gap-3">
@@ -207,7 +211,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                   className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 px-4 py-2 text-xs font-bold text-white transition hover:from-sky-500 hover:to-indigo-500 sm:flex-none sm:px-5"
                 >
                   <Download className="w-4 h-4" />
-                  <span>确认安装</span>
+                  <span>安装应用</span>
                 </button>
               </>
             )}
@@ -218,7 +222,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                 className="px-5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 text-xs font-semibold cursor-not-allowed flex items-center space-x-2"
               >
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>正在安装部署中...</span>
+                <span>安装中</span>
               </button>
             )}
 
@@ -228,15 +232,17 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                   onClick={handleFinishedClose}
                   className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 text-xs font-semibold transition"
                 >
-                  关闭并刷新应用列表
+                  完成
                 </button>
                 <a
-                  href={webAccessUrl}
+                  href={webAccessUrl || undefined}
+                  aria-disabled={!webAccessUrl}
+                  onClick={event => { if (!webAccessUrl) event.preventDefault(); }}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center space-x-1.5 px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md shadow-emerald-500/25 transition"
                 >
-                  <span>打开应用</span>
+                  <span>{webAccessUrl ? '打开应用' : "等待地址"}</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               </>
@@ -254,7 +260,7 @@ export const AppConfigInstallModal: React.FC<AppConfigInstallModalProps> = ({
                   onClick={startDeploy}
                   className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold transition"
                 >
-                  重试安装
+                  重新安装
                 </button>
               </>
             )}

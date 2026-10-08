@@ -96,26 +96,26 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
             <Folder className="h-4 w-4 text-sky-400" />
           </div>
           <div className="min-w-0">
-            <span className="block truncate whitespace-nowrap text-[15px] font-bold text-white">虚拟机文件系统</span>
+            <span className="block truncate whitespace-nowrap text-[15px] font-bold text-white">系统文件</span>
           </div>
           </div>
           <button
             onClick={onClose}
-            aria-label="返回终端"
+            aria-label="返回命令"
             className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-slate-800 px-2.5 text-[11px] font-semibold text-slate-200 transition hover:bg-slate-700 lg:hidden"
-            title="返回终端"
+            title="返回命令"
           >
             <PanelLeftClose className="h-4 w-4" />
-            <span>终端</span>
+            <span>命令窗口</span>
           </button>
         </div>
         <div className="grid w-full shrink-0 grid-cols-4 gap-2 lg:flex lg:w-auto lg:items-center lg:gap-1.5">
           <button
             onClick={onOpenMkdir}
             disabled={isVMSystemPath}
-            aria-label="新建文件夹"
+            aria-label="新文件夹"
             className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-slate-800 text-[11px] font-medium text-slate-300 transition hover:bg-slate-700 disabled:pointer-events-none disabled:opacity-40 lg:h-9 lg:w-9"
-            title="新建文件夹"
+            title="新文件夹"
           >
             <FolderPlus className="h-4 w-4" />
             <span className="lg:hidden">新建</span>
@@ -126,7 +126,7 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
             title="上传文件"
           >
             <Upload className="h-4 w-4" />
-            <span className="lg:hidden">上传</span>
+            <span className="lg:hidden">上传文件</span>
             <input
               type="file"
               multiple
@@ -152,8 +152,8 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
               ? 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/30'
               : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
-            title={showHiddenFiles ? '隐藏以 . 开头的文件和文件夹' : '显示隐藏文件和文件夹'}
-            aria-label={showHiddenFiles ? '隐藏隐藏文件和文件夹' : '显示隐藏文件和文件夹'}
+            title={showHiddenFiles ? "隐藏文件" : "显示隐藏"}
+            aria-label={showHiddenFiles ? "隐藏文件" : "显示隐藏"}
           >
             {showHiddenFiles ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
             <span className="lg:hidden">{showHiddenFiles ? '隐藏' : '显示'}</span>
@@ -200,7 +200,7 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
           onClick={onNavigateUp}
           disabled={currentPath === '/'}
           className="shrink-0 rounded p-1 text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:opacity-30"
-          title="返回上一级"
+          title="上一级"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
         </button>
@@ -243,11 +243,11 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
         onUpload(event.dataTransfer.files);
       }}
     >
-      {uploading && <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-center text-xs text-sky-300">文件上传写入中...</div>}
+      {uploading && <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-center text-xs text-sky-300">正在上传文件</div>}
       {filesLoading && files.length === 0 ? (
-        <div className="p-8 text-center text-xs text-slate-500">正在扫描文件系统...</div>
+        <div className="p-8 text-center text-xs text-slate-500">正在读取文件列表</div>
       ) : visibleFiles.length === 0 ? (
-        <div className="p-8 text-center text-xs text-slate-500">该目录下暂无文件</div>
+        <div className="p-8 text-center text-xs text-slate-500">这个文件夹是空的</div>
       ) : (
         visibleFiles.map((file) => (
           <div key={file.path} className="group flex items-center justify-between rounded-xl p-2 text-xs transition hover:bg-slate-800/60">
@@ -268,20 +268,20 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
                   }}
                   className={`rounded p-1 transition ${favoritePaths.includes(file.path) ? 'text-amber-300 hover:bg-amber-400/20 hover:text-amber-200' : 'text-slate-500 hover:bg-amber-400/20 hover:text-amber-300'}`}
                   title={favoritePaths.includes(file.path) ? '取消收藏' : '收藏目录'}
-                  aria-label={favoritePaths.includes(file.path) ? `取消收藏 ${file.name}` : `收藏 ${file.name}`}
+                  aria-label={favoritePaths.includes(file.path) ? `取消收藏：${file.name}` : `收藏：${file.name}`}
                 >
                   <Star className={`h-3.5 w-3.5 ${favoritePaths.includes(file.path) ? 'fill-amber-300' : ''}`} />
                 </button>
               )}
               <div className="flex items-center space-x-1 opacity-70 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                 {file.isDir ? (
-                  <button onClick={() => onOpenInTerminal(file.path)} className="rounded p-1 text-slate-400 transition hover:bg-sky-500/20 hover:text-sky-300" title="在终端中打开 (cd)">
+                  <button onClick={() => onOpenInTerminal(file.path)} className="rounded p-1 text-slate-400 transition hover:bg-sky-500/20 hover:text-sky-300" title="切换目录">
                     <TerminalIcon className="h-3.5 w-3.5" />
                   </button>
                 ) : (
                   <>
                     {!isVMSystemPath && (
-                      <button onClick={() => onViewFile(file)} className="rounded p-1 text-slate-400 transition hover:bg-sky-500/20 hover:text-sky-300" title="查看/编辑文件">
+                      <button onClick={() => onViewFile(file)} className="rounded p-1 text-slate-400 transition hover:bg-sky-500/20 hover:text-sky-300" title="编辑文件">
                         <Edit3 className="h-3.5 w-3.5" />
                       </button>
                     )}
@@ -290,7 +290,7 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
                     </a>
                   </>
                 )}
-                <button onClick={() => onCopyPath(file.path)} className="rounded p-1 text-slate-400 transition hover:bg-slate-700 hover:text-white" title="复制绝对路径">
+                <button onClick={() => onCopyPath(file.path)} className="rounded p-1 text-slate-400 transition hover:bg-slate-700 hover:text-white" title="复制位置">
                   {copiedPath === file.path ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
                 </button>
                 {!isVMSystemPath && (
@@ -306,10 +306,10 @@ export const TerminalFileBrowser: React.FC<TerminalFileBrowserProps> = ({
     </div>
 
     <div className="flex items-center justify-between border-t border-slate-800/80 bg-slate-950/40 p-3 text-[11px] text-slate-400">
-      <span>当前路径: <code className="font-mono text-sky-400">{currentPath}</code></span>
+      <span>当前目录 <code className="font-mono text-sky-400">{currentPath}</code></span>
       <button onClick={() => onOpenInTerminal(currentPath)} className="flex items-center space-x-1 rounded bg-slate-800 px-2 py-1 font-medium text-slate-300 transition hover:bg-sky-600 hover:text-white">
         <CornerDownRight className="h-3 w-3" />
-        <span>终端切入此目录</span>
+        <span>切换目录</span>
       </button>
     </div>
   </div>

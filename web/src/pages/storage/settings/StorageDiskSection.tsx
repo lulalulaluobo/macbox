@@ -38,7 +38,7 @@ export const StorageDiskSection: React.FC<StorageDiskSectionProps> = ({
 
       {disks.length === 0 && !loading ? (
         <div className="p-8 rounded-2xl bg-white dark:bg-slate-900/40 border border-dashed border-slate-200 dark:border-slate-800 text-center text-slate-500 dark:text-slate-400 text-sm shadow-xs">
-          未扫描到外接磁盘设备，请检查 USB/雷电外接硬盘连接。
+          未找到外接磁盘，请检查连接
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -69,7 +69,7 @@ export const StorageDiskSection: React.FC<StorageDiskSectionProps> = ({
                   <div className={`h-full ${isSelected ? 'bg-sky-500' : disk.isSecondary ? 'bg-violet-500' : 'bg-slate-400'}`} style={{ width: `${Math.min(disk.usedPercent || 0, 100)}%` }} />
                 </div>
                 <div className="mt-2 flex items-center justify-between gap-3">
-                  <span className="truncate text-[11px] text-slate-500">{disk.usedPercent > 0 ? `${disk.usedPercent.toFixed(0)}% 已用` : disk.mounted ? '已就绪' : '未挂载'}</span>
+                  <span className="truncate text-[11px] text-slate-500">{disk.usedPercent > 0 ? `已用${disk.usedPercent.toFixed(0)}%` : disk.mounted ? '已就绪' : "未接入"}</span>
                   {isSelected ? (
                     isExternalActive ? <button type="button" onClick={onRequestUnbind} className="min-h-9 shrink-0 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200" title={dataPath}>解除主盘</button> : <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">主盘</span>
                   ) : disk.isSecondary ? (
@@ -77,7 +77,7 @@ export const StorageDiskSection: React.FC<StorageDiskSectionProps> = ({
                   ) : (
                     <div className="flex shrink-0 items-center gap-2">
                       {disk.mountPoint && <button type="button" onClick={() => onOpenBindModal(disk)} className="min-h-9 rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">设为主盘</button>}
-                      <button type="button" onClick={() => onOpenSecondaryModal(disk)} className="min-h-9 rounded-xl bg-violet-500 px-3 text-xs font-semibold text-white">设为扩展</button>
+                      <button type="button" onClick={() => onOpenSecondaryModal(disk)} className="min-h-9 rounded-xl bg-violet-500 px-3 text-xs font-semibold text-white">添加扩展</button>
                     </div>
                   )}
                 </div>
@@ -91,13 +91,13 @@ export const StorageDiskSection: React.FC<StorageDiskSectionProps> = ({
     {visible && managedDisks.length > 0 && (
       <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900/40">
         <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between px-4">
-          <span className="text-sm font-bold text-slate-900 dark:text-white">虚拟磁盘</span>
-          <span className="text-xs text-slate-500">{managedDisks.length} 个 · 查看详情</span>
+          <span className="text-sm font-bold text-slate-900 dark:text-white">系统磁盘</span>
+          <span className="text-xs text-slate-500">{managedDisks.length} 个，查看详情</span>
         </summary>
         <div className="space-y-3 border-t border-slate-100 p-4 dark:border-slate-800">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-bold text-slate-900 dark:text-white">Lima 托管 ext4 虚拟磁盘 (Managed Disks)</h4>
-            <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">动态精简分配 (Thin Provisioning)</span>
+            <h4 className="text-sm font-bold text-slate-900 dark:text-white">系统磁盘</h4>
+            <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">按需占用</span>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {managedDisks.map((disk) => (
@@ -107,10 +107,10 @@ export const StorageDiskSection: React.FC<StorageDiskSectionProps> = ({
                     <span className="font-bold text-slate-900 dark:text-slate-200">{disk.name}</span>
                     <span className="rounded bg-sky-500/20 px-1.5 py-0.5 font-mono text-[10px] text-sky-700 dark:text-sky-300">ext4</span>
                   </div>
-                  <span className="font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">实际占用: {disk.actualSizeString || '24 MB'}</span>
+                  <span className="font-mono text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">占用空间 {disk.actualSizeString || '24 MB'}</span>
                 </div>
                 <div className="space-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  <p>虚拟上限: <strong className="font-mono text-slate-800 dark:text-slate-300">{(disk.size / 1024 / 1024 / 1024).toFixed(0)} GiB</strong> · 格式: <span className="font-mono text-slate-700 dark:text-slate-300">{disk.format}</span></p>
+                  <p>容量上限 <strong className="font-mono text-slate-800 dark:text-slate-300">{(disk.size / 1024 / 1024 / 1024).toFixed(0)} GiB</strong> 磁盘格式 <span className="font-mono text-slate-700 dark:text-slate-300">{disk.format}</span></p>
                 </div>
               </div>
             ))}

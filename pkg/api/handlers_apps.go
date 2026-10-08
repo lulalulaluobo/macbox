@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/lulalulaluobo/macbox/pkg/apps"
 	"github.com/lulalulaluobo/macbox/pkg/docker"
-	"github.com/lulalulaluobo/macbox/pkg/system"
 	"log"
 	"net/http"
 	"strconv"
@@ -15,12 +14,7 @@ import (
 
 // Apps Handlers
 func (s *Server) handleAppsList(w http.ResponseWriter, r *http.Request) {
-	sysStats, _ := system.GetSystemStats()
-	primaryIP := "localhost"
-	if sysStats != nil && sysStats.PrimaryIP != "" {
-		primaryIP = sysStats.PrimaryIP
-	}
-
+	primaryIP := s.vmMgr.NetworkStatus(r.Context()).IP
 	appList, err := s.appMgr.ListApps(r.Context(), primaryIP)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

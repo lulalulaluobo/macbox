@@ -47,7 +47,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
     event.preventDefault();
     const name = destinationName.trim();
     if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
-      setError('请输入当前目录下的有效名称');
+      setError("请填写有效的文件或文件夹名称");
       return;
     }
     setSubmitting(true);
@@ -55,7 +55,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
     try {
       await onConfirm(operation, 'zip', destination, conflictPolicy);
     } catch (err: any) {
-      setError(err.message || '操作失败');
+      setError(err.message || "操作未完成，请查看提示");
     } finally {
       setSubmitting(false);
     }
@@ -83,7 +83,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
           <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1 dark:bg-slate-800">
             {(['compress', 'extract'] as ArchiveOperation[]).map((value) => (
               <button key={value} type="button" onClick={() => { setOperation(value); setDestinationName(value === 'compress' ? `${archiveBaseName(item.name)}.zip` : archiveBaseName(item.name)); setError(null); }} className={`rounded-xl px-3 py-2.5 text-xs font-bold transition ${operation === value ? 'bg-white text-violet-700 shadow-sm dark:bg-slate-700 dark:text-violet-300' : 'text-slate-500 dark:text-slate-400'}`}>
-                {value === 'compress' ? '创建压缩包' : '解压到文件夹'}
+                {value === 'compress' ? "创建压缩" : "解压文件"}
               </button>
             ))}
           </div>
@@ -93,11 +93,11 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
             <div className="flex items-center gap-2 rounded-xl border border-violet-300 bg-violet-50 px-3 py-2.5 text-xs font-bold uppercase text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-300">
               <Check className="h-3.5 w-3.5" />ZIP
             </div>
-            <p className="mt-2 text-[11px] text-slate-400">使用系统内置 ZIP，无需额外安装压缩工具。</p>
+            <p className="mt-2 text-[11px] text-slate-400">直接压缩为ZIP，无需另装工具</p>
           </div>
 
           <div>
-            <label htmlFor="archive-destination" className="mb-2 block text-xs font-bold text-slate-600 dark:text-slate-300">{operation === 'compress' ? '压缩包名称' : '解压目录名称'}</label>
+            <label htmlFor="archive-destination" className="mb-2 block text-xs font-bold text-slate-600 dark:text-slate-300">{operation === 'compress' ? "文件名称" : "目录名称"}</label>
             <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 px-3 dark:border-slate-700 dark:bg-slate-950/60">
               <span className="shrink-0 text-xs text-slate-400">{currentPath}/</span>
               <input id="archive-destination" value={destinationName} onChange={(event) => setDestinationName(event.target.value)} className="min-w-0 flex-1 bg-transparent px-1 py-3 text-sm text-slate-900 outline-none dark:text-white" autoFocus />
@@ -105,9 +105,9 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
           </div>
 
           <div>
-            <p className="mb-2 text-xs font-bold text-slate-600 dark:text-slate-300">遇到同名项目时</p>
+            <p className="mb-2 text-xs font-bold text-slate-600 dark:text-slate-300">同名处理</p>
             <div className="grid grid-cols-2 gap-2">
-              {([['rename', '保留两份'], ['overwrite', '覆盖'], ['skip', '跳过'], ['error', '停止']] as Array<[ConflictPolicy, string]>).map(([value, label]) => <button key={value} type="button" onClick={() => setConflictPolicy(value)} className={`rounded-xl border px-3 py-2 text-xs font-bold ${conflictPolicy === value ? 'border-violet-400 bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}>{conflictPolicy === value ? '✓ ' : ''}{label}</button>)}
+              {([['rename', '保留两份'], ['overwrite', "替换"], ['skip', '跳过'], ['error', '停止']] as Array<[ConflictPolicy, string]>).map(([value, label]) => <button key={value} type="button" onClick={() => setConflictPolicy(value)} className={`rounded-xl border px-3 py-2 text-xs font-bold ${conflictPolicy === value ? 'border-violet-400 bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300' : 'border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300'}`}>{conflictPolicy === value ? '✓ ' : ''}{label}</button>)}
             </div>
           </div>
 
@@ -116,7 +116,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({ item, currentPath, d
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
             <button type="button" onClick={onClose} className="rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">取消</button>
             <button type="submit" disabled={submitting} className="flex items-center gap-1.5 rounded-xl bg-violet-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-600/20 disabled:opacity-50">
-              <Archive className="h-3.5 w-3.5" />{submitting ? '处理中…' : '确认执行'}
+              <Archive className="h-3.5 w-3.5" />{submitting ? "处理中" : "开始"}
             </button>
           </div>
         </form>

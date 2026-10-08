@@ -40,18 +40,18 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
     const trimmedName = name.trim();
     const trimmedURL = url.trim();
     if (!trimmedName) {
-      setError('请填写服务名称');
+      setError("请填写入口名称");
       return;
     }
     if (!trimmedURL) {
-      setError('请填写内网网址，容器至少需要映射一个 Web 端口');
+      setError("请填写网址，并确认应用已开放网页端口");
       return;
     }
     try {
       const parsed = new URL(trimmedURL);
       if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('protocol');
     } catch {
-      setError('内网网址格式不正确，例如 http://192.168.2.123:8080');
+      setError("访问网址格式不正确，请填写完整网址");
       return;
     }
 
@@ -69,7 +69,7 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
         enabled: true,
       });
     } catch (err: any) {
-      setError(err?.message || '保存服务导航失败');
+      setError(err?.message || "入口未能保存，请重试");
       setSaving(false);
     }
   };
@@ -83,8 +83,8 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
               <Plus className="h-5 w-5" />
             </span>
             <div className="min-w-0">
-              <h3 className="text-base font-black text-slate-900 dark:text-white">添加到主页服务导航</h3>
-              <p className="mt-1 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">容器：{container.name || container.id}</p>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">添加入口</h3>
+              <p className="mt-1 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">应用名称{container.name || container.id}</p>
             </div>
           </div>
           <button type="button" onClick={onClose} disabled={saving} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label="关闭">
@@ -94,7 +94,7 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <label className="block space-y-1.5">
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">服务名称</span>
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">入口名称</span>
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -105,7 +105,7 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
           </label>
 
           <label className="block space-y-1.5">
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">内网网址</span>
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">访问网址</span>
             <div className="relative">
               <ExternalLink className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-sky-500" />
               <input
@@ -118,13 +118,13 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
               />
             </div>
             <p className="mt-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-              {ports.length > 0 ? '已根据容器映射端口自动生成；多个端口可在下方切换。' : '该容器没有映射端口，请手动填写可访问的内网网址。'}
+              {ports.length > 0 ? "已填入应用网址，多个端口可切换" : "未找到应用网址，请手动填写"}
             </p>
           </label>
 
           {ports.length > 1 && (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/60">
-              <div className="mb-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">选择 Web 端口（可自动回填网址）</div>
+              <div className="mb-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">选择端口</div>
               <div className="flex flex-wrap gap-1.5">
                 {ports.map((port) => (
                   <button
@@ -144,7 +144,7 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
           )}
 
           <div>
-            <div className="mb-2 text-xs font-bold text-slate-700 dark:text-slate-200">选择图标（20 个预设）</div>
+            <div className="mb-2 text-xs font-bold text-slate-700 dark:text-slate-200">选择图标</div>
             <div className="grid grid-cols-5 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-950/60">
               {DOCKER_SERVICE_ICON_OPTIONS.map((option) => {
                 const selected = icon === option.value;
@@ -176,7 +176,7 @@ export const DockerServiceShortcutModal: React.FC<DockerServiceShortcutModalProp
             <button type="button" onClick={onClose} disabled={saving} className="min-h-11 rounded-xl bg-slate-100 px-4 text-xs font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">取消</button>
             <button type="submit" disabled={saving} className="flex min-h-11 items-center gap-1.5 rounded-xl bg-sky-500 px-5 text-xs font-bold text-white shadow-sm transition hover:bg-sky-600 disabled:opacity-50">
               <Check className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
-              <span>{saving ? '保存中…' : initialShortcut ? '保存修改' : '确认添加'}</span>
+              <span>{saving ? "保存中" : initialShortcut ? "保存" : "添加"}</span>
             </button>
           </div>
         </form>

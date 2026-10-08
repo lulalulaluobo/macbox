@@ -39,9 +39,9 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
         <Terminal className="w-6 h-6" />
       </div>
       <div>
-        <h3 className="text-lg font-bold text-white">终端默认登录身份设置</h3>
+        <h3 className="text-lg font-bold text-white">默认账号</h3>
         <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-          设置每次打开 Web 终端页面、或一键进入容器终端时，系统默认直接以 <strong>Root 身份</strong> 还是 <strong>普通用户身份</strong> 进入交互式 Shell。
+          选择打开命令窗口时使用的账号 <strong>最高权限</strong> 或 <strong>普通账号</strong> 用于执行命令
         </p>
       </div>
     </div>
@@ -66,13 +66,13 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
         </div>
         <div className="flex-1 space-y-1">
           <div className="flex items-center space-x-2">
-            <span className="font-bold text-sm text-white">以 Root 身份直接登录 (高权限推荐)</span>
+            <span className="font-bold text-sm text-white">最高权限</span>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono font-semibold">
               sudo -i / #
             </span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
-            进入终端时自动提升为 root 超级管理员，具有整个系统的全部读写权限，免去频繁输入 sudo 的麻烦，适合系统深度维护与安装软件包。
+            可直接修改系统和安装软件。<br />错误命令也会直接生效。
           </p>
         </div>
       </div>
@@ -96,13 +96,13 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
         </div>
         <div className="flex-1 space-y-1">
           <div className="flex items-center space-x-2">
-            <span className="font-bold text-sm text-white">以普通用户身份登录 (安全防误删)</span>
+            <span className="font-bold text-sm text-white">普通账号</span>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-mono font-semibold">
-              Lima 管理用户 / $
+              运行系统的普通账号
             </span>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
-            默认以当前普通用户登录，防止命令敲错误删系统核心目录，需要执行特权命令时可自行手动输入 sudo。
+            以普通账号登录，管理时需提升权限
           </p>
         </div>
       </div>
@@ -115,7 +115,7 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h4 className="text-sm font-bold text-white">AI CLI Skill 目录</h4>
+            <h4 className="text-sm font-bold text-white">助手技能</h4>
             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
               terminalSkills.status === 'ready'
                 ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
@@ -123,19 +123,19 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
                   ? 'border-rose-400/30 bg-rose-400/10 text-rose-300'
                   : 'border-slate-700 bg-slate-800 text-slate-400'
             }`}>
-              {terminalSkills.status === 'ready' ? '本机目录已就绪' : terminalSkills.status === 'disabled' ? '未启用' : terminalSkills.message}
+              {terminalSkills.status === 'ready' ? "已就绪" : terminalSkills.status === 'disabled' ? '未启用' : terminalSkills.message}
             </span>
           </div>
           <p className="mt-1 text-xs leading-relaxed text-slate-400">
-            将 Mac 本机的 Skill 目录以只读方式映射到 VM 的 <code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.agents/skills</code>、<code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.claude/skills</code> 和 <code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.codex/skills</code>，终端里的 Codex、Claude 等 AI CLI 可以直接调用。目录不会被 AI CLI 修改。
+            让命令助手读取Mac上的技能文件 <code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.agents/skills</code>、<code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.claude/skills</code> 和 <code className="rounded bg-slate-950/70 px-1 py-0.5 text-violet-300">.codex/skills</code>可供命令助手使用，不能写入原目录
           </p>
         </div>
       </div>
 
       <div className="mt-4 space-y-3">
         <div className="rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-[11px] leading-relaxed text-amber-200">
-          <div className="font-bold text-amber-100">安全提示：这是本机目录映射</div>
-          <div className="mt-1">只选择专门存放 Skill 的目录。不要选择用户主目录、.ssh、钥匙串、浏览器资料或任何包含密码、Token、私钥的目录；启用后该目录会以只读方式暴露给 VM 中的 AI CLI。</div>
+          <div className="font-bold text-amber-100">读取提醒</div>
+          <div className="mt-1">只选择专门存放技能的文件夹。<br />不要选择个人主目录或浏览器资料。<br />也不要选择钥匙串或.ssh目录。<br />不要接入含密码、令牌或私钥的目录。<br />启用后命令助手可以读取这些文件。</div>
           <label className="mt-2 flex cursor-pointer items-start gap-2 font-semibold text-amber-100">
             <input
               type="checkbox"
@@ -143,14 +143,14 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
               onChange={(event) => onSkillsRiskConfirmedChange(event.target.checked)}
               className="mt-0.5 rounded border-amber-300 bg-transparent text-amber-500 focus:ring-amber-400"
             />
-            <span>我确认所选目录仅包含可供 AI CLI 使用的 Skill 文件</span>
+            <span>我确认此目录只含可供助手使用的技能</span>
           </label>
         </div>
 
         <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-3 py-2.5">
           <div>
-            <div className="text-xs font-semibold text-slate-200">启用 Skill 映射</div>
-            <div className="mt-0.5 text-[11px] text-slate-500">下次启动或重启 VM 后挂载到终端</div>
+            <div className="text-xs font-semibold text-slate-200">接入技能</div>
+            <div className="mt-0.5 text-[11px] text-slate-500">下次启动或重启系统后生效</div>
           </div>
           <button
             type="button"
@@ -164,7 +164,7 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
         </div>
 
         <label className="block space-y-1.5">
-          <span className="text-xs font-semibold text-slate-300">Mac 本机 Skill 目录</span>
+          <span className="text-xs font-semibold text-slate-300">技能目录</span>
           <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 focus-within:border-violet-400">
             <FolderOpen className="h-4 w-4 shrink-0 text-violet-300" />
             <input
@@ -180,8 +180,8 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
         {terminalSkills.candidates.length > 0 && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-[11px] text-slate-500">
-              <span>服务器本机扫描到的候选目录</span>
-              <span>可用目录可直接选用</span>
+              <span>本机目录</span>
+              <span>选择一个已找到的目录</span>
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               {terminalSkills.candidates.map((candidate) => (
@@ -204,7 +204,7 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
                   </div>
                   <div className="mt-1 truncate font-mono text-[10px] text-slate-500" title={candidate.hostPath}>{candidate.hostPath}</div>
                   <div className={`mt-1 text-[10px] ${candidate.available ? 'text-emerald-300' : 'text-slate-600'}`}>
-                    {candidate.available ? `${candidate.skillCount} 个 Skill 目录` : candidate.reason}
+                    {candidate.available ? `${candidate.skillCount}个技能目录` : candidate.reason}
                   </div>
                 </button>
               ))}
@@ -214,15 +214,15 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
 
         <div className="flex flex-col gap-2 rounded-xl border border-slate-800/80 bg-slate-950/40 p-3 text-[11px] leading-relaxed text-slate-500 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div>VM 映射位置：<code className="text-slate-300">.agents/skills</code>、<code className="text-slate-300">.claude/skills</code>、<code className="text-slate-300">.codex/skills</code>（普通用户与 root 均已映射）</div>
-            <div className="mt-1">纯 Web 访问时，浏览器目录选择器只能读取手机/当前设备，不能代表运行 Mac；因此这里由 MacBox 在服务器本机自动扫描。</div>
+            <div>系统位置<code className="text-slate-300">.agents/skills</code>、<code className="text-slate-300">.claude/skills</code>、<code className="text-slate-300">.codex/skills</code>普通账号和最高权限账号都可使用</div>
+            <div className="mt-1">此处只查找运行MacBox的Mac。<br />其他设备的文件夹不能在此选择。</div>
           </div>
-          <span className="shrink-0 text-emerald-300">只读映射</span>
+          <span className="shrink-0 text-emerald-300">只能读取</span>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           {terminalSkills.requiresRestart ? (
-            <span className="text-[11px] font-semibold text-amber-300">配置已保存，请下次启动或重启虚拟机使映射生效</span>
+            <span className="text-[11px] font-semibold text-amber-300">设置已保存，启动或重启系统后生效</span>
           ) : <span />}
           <button
             type="button"
@@ -231,15 +231,15 @@ export const TerminalSettingsSection: React.FC<TerminalSettingsSectionProps> = (
             className="flex items-center gap-1.5 rounded-xl bg-violet-500 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-500/20 transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {skillsSaving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-            <span>保存 Skill 映射</span>
+            <span>保存设置</span>
           </button>
         </div>
       </div>
     </div>
 
     <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-      <span>当前默认配置: <strong className="font-mono text-white font-bold">{terminalSettings.defaultLoginUser === 'root' ? '👑 root 超级管理员' : '👤 普通用户'}</strong></span>
-      {termSaving && <span className="text-sky-400 flex items-center space-x-1"><RefreshCw className="w-3 h-3 animate-spin" /><span>保存中...</span></span>}
+      <span>默认账号 <strong className="font-mono text-white font-bold">{terminalSettings.defaultLoginUser === 'root' ? "最高权限" : "普通账号"}</strong></span>
+      {termSaving && <span className="text-sky-400 flex items-center space-x-1"><RefreshCw className="w-3 h-3 animate-spin" /><span>保存中</span></span>}
     </div>
   </div>
 );

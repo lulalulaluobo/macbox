@@ -62,7 +62,7 @@ export const FileSidebar: React.FC<FileSidebarProps> = ({
               <span className="flex-1">回收站</span><span className="text-[10px] text-slate-400">{trashCount} 项</span>
             </button>
 
-            {enabledMounts.length > 0 && <p className="px-3 pb-1 pt-3 text-[9px] font-black uppercase tracking-wider text-slate-400">本机目录直通</p>}
+            {enabledMounts.length > 0 && <p className="px-3 pb-1 pt-3 text-[9px] font-black uppercase tracking-wider text-slate-400">本机文件</p>}
             {enabledMounts.map((mount) => {
               const path = `/data/${mount.guestTarget}`;
               return (
@@ -82,7 +82,7 @@ export const FileSidebar: React.FC<FileSidebarProps> = ({
 
             <div className="mt-2 border-t border-slate-100 pt-2 dark:border-slate-800">
               <button type="button" onClick={onToggleHideSystemFiles} className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800">
-                <ShieldCheck className={`h-4 w-4 ${hideSystemFiles ? 'text-emerald-500' : 'text-amber-500'}`} /><span className="flex-1">系统目录</span><span className="text-[10px] text-slate-400">{hideSystemFiles ? '已隐藏' : '已显示'}</span>
+                <ShieldCheck className={`h-4 w-4 ${hideSystemFiles ? 'text-emerald-500' : 'text-amber-500'}`} /><span className="flex-1">系统文件</span><span className="text-[10px] text-slate-400">{hideSystemFiles ? '已隐藏' : '已显示'}</span>
               </button>
             </div>
           </div>

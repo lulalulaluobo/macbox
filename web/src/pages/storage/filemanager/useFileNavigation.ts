@@ -40,8 +40,8 @@ export const useFileNavigation = ({ initialPath, onError }: UseFileNavigationOpt
         if (discovered.length > 0) setDiscoveredDrivePaths(discovered);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : '未知错误';
-      onError(`读取文件夹失败: ${message}`);
+      const message = error instanceof Error ? error.message : "原因暂不明确，请重试";
+      onError(`读取文件夹失败，原因：${message}`);
     } finally {
       append ? setLoadingMore(false) : setLoading(false);
     }

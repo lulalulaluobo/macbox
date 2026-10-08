@@ -23,18 +23,18 @@ export const ServiceShortcutModal: React.FC<ServiceShortcutModalProps> = ({ init
     const trimmedURL = url.trim();
     const trimmedDescription = description.trim();
     if (!trimmedName) {
-      setError('请填写服务名称');
+      setError("请填写入口名称");
       return;
     }
     if (!trimmedURL) {
-      setError('请填写访问地址');
+      setError("请填写访问网址");
       return;
     }
     try {
       const parsed = new URL(trimmedURL);
       if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) throw new Error('protocol');
     } catch {
-      setError('访问地址格式不正确，例如 http://192.168.2.123:30141');
+      setError("访问网址格式不正确，请填写完整网址");
       return;
     }
 
@@ -51,7 +51,7 @@ export const ServiceShortcutModal: React.FC<ServiceShortcutModalProps> = ({ init
         enabled: true,
       });
     } catch (err: any) {
-      setError(err?.message || '保存服务导航失败');
+      setError(err?.message || "入口未能保存，请重试");
       setSaving(false);
     }
   };
@@ -63,8 +63,8 @@ export const ServiceShortcutModal: React.FC<ServiceShortcutModalProps> = ({ init
           <div className="flex min-w-0 items-center gap-3">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sky-500 dark:bg-sky-500/10 dark:text-sky-300"><Globe2 className="h-5 w-5" /></span>
             <div className="min-w-0">
-              <h3 id="service-shortcut-title" className="text-base font-black text-slate-900 dark:text-white">{initialShortcut ? '编辑服务导航' : '添加服务导航'}</h3>
-              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">手动服务只保存主页入口，不会创建或删除实际服务。</p>
+              <h3 id="service-shortcut-title" className="text-base font-black text-slate-900 dark:text-white">{initialShortcut ? "编辑入口" : "添加入口"}</h3>
+              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">只保存入口，实际服务不变</p>
             </div>
           </div>
           <button type="button" onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label="关闭"><X className="h-4 w-4" /></button>
@@ -72,22 +72,22 @@ export const ServiceShortcutModal: React.FC<ServiceShortcutModalProps> = ({ init
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <label className="block space-y-1.5">
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">服务名称</span>
-            <input value={name} onChange={(event) => setName(event.target.value)} className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-900 outline-none transition focus:border-sky-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="例如：Pi Web" autoFocus />
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">入口名称</span>
+            <input value={name} onChange={(event) => setName(event.target.value)} className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-900 outline-none transition focus:border-sky-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="例如：个人工作台" autoFocus />
           </label>
 
           <label className="block space-y-1.5">
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">访问地址</span>
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">访问网址</span>
             <div className="relative">
               <ExternalLink className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-sky-500" />
               <input value={url} onChange={(event) => setURL(event.target.value)} className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm font-mono text-slate-900 outline-none transition focus:border-sky-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="例如：http://192.168.2.123:30141" inputMode="url" />
             </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400">只支持 http:// 或 https:// 地址，点击后将在新标签页打开。</p>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400">网址开头只能为：<br />http:// 或 https://<br />点击后在新标签页打开。</p>
           </label>
 
           <label className="block space-y-1.5">
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">备注说明 <span className="font-normal text-slate-400">（可选）</span></span>
-            <input value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-900 outline-none transition focus:border-sky-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="例如：VM 内的个人工作台" />
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">备注 <span className="font-normal text-slate-400">选填</span></span>
+            <input value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-900 outline-none transition focus:border-sky-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white" placeholder="例如：个人工作台" />
           </label>
 
           <div>
@@ -110,7 +110,7 @@ export const ServiceShortcutModal: React.FC<ServiceShortcutModalProps> = ({ init
 
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
             <button type="button" onClick={onClose} disabled={saving} className="min-h-11 rounded-xl bg-slate-100 px-4 text-xs font-semibold text-slate-600 transition hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700">取消</button>
-            <button type="submit" disabled={saving} className="flex min-h-11 items-center gap-1.5 rounded-xl bg-sky-500 px-5 text-xs font-bold text-white shadow-sm transition hover:bg-sky-600 disabled:opacity-50"><Check className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} /><span>{saving ? '保存中…' : initialShortcut ? '保存修改' : '添加服务'}</span></button>
+            <button type="submit" disabled={saving} className="flex min-h-11 items-center gap-1.5 rounded-xl bg-sky-500 px-5 text-xs font-bold text-white shadow-sm transition hover:bg-sky-600 disabled:opacity-50"><Check className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} /><span>{saving ? "保存中" : initialShortcut ? "保存" : "添加入口"}</span></button>
           </div>
         </form>
       </div>

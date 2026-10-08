@@ -12,12 +12,12 @@ export const SettingsHeader: React.FC<SettingsHeaderProps> = ({ loading, onRefre
   <div className="flex items-center justify-between gap-3">
     <div className="min-w-0">
       <h2 className="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-2xl">设置</h2>
-      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">账户、安全与系统偏好</p>
+      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">管理运行、网络、更新和账号</p>
     </div>
 
     <button
       onClick={onRefresh}
-      aria-label="刷新设置状态"
+      aria-label="刷新状态"
       className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
     >
       <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />

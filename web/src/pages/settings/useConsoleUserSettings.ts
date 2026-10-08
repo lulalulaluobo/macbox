@@ -48,15 +48,15 @@ export function useConsoleUserSettings({
   const handleCreateConsoleUser = async (e: FormEvent) => {
     e.preventDefault();
     if (!newConsoleUsername.trim() || !newConsolePassword) {
-      onAlert({ type: 'error', text: '请填写用户名和登录密码' });
+      onAlert({ type: 'error', text: "请填写账号和密码" });
       return;
     }
     if (Array.from(newConsolePassword).length < 8) {
-      onAlert({ type: 'error', text: '密码长度至少需要 8 个字符' });
+      onAlert({ type: 'error', text: "密码至少8个字符" });
       return;
     }
     if (newConsolePassword !== newConsoleConfirmPassword) {
-      onAlert({ type: 'error', text: '两次输入的新密码不一致' });
+      onAlert({ type: 'error', text: "两次输入的密码不一致" });
       return;
     }
 
@@ -68,7 +68,7 @@ export function useConsoleUserSettings({
         password: newConsolePassword,
         role: newConsoleRole,
       });
-      onAlert({ type: 'success', text: `MacBox 控制台用户 [${newConsoleUsername}] 创建成功！` });
+      onAlert({ type: 'success', text: `后台账号“${newConsoleUsername}”已创建` });
       setShowAddConsoleModal(false);
       setNewConsoleUsername('');
       setNewConsoleDisplayName('');
@@ -77,7 +77,7 @@ export function useConsoleUserSettings({
       setNewConsoleRole('user');
       await loadConsoleUsers();
     } catch (err: any) {
-      onAlert({ type: 'error', text: `创建用户失败: ${err.message}` });
+      onAlert({ type: 'error', text: `创建用户失败，原因：${err.message}` });
     } finally {
       setConsoleActionLoading(false);
     }
@@ -109,7 +109,7 @@ export function useConsoleUserSettings({
       };
       if (editNewPassword.trim()) {
         if (Array.from(editNewPassword.trim()).length < 8) {
-          onAlert({ type: 'error', text: '重置密码长度至少需要 8 个字符' });
+          onAlert({ type: 'error', text: "新密码至少8个字符" });
           setConsoleActionLoading(false);
           return;
         }
@@ -117,14 +117,14 @@ export function useConsoleUserSettings({
       }
 
       const res = await api.updateConsoleUser(editingConsoleUser.id, payload);
-      onAlert({ type: 'success', text: `用户 [${editingConsoleUser.username}] 配置已成功更新！` });
+      onAlert({ type: 'success', text: `账号“${editingConsoleUser.username}”的设置已更新` });
       if (currentUser && currentUser.id === editingConsoleUser.id && onCurrentUserUpdated) {
         onCurrentUserUpdated(res.user);
       }
       setEditingConsoleUser(null);
       await loadConsoleUsers();
     } catch (err: any) {
-      onAlert({ type: 'error', text: `更新用户失败: ${err.message}` });
+      onAlert({ type: 'error', text: `更新用户失败，原因：${err.message}` });
     } finally {
       setConsoleActionLoading(false);
     }
@@ -135,11 +135,11 @@ export function useConsoleUserSettings({
     setConsoleActionLoading(true);
     try {
       await api.deleteConsoleUser(deletingConsoleUser.id);
-      onAlert({ type: 'success', text: `控制台用户 [${deletingConsoleUser.username}] 已成功删除！` });
+      onAlert({ type: 'success', text: `后台账号“${deletingConsoleUser.username}”已删除` });
       setDeletingConsoleUser(null);
       await loadConsoleUsers();
     } catch (err: any) {
-      onAlert({ type: 'error', text: `删除用户失败: ${err.message}` });
+      onAlert({ type: 'error', text: `删除用户失败，原因：${err.message}` });
     } finally {
       setConsoleActionLoading(false);
     }

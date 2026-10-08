@@ -43,7 +43,7 @@ export const useAppInstallStream = ({
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setInstallStatus('installing');
-    setInstallLogs(['🚀 正在连接 MacBox 应用引擎并提交定制参数...']);
+    setInstallLogs(["正在提交安装设置"]);
     setInstallError(null);
 
     const payload: InstallCustomConfig = {
@@ -62,7 +62,7 @@ export const useAppInstallStream = ({
       });
 
       if (!response.ok || !response.body) {
-        throw new Error(response.statusText || '请求失败');
+        throw new Error(response.statusText || "请求未完成，请重试");
       }
 
       const reader = response.body.getReader();
@@ -84,7 +84,7 @@ export const useAppInstallStream = ({
         } else if (trimmed === 'event: error') {
           streamFailed = true;
           setInstallStatus('error');
-          setInstallError('安装过程遇到错误，请查看控制台日志');
+          setInstallError("安装出错，请查看安装记录");
         }
       };
 
@@ -101,13 +101,13 @@ export const useAppInstallStream = ({
       processStreamLine(buffer);
 
       if (!streamCompleted && !streamFailed) {
-        setInstallError('部署连接已结束，但服务端没有返回完成确认；请保留日志并检查应用状态后重试');
+        setInstallError("连接已结束，安装结果暂未确认。\n请保留记录并检查应用状态。\n确认后再决定是否重试。");
         setInstallStatus('error');
       }
     } catch (error) {
       if (controller.signal.aborted) return;
-      const message = error instanceof Error ? error.message : '安装网络中断';
-      setInstallError(message || '安装网络中断');
+      const message = error instanceof Error ? error.message : "安装连接已断开";
+      setInstallError(message || "安装连接已断开");
       setInstallStatus('error');
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null;

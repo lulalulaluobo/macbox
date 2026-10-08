@@ -24,7 +24,7 @@ export const FileManagerAlerts: React.FC<FileManagerAlertsProps> = ({ alertMsg, 
     {!hideSystemFiles && (
       <div className="fixed left-1/2 top-20 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-amber-300 bg-white/95 px-4 py-2.5 text-xs text-amber-700 shadow-xl backdrop-blur dark:bg-slate-900/95 dark:text-amber-300">
         <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
-        <span>您已开启系统保护目录显示。请注意：<strong className="underline">appdata</strong> 包含各 Docker 容器的 SQLite 数据库与持久化卷，误删可能导致容器损坏！</span>
+        <span>已显示应用数据文件夹。<br />修改前请确认用途。<strong className="underline">appdata</strong> 这里保存应用数据库和长期数据。<br />误删可能导致应用无法使用。</span>
       </div>
     )}
   </>

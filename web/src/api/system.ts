@@ -1,7 +1,15 @@
-import type { SystemOverview, SystemDiagnostics, PowerStatus, ServiceStatus, VMConfigInfo, VMPrerequisites, BackgroundJob, SystemUser, SSHConfig, SSHKeyGenerationResult, VMListeningPortsResponse, VMPortForwardsResponse } from '../types';
+import type { SystemOverview, SystemDiagnostics, PowerStatus, ServiceStatus, VMConfigInfo, VMPrerequisites, BackgroundJob, SystemUser, SSHConfig, SSHKeyGenerationResult } from '../types';
+import type { NetworkStatus, VersionInfo, ReleaseInfo, UpdateState } from '../types/update';
 import { BASE_URL, fetchJSON } from './client';
 
-export const systemApi = {  // System Overview
+export const systemApi = {
+ getVMNetwork: () => fetchJSON<NetworkStatus>(`${BASE_URL}/vm/network`),
+ setupVMNetwork: () => fetchJSON<{ jobId: string }>(`${BASE_URL}/vm/network/setup`, { method: 'POST' }),
+ getVersion: () => fetchJSON<VersionInfo>(`${BASE_URL}/system/version`),
+ getUpdateHistory: () => fetchJSON<{ history: UpdateState[] }>(`${BASE_URL}/system/update/history`),
+ checkUpdate: () => fetchJSON<ReleaseInfo>(`${BASE_URL}/system/update/check`, { method: 'POST' }),
+ startUpdate: () => fetchJSON<{ id: string }>(`${BASE_URL}/system/update/start`, { method: 'POST' }),
+ rollbackUpdate: () => fetchJSON<{ id: string }>(`${BASE_URL}/system/update/rollback`, { method: 'POST' }),  // System Overview
   getOverview: () => fetchJSON<SystemOverview>(`${BASE_URL}/system/status`),
   getDiagnostics: () => fetchJSON<SystemDiagnostics>(`${BASE_URL}/system/diagnostics`),
 
@@ -11,15 +19,6 @@ export const systemApi = {  // System Overview
   startVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/start`, { method: 'POST' }),
   stopVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/stop`, { method: 'POST' }),
   restartVM: () => fetchJSON<{ status: string; message: string; jobId: string }>(`${BASE_URL}/vm/restart`, { method: 'POST' }),
-  getVMListeningPorts: () => fetchJSON<VMListeningPortsResponse>(`${BASE_URL}/vm/listening-ports`),
-  getVMPortForwards: () => fetchJSON<VMPortForwardsResponse>(`${BASE_URL}/vm/port-forwards`),
-  publishVMPort: (port: number) => fetchJSON<{ status: string; port: number; source?: 'manual' | 'managed'; jobId?: string }>(`${BASE_URL}/vm/port-forwards`, {
-    method: 'POST',
-    body: JSON.stringify({ port }),
-  }),
-  removeVMPortForward: (port: number) => fetchJSON<{ status: string; port: number; jobId?: string }>(`${BASE_URL}/vm/port-forwards/${encodeURIComponent(port)}`, {
-    method: 'DELETE',
-  }),
 
   // Power Management (Caffeinate)
   getPowerStatus: () => fetchJSON<PowerStatus>(`${BASE_URL}/system/power`),
@@ -59,7 +58,7 @@ export const systemApi = {  // System Overview
     const res = await fetch(`${BASE_URL}/system/backup`, { credentials: 'same-origin' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || '创建备份失败');
+      throw new Error(err.error || "未能创建备份，请重试");
     }
     const disposition = res.headers.get('Content-Disposition') || '';
     const match = disposition.match(/filename="([^"]+)"/i);
@@ -77,7 +76,7 @@ export const systemApi = {  // System Overview
     if (res.status === 401) window.dispatchEvent(new CustomEvent('macbox-unauthorized'));
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || '恢复备份失败');
+      throw new Error(err.error || "未能恢复备份，请检查文件");
     }
     return res.json();
   },

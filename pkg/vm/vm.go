@@ -23,18 +23,21 @@ import (
 )
 
 type VMStatus struct {
-	Name         string    `json:"name"`
-	Status       string    `json:"status"` // "Running", "Stopped", "NotCreated", "Broken"
-	Dir          string    `json:"dir"`
-	Arch         string    `json:"arch"`
-	CPUs         int       `json:"cpus"`
-	Memory       uint64    `json:"memory"`
-	Disk         uint64    `json:"disk"`
-	SSHLocalPort int       `json:"sshLocalPort"`
-	DockerSocket string    `json:"dockerSocket"`
-	DockerReady  bool      `json:"dockerReady"`
-	Errors       []string  `json:"errors,omitempty"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	NetworkMode     string    `json:"networkMode"`
+	BridgeIP        string    `json:"bridgeIP"`
+	BridgeInterface string    `json:"bridgeInterface"`
+	Name            string    `json:"name"`
+	Status          string    `json:"status"` // "Running", "Stopped", "NotCreated", "Broken"
+	Dir             string    `json:"dir"`
+	Arch            string    `json:"arch"`
+	CPUs            int       `json:"cpus"`
+	Memory          uint64    `json:"memory"`
+	Disk            uint64    `json:"disk"`
+	SSHLocalPort    int       `json:"sshLocalPort"`
+	DockerSocket    string    `json:"dockerSocket"`
+	DockerReady     bool      `json:"dockerReady"`
+	Errors          []string  `json:"errors,omitempty"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 // StartProgress is deliberately coarse-grained. Lima does not expose a
@@ -269,72 +272,6 @@ func (m *Manager) ClearConfigDirtyIfRevision(revision uint64) bool {
 	return true
 }
 
-// AddForwardedPortsChanged records only the host ports explicitly published
-// by an installed Compose application and reports whether the VM forwarding
-// configuration gained a new port.
-func (m *Manager) AddForwardedPortsChanged(ports ...int) (bool, error) {
-	ports = config.NormalizeForwardedPorts(ports)
-	if len(ports) == 0 {
-		return false, nil
-	}
-
-	changed := false
-	if err := config.Update(m.cfg, func(updated *config.Config) error {
-		previous := config.NormalizeForwardedPorts(updated.VM.ForwardedPorts)
-		merged := append([]int(nil), previous...)
-		merged = append(merged, ports...)
-		merged = config.NormalizeForwardedPorts(merged)
-		if len(merged) != len(previous) {
-			changed = true
-		} else {
-			for i := range merged {
-				if merged[i] != previous[i] {
-					changed = true
-					break
-				}
-			}
-		}
-		if changed {
-			updated.VM.ForwardedPorts = merged
-		}
-		return nil
-	}); err != nil {
-		return false, fmt.Errorf("保存端口转发配置失败: %w", err)
-	}
-	if !changed {
-		return false, nil
-	}
-	m.SetConfigDirty(true)
-	m.mu.Lock()
-	m.cachedStatus = nil
-	m.mu.Unlock()
-	return true, nil
-}
-
-// AddForwardedPorts preserves the original fire-and-forget API for callers
-// that only need to persist forwarding entries.
-func (m *Manager) AddForwardedPorts(ports ...int) error {
-	_, err := m.AddForwardedPortsChanged(ports...)
-	return err
-}
-
-// RestartForPortForwarding serializes the short VM restart needed to apply a
-// newly discovered Compose port. This prevents an automatic restart from
-// racing with a user-triggered VM lifecycle action.
-func (m *Manager) RestartForPortForwarding(ctx context.Context, projectRoot string) error {
-	if !m.BeginVMAction("restarting-for-port-forwarding") {
-		return fmt.Errorf("已有虚拟机操作正在进行")
-	}
-	defer m.EndVMAction()
-	dirtyRevision := m.ConfigDirtyRevision()
-
-	if err := m.Restart(ctx, projectRoot); err != nil {
-		return err
-	}
-	m.ClearConfigDirtyIfRevision(dirtyRevision)
-	return nil
-}
-
 func NewManager(cfg *config.Config) *Manager {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -449,6 +386,11 @@ func (m *Manager) GetStatusContext(ctx context.Context) (*VMStatus, error) {
 					DockerReady:  ready,
 					Errors:       errs,
 					UpdatedAt:    time.Now(),
+				}
+				res.NetworkMode = "bridged"
+				if inst.Status == "Running" {
+					network := m.NetworkStatus(ctx)
+					res.BridgeIP, res.BridgeInterface = network.IP, network.Interface
 				}
 				m.mu.Lock()
 				m.cachedStatus = res
@@ -632,9 +574,6 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 	cpus := cfgSnapshot.VM.CPUs
 	memory := cfgSnapshot.VM.Memory
 	diskSize := cfgSnapshot.VM.DiskSize
-	sambaPort := cfgSnapshot.Samba.Port
-	listenAddress := cfgSnapshot.ListenAddress
-	forwardedPorts := append([]int(nil), cfgSnapshot.VM.ForwardedPorts...)
 	localMounts := append([]config.LocalMount(nil), cfgSnapshot.Storage.LocalMounts...)
 	m.mu.RLock()
 	instanceName := m.instanceName
@@ -679,9 +618,6 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		Memory           int
 		DiskSize         int
 		DataDiskName     string
-		SambaPort        int
-		HostBindAddress  string
-		ForwardedPorts   []int
 		LocalMounts      []config.LocalMount
 		AISkillsEnabled  bool
 		AISkillsHostPath string
@@ -690,9 +626,6 @@ func (m *Manager) GenerateConfigFile(tmplPath, outputPath string) error {
 		Memory:           memory,
 		DiskSize:         diskSize,
 		DataDiskName:     dataDiskName,
-		SambaPort:        sambaPort,
-		HostBindAddress:  config.NormalizeListenAddress(listenAddress),
-		ForwardedPorts:   config.NormalizeForwardedPorts(forwardedPorts),
 		LocalMounts:      localMounts,
 		AISkillsEnabled:  cfgSnapshot.Terminal.AISkillsEnabled,
 		AISkillsHostPath: aiSkillsHostPath,
@@ -1153,6 +1086,9 @@ func (m *Manager) EnsureRuntimeAccess(ctx context.Context) error {
 }
 
 func (m *Manager) startInternal(ctx context.Context, projectRoot string) error {
+	if err := m.EnsureBridge(ctx); err != nil {
+		return err
+	}
 	status, err := m.GetStatusContext(ctx)
 	if err != nil {
 		return err
@@ -1250,6 +1186,17 @@ func (m *Manager) Restart(ctx context.Context, projectRoot string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Obtain OS authorization before interrupting the running VM.
+	if err := m.EnsureBridge(ctx); err != nil {
+		return err
+	}
+	home, _ := os.UserHomeDir()
+	path := filepath.Join(home, ".lima", m.instanceName, "lima.yaml")
+	previous, readErr := os.ReadFile(path)
+	wasRunning := false
+	if status, err := m.GetStatusContext(ctx); err == nil {
+		wasRunning = status.Status == "Running"
+	}
 	m.InvalidateCache()
 	if err := m.Stop(ctx); err != nil {
 		return fmt.Errorf("重启前停止虚拟机失败: %w", err)
@@ -1257,7 +1204,24 @@ func (m *Manager) Restart(ctx context.Context, projectRoot string) error {
 	if err := waitForContext(ctx, 2*time.Second); err != nil {
 		return err
 	}
-	return m.Start(ctx, projectRoot)
+	if err := m.Start(ctx, projectRoot); err != nil {
+		if readErr == nil && wasRunning {
+			recoveryCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			_ = m.forceStopLima(recoveryCtx)
+			if restoreErr := os.WriteFile(path, previous, 0600); restoreErr != nil {
+				return fmt.Errorf("%v；恢复网络配置失败: %w", err, restoreErr)
+			}
+			out, recoveryErr := runHostCommand(recoveryCtx, "limactl", "start", m.instanceName, "--tty=false")
+			m.InvalidateCache()
+			if recoveryErr != nil {
+				return fmt.Errorf("%v；旧网络启动失败: %s (%w)", err, out, recoveryErr)
+			}
+			return fmt.Errorf("%v；已恢复原虚拟机网络，数据磁盘保留", err)
+		}
+		return err
+	}
+	return nil
 }
 
 func waitForContext(ctx context.Context, duration time.Duration) error {

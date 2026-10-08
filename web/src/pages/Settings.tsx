@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, ConsoleUser } from '../types';
+import { SystemUser, SSHConfig, TerminalSettings, TerminalSkillsSettings, SSHKeyGenerationResult, ConsoleUser, SystemOverview } from '../types';
 import { api } from '../api';
 import { useTheme } from '../theme';
-import { SettingsNavigation, SettingsSubTab } from './settings/SettingsNavigation';
+import { SettingsNavigation, SettingsSubTab, settingsTabs } from './settings/SettingsNavigation';
 import { SSHSettingsSection } from './settings/SSHSettingsSection';
 import { TerminalSettingsSection } from './settings/TerminalSettingsSection';
 import { ConsoleUsersSection } from './settings/ConsoleUsersSection';
@@ -13,21 +13,29 @@ import { SSHKeyModals } from './settings/SSHKeyModals';
 import { useConsoleUserSettings } from './settings/useConsoleUserSettings';
 import { SettingsAlert, SettingsHeader, SettingsAlertMessage } from './settings/SettingsHeader';
 import { BackupRestoreSection } from './settings/BackupRestoreSection';
-import { ServicePublishingSection } from './settings/ServicePublishingSection';
+import { NetworkSettingsSection } from './settings/NetworkSettingsSection';
+import { VersionManagementSection } from './settings/VersionManagementSection';
+import { SettingsOverviewSection } from './settings/SettingsOverviewSection';
 
 interface SettingsProps {
+ overview?: SystemOverview | null;
+ onRefreshOverview?: () => void;
+ onNavigateTab?: (tab: 'storage_settings' | 'smb_sharing') => void;
   primaryIP?: string;
   currentUser?: ConsoleUser | null;
   onCurrentUserUpdated?: (u: ConsoleUser) => void;
 }
 
 export const Settings: React.FC<SettingsProps> = ({
-  primaryIP = '192.168.2.123',
+ overview, onRefreshOverview, onNavigateTab,
   currentUser,
   onCurrentUserUpdated,
 }) => {
   const { theme, setTheme } = useTheme();
-  const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>('console_users');
+  const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>(() => {
+ const stored = localStorage.getItem('macbox-settings-tab');
+ return settingsTabs.find(tab => tab.id === stored && (!tab.admin || currentUser?.role === 'admin'))?.id || 'overview';
+ });
   const [alertMsg, setAlertMsg] = useState<SettingsAlertMessage | null>(null);
 
   const {
@@ -128,7 +136,7 @@ export const Settings: React.FC<SettingsProps> = ({
     ],
     readOnly: true,
     status: 'disabled',
-    message: '未启用本机 Skill 目录映射',
+    message: "还没有接入助手技能",
     requiresRestart: false,
     candidates: [],
   });
@@ -138,36 +146,21 @@ export const Settings: React.FC<SettingsProps> = ({
   const [skillsSaving, setSkillsSaving] = useState(false);
 
   const loadData = async () => {
-    setUsersLoading(true);
-    setSSHLoading(true);
+    setUsersLoading(activeSubTab === 'users'); setSSHLoading(activeSubTab === 'ssh');
     try {
-      const [uList, sCfg, tCfg, skillsCfg] = await Promise.all([
-        api.getUsers().catch(() => []),
-        api.getSSHConfig().catch(() => null),
-        api.getTerminalSettings().catch(() => null),
-        api.getTerminalSkills().catch(() => null),
-        loadConsoleUsers(),
-      ]);
-      setUsers(uList || []);
-      if (sCfg) setSSHConfig(sCfg);
-      if (tCfg) setTerminalSettings(tCfg);
-      if (skillsCfg) {
-        setTerminalSkills(skillsCfg);
-        setSkillsEnabled(skillsCfg.enabled);
-        setSkillsHostPath(skillsCfg.hostPath || '');
-        setSkillsRiskConfirmed(skillsCfg.enabled);
+      if (activeSubTab === 'users') setUsers(await api.getUsers());
+      if (activeSubTab === 'ssh') setSSHConfig(await api.getSSHConfig());
+      if (activeSubTab === 'console_users') await loadConsoleUsers();
+      if (activeSubTab === 'terminal') {
+        const [tCfg, skillsCfg] = await Promise.all([api.getTerminalSettings(), api.getTerminalSkills()]);
+        setTerminalSettings(tCfg); setTerminalSkills(skillsCfg); setSkillsEnabled(skillsCfg.enabled);
+        setSkillsHostPath(skillsCfg.hostPath || ''); setSkillsRiskConfirmed(skillsCfg.enabled);
       }
-    } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `加载系统设置失败: ${err.message}` });
-    } finally {
-      setUsersLoading(false);
-      setSSHLoading(false);
-    }
+      onRefreshOverview?.();
+    } catch (err: any) { setAlertMsg({ type: 'error', text: `加载设置失败，原因：${err.message}` }); }
+    finally { setUsersLoading(false); setSSHLoading(false); }
   };
-
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { localStorage.setItem('macbox-settings-tab', activeSubTab); void loadData(); }, [activeSubTab]);
 
   // --- Users Handlers ---
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -180,14 +173,14 @@ export const Settings: React.FC<SettingsProps> = ({
         password: newPassword.trim(),
         isSudo: newIsSudo,
       });
-      setAlertMsg({ type: 'success', text: `用户 [${newUsername}] 创建成功！` });
+      setAlertMsg({ type: 'success', text: `账号“${newUsername}”已创建` });
       setShowAddUserModal(false);
       setNewUsername('');
       setNewPassword('');
       setNewIsSudo(false);
       await loadData();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `创建用户失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `创建用户失败，原因：${err.message}` });
     } finally {
       setUserActionLoading(false);
     }
@@ -199,24 +192,26 @@ export const Settings: React.FC<SettingsProps> = ({
     setUserActionLoading(true);
     try {
       await api.updateUserPassword(changePwdUser, targetNewPwd);
-      setAlertMsg({ type: 'success', text: `用户 [${changePwdUser}] 密码修改成功！` });
+      setAlertMsg({ type: 'success', text: `账号“${changePwdUser}”的密码已修改` });
       setChangePwdUser(null);
       setTargetNewPwd('');
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `修改密码失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `修改密码失败，原因：${err.message}` });
     } finally {
       setUserActionLoading(false);
     }
   };
 
   const handleDeleteUser = async (username: string) => {
-    if (!confirm(`确定要彻底删除系统用户 [${username}] 及其个人家目录吗？此操作不可逆！`)) return;
+    if (!confirm(`删除系统账号“${username}”？
+个人文件夹中的文件也将删除。
+此操作无法撤销。`)) return;
     try {
       await api.deleteUser(username);
-      setAlertMsg({ type: 'success', text: `用户 [${username}] 已被删除` });
+      setAlertMsg({ type: 'success', text: `账号“${username}”已删除` });
       await loadData();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `删除用户失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `删除用户失败，原因：${err.message}` });
     }
   };
 
@@ -224,22 +219,22 @@ export const Settings: React.FC<SettingsProps> = ({
   const handleSaveRootPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rootNewPwd) {
-      setAlertMsg({ type: 'error', text: 'Root 密码不能为空' });
+      setAlertMsg({ type: 'error', text: "请填写管理密码" });
       return;
     }
     if (rootNewPwd !== rootConfirmPwd) {
-      setAlertMsg({ type: 'error', text: '两次输入的 Root 密码不一致，请核对后重试' });
+      setAlertMsg({ type: 'error', text: "两次输入的密码不一致" });
       return;
     }
 
     setRootPwdSaving(true);
     try {
       await api.updateRootPassword(rootNewPwd);
-      setAlertMsg({ type: 'success', text: '超级管理员 (root) 密码已成功更新！' });
+      setAlertMsg({ type: 'success', text: "系统最高权限账号的密码已修改" });
       setRootNewPwd('');
       setRootConfirmPwd('');
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `更新 Root 密码失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `更新 管理 密码失败，原因：${err.message}` });
     } finally {
       setRootPwdSaving(false);
     }
@@ -254,10 +249,10 @@ export const Settings: React.FC<SettingsProps> = ({
       const safeSSHConfig = { ...sshConfig, passwordAuthentication: false };
       await api.updateSSHConfig(safeSSHConfig);
       setSSHConfig(safeSSHConfig);
-      setAlertMsg({ type: 'success', text: 'SSH 配置已成功保存并即时生效！' });
+      setAlertMsg({ type: 'success', text: "远程登录设置已保存并生效" });
       await loadData();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `更新 SSH 配置失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `更新 远程登录 配置失败，原因：${err.message}` });
     } finally {
       setSSHSaving(false);
     }
@@ -268,10 +263,10 @@ export const Settings: React.FC<SettingsProps> = ({
     try {
       const nextState = !(sshConfig.status === 'running');
       await api.toggleSSH(nextState);
-      setAlertMsg({ type: 'success', text: nextState ? 'SSH 服务已成功启动' : 'SSH 服务已停止' });
+      setAlertMsg({ type: 'success', text: nextState ? "远程登录服务已启动" : "远程登录服务已停止" });
       await loadData();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `操作 SSH 服务失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `操作 远程登录 服务失败，原因：${err.message}` });
     } finally {
       setSSHSaving(false);
     }
@@ -307,13 +302,13 @@ export const Settings: React.FC<SettingsProps> = ({
         setShowKeyModal(true);
         // Automatically trigger browser download of private key file
         downloadPrivateKeyFile(res.result.privateKey, res.result.filename);
-        setAlertMsg({ type: 'success', text: 'Root SSH 私钥已成功生成并下载到您的本地电脑！' });
+        setAlertMsg({ type: 'success', text: "私钥已生成并下载，请妥善保存" });
         // Refresh SSH config
         const fresh = await api.getSSHConfig();
         setSSHConfig(fresh);
       }
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `生成 SSH 密钥失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `生成 远程登录 密钥失败，原因：${err.message}` });
     } finally {
       setGeneratingKey(false);
     }
@@ -326,7 +321,7 @@ export const Settings: React.FC<SettingsProps> = ({
       setAuthorizedKeys(res.keys || []);
       setShowAuthorizedKeys(true);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `获取已授权公钥列表失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `获取已授权公钥列表失败，原因：${err.message}` });
     } finally {
       setLoadingAuthKeys(false);
     }
@@ -338,31 +333,31 @@ export const Settings: React.FC<SettingsProps> = ({
     setImportingKey(true);
     try {
       await api.addSSHAuthorizedKey(importKeyText.trim());
-      setAlertMsg({ type: 'success', text: '公钥已成功添加到 Root 授权列表！' });
+      setAlertMsg({ type: 'success', text: "公钥已授权，可使用对应私钥登录" });
       setShowImportKeyModal(false);
       setImportKeyText('');
       await handleLoadAuthorizedKeys();
       const fresh = await api.getSSHConfig();
       setSSHConfig(fresh);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `添加公钥失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `添加公钥失败，原因：${err.message}` });
     } finally {
       setImportingKey(false);
     }
   };
 
   const handleClearAuthorizedKeys = async () => {
-    if (!window.confirm('确认清空 Root 的所有已授权 SSH 公钥吗？清空后将无法使用已有密钥免密登录！')) {
+    if (!window.confirm("将清空最高权限账号的公钥。\n已有密钥将无法登录该账号。\n是否清空？")) {
       return;
     }
     try {
       await api.clearSSHAuthorizedKeys();
-      setAlertMsg({ type: 'success', text: '已清空 Root 的所有已授权公钥' });
+      setAlertMsg({ type: 'success', text: "最高权限账号的公钥已清空" });
       setAuthorizedKeys([]);
       const fresh = await api.getSSHConfig();
       setSSHConfig(fresh);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `清空失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `清空失败，原因：${err.message}` });
     }
   };
 
@@ -376,9 +371,9 @@ export const Settings: React.FC<SettingsProps> = ({
     try {
       await api.updateTerminalSettings(updated);
       setTerminalSettings(updated);
-      setAlertMsg({ type: 'success', text: `终端设置已更新: 进入终端后默认以 ${userChoice === 'root' ? 'Root 超级管理员' : '普通用户'} 登录` });
+      setAlertMsg({ type: 'success', text: `默认登录账号已改为：${userChoice === 'root' ? 'Root 超级管理员' : '普通用户'}` });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `保存终端设置失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `保存命令窗口设置失败，原因：${err.message}` });
     } finally {
       setTermSaving(false);
     }
@@ -387,11 +382,11 @@ export const Settings: React.FC<SettingsProps> = ({
   const handleSaveTerminalSkills = async () => {
     const hostPath = skillsHostPath.trim();
     if (skillsEnabled && !hostPath) {
-      setAlertMsg({ type: 'error', text: '请先选择或填写本机 AI Skill 目录' });
+      setAlertMsg({ type: 'error', text: "请先选择或填写本机技能文件夹" });
       return;
     }
     if (skillsEnabled && !skillsRiskConfirmed) {
-      setAlertMsg({ type: 'error', text: '请先阅读风险提示并勾选确认，再启用 Skill 映射' });
+      setAlertMsg({ type: 'error', text: "请先阅读提醒并勾选确认" });
       return;
     }
 
@@ -404,7 +399,7 @@ export const Settings: React.FC<SettingsProps> = ({
       setSkillsRiskConfirmed(res.settings.enabled);
       setAlertMsg({ type: 'success', text: res.message });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `保存 AI Skill 映射失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `保存 助手技能 映射失败，原因：${err.message}` });
     } finally {
       setSkillsSaving(false);
     }
@@ -524,7 +519,7 @@ export const Settings: React.FC<SettingsProps> = ({
           onClearAuthorizedKeys={handleClearAuthorizedKeys}
           onCopyAuthorizedKey={(key) => {
             navigator.clipboard.writeText(key);
-            setAlertMsg({ type: 'success', text: '公钥内容已复制到剪贴板！' });
+            setAlertMsg({ type: 'success', text: "公钥已复制" });
           }}
         />
       )}
@@ -555,7 +550,9 @@ export const Settings: React.FC<SettingsProps> = ({
         />
       )}
 
-      {activeSubTab === 'service_publish' && currentUser?.role === 'admin' && <ServicePublishingSection />}
+      {activeSubTab === 'overview' && <SettingsOverviewSection overview={overview} isAdmin={currentUser?.role === 'admin'} onRefresh={onRefreshOverview} onSelect={setActiveSubTab} onNavigate={onNavigateTab} />}
+      {activeSubTab === 'network' && <NetworkSettingsSection isAdmin={currentUser?.role === 'admin'} onRefresh={onRefreshOverview} />}
+      {activeSubTab === 'updates' && <VersionManagementSection isAdmin={currentUser?.role === 'admin'} />}
 
       {activeSubTab === 'appearance' && (
         <AppearanceSettingsSection theme={theme} onThemeChange={setTheme} />
@@ -572,7 +569,7 @@ export const Settings: React.FC<SettingsProps> = ({
         importKeyText={importKeyText}
         importingKey={importingKey}
         sshConfig={sshConfig}
-        primaryIP={primaryIP}
+        primaryIP={overview?.vm.bridgeIP || ''}
         onCloseKeyModal={() => setShowKeyModal(false)}
         onDownloadPrivateKey={downloadPrivateKeyFile}
         onImportKeyTextChange={setImportKeyText}

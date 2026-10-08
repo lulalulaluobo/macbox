@@ -1,6 +1,14 @@
 package api
 
 func (s *Server) registerRoutes() {
+	s.mux.HandleFunc("GET /api/health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/system/version", s.handleVersion)
+	s.mux.HandleFunc("GET /api/system/update/history", s.adminOnly(s.handleUpdateHistory))
+	s.mux.HandleFunc("POST /api/system/update/check", s.adminOnly(s.handleUpdateCheck))
+	s.mux.HandleFunc("POST /api/system/update/start", s.adminOnly(s.handleUpdateStart))
+	s.mux.HandleFunc("POST /api/system/update/rollback", s.adminOnly(s.handleUpdateRollback))
+	s.mux.HandleFunc("GET /api/vm/network", s.handleNetwork)
+	s.mux.HandleFunc("POST /api/vm/network/setup", s.adminOnly(s.handleNetworkSetup))
 	// 1. System
 	s.mux.HandleFunc("GET /api/system/status", s.handleSystemStatus)
 	s.mux.HandleFunc("GET /api/system/menubar-status", s.handleSystemMenubarStatus)
@@ -21,10 +29,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/vm/restart", s.adminOnly(s.handleVMRestart))
 	s.mux.HandleFunc("GET /api/vm/config", s.handleVMConfigGet)
 	s.mux.HandleFunc("POST /api/vm/config", s.adminOnly(s.handleVMConfigUpdate))
-	s.mux.HandleFunc("GET /api/vm/listening-ports", s.adminOnly(s.handleVMListeningPorts))
-	s.mux.HandleFunc("GET /api/vm/port-forwards", s.adminOnly(s.handleVMPortForwardsList))
-	s.mux.HandleFunc("POST /api/vm/port-forwards", s.adminOnly(s.handleVMPortForwardPublish))
-	s.mux.HandleFunc("DELETE /api/vm/port-forwards/{port}", s.adminOnly(s.handleVMPortForwardRemove))
 	s.mux.HandleFunc("GET /api/jobs", s.adminOnly(s.handleJobsList))
 	s.mux.HandleFunc("GET /api/jobs/{id}", s.adminOnly(s.handleJobGet))
 	s.mux.HandleFunc("POST /api/jobs/{id}/cancel", s.adminOnly(s.handleJobCancel))

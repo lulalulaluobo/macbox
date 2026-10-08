@@ -88,7 +88,7 @@ export const AppCard: React.FC<AppCardProps> = ({
       return (
         <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center space-x-1">
           <Sparkles className="w-2.5 h-2.5" />
-          <span>自定义</span>
+          <span>自建应用</span>
         </span>
       );
     }
@@ -96,7 +96,7 @@ export const AppCard: React.FC<AppCardProps> = ({
       return (
         <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center space-x-1">
           <Layers className="w-2.5 h-2.5" />
-          <span>社区拓展</span>
+          <span>社区应用</span>
         </span>
       );
     }
@@ -165,7 +165,7 @@ export const AppCard: React.FC<AppCardProps> = ({
         {isRunning && (
           <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
             <div className="min-w-0 flex-1 mr-2">
-              <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium">WebUI 访问入口:</span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-medium">应用网址</span>
               <a
                 href={app.webUrl}
                 target="_blank"
@@ -180,7 +180,7 @@ export const AppCard: React.FC<AppCardProps> = ({
               target="_blank"
               rel="noreferrer"
               className="p-1.5 rounded-lg bg-sky-500/10 hover:bg-sky-500 text-sky-600 hover:text-white transition flex-shrink-0"
-              title="新标签页打开"
+              title="打开应用"
             >
               <ExternalLink className="w-4 h-4" />
             </a>
@@ -189,7 +189,7 @@ export const AppCard: React.FC<AppCardProps> = ({
 
         <details className="group rounded-xl bg-slate-50/80 dark:bg-slate-950/40">
           <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between px-3 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-            <span>端口与部署详情</span>
+            <span>安装详情</span>
             <span className="text-sky-600 group-open:hidden dark:text-sky-400">查看</span>
             <span className="hidden group-open:block">收起</span>
           </summary>
@@ -197,8 +197,8 @@ export const AppCard: React.FC<AppCardProps> = ({
         {/* Volumes & Ports Preview */}
         <div className="space-y-1.5 bg-slate-50 dark:bg-slate-950/50 p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800/60 font-mono text-[11px]">
           <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 font-sans text-[10px]">
-            <span>默认端口: <strong className="font-mono text-slate-700 dark:text-slate-300 font-bold">{app.port}</strong></span>
-            <span>挂载目录: <strong className="font-mono text-slate-700 dark:text-slate-300 font-bold">{app.volumes?.length || 0} 处</strong></span>
+            <span>默认端口 <strong className="font-mono text-slate-700 dark:text-slate-300 font-bold">{app.port}</strong></span>
+            <span>文件目录 <strong className="font-mono text-slate-700 dark:text-slate-300 font-bold">{app.volumes?.length || 0} 处</strong></span>
           </div>
           {app.volumes && app.volumes.length > 0 && (
             <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate space-y-0.5 pt-1 border-t border-slate-200/80 dark:border-slate-800/50">
@@ -209,7 +209,7 @@ export const AppCard: React.FC<AppCardProps> = ({
                 </div>
               ))}
               {app.volumes.length > 2 && (
-                <div className="text-[9px] text-slate-400 text-center">... 还有 {app.volumes.length - 2} 项目录映射</div>
+                <div className="text-[9px] text-slate-400 text-center">还有 {app.volumes.length - 2} 个保存目录</div>
               )}
             </div>
           )}
@@ -227,13 +227,13 @@ export const AppCard: React.FC<AppCardProps> = ({
               className="flex-1 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold shadow-lg shadow-sky-500/20 transition flex items-center justify-center space-x-2"
             >
               <Settings className="w-3.5 h-3.5" />
-              <span>配置并安装应用</span>
+              <span>安装应用</span>
             </button>
             {app.source === 'custom' && onDeleteCustom && (
               <button
                 onClick={() => onDeleteCustom(app.id)}
                 className="p-2.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700/80 transition"
-                title="删除此自定义模板"
+                title="删除模板"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -269,7 +269,7 @@ export const AppCard: React.FC<AppCardProps> = ({
                 onClick={() => onAction(app.id, 'stop')}
                 disabled={actionLoading !== null}
                 className="p-2 rounded-xl bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-medium transition disabled:opacity-50"
-                title="停止服务"
+                title="停止应用"
               >
                 <Square className="w-3.5 h-3.5" />
               </button>
@@ -280,7 +280,7 @@ export const AppCard: React.FC<AppCardProps> = ({
               onClick={() => onAction(app.id, 'restart')}
               disabled={actionLoading !== null}
               className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 dark:border-slate-700 text-xs font-medium transition disabled:opacity-50"
-              title="重启服务"
+              title="重启应用"
             >
               <RotateCw className={`w-3.5 h-3.5 ${actionLoading === `restart-${app.id}` ? 'animate-spin' : ''}`} />
             </button>
@@ -289,7 +289,7 @@ export const AppCard: React.FC<AppCardProps> = ({
             <button
               onClick={() => onInstall(app)}
               className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 dark:border-slate-700 text-xs font-medium transition"
-              title="修改端口/存储挂载并重新部署"
+              title="修改访问端口和目录后重新安装"
             >
               <Settings className="w-3.5 h-3.5 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white" />
             </button>
@@ -298,7 +298,7 @@ export const AppCard: React.FC<AppCardProps> = ({
             <button
               onClick={() => onViewLogs(app.id)}
               className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/80 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 dark:border-slate-700 text-xs font-medium transition"
-              title="查看实时应用日志"
+              title="运行记录"
             >
               <Terminal className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
             </button>
@@ -308,7 +308,7 @@ export const AppCard: React.FC<AppCardProps> = ({
               <button
                 onClick={() => onOpenTerminal(`macbox-${app.id}`)}
                 className="p-2 rounded-xl bg-slate-100 hover:bg-teal-50 text-slate-600 hover:text-teal-600 border border-slate-200 dark:bg-slate-800 dark:hover:bg-teal-950/60 dark:text-slate-300 dark:hover:text-teal-300 dark:border-slate-700 text-xs font-medium transition"
-                title="进入应用容器内部终端 (docker exec)"
+                title="命令窗口"
               >
                 <Terminal className="w-3.5 h-3.5 text-teal-500 dark:text-teal-400" />
               </button>

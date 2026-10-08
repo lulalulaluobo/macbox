@@ -79,8 +79,6 @@ func (m *Manager) migrateAListDataMount(ctx context.Context) error {
 	return nil
 }
 
-
-
 func migrateAListDataBind(content string) (string, bool) {
 	if !strings.Contains(content, "container_name: macbox-alist") || strings.Contains(content, "propagation: rslave") {
 		return content, false
@@ -351,6 +349,9 @@ func (m *Manager) ListApps(ctx context.Context, hostIP string) ([]AppMetadata, e
 			appMeta.Status = "not_installed"
 		}
 
+		if hostIP == "" {
+			appMeta.WebURL = ""
+		}
 		results = append(results, appMeta)
 	}
 	sort.Slice(results, func(i, j int) bool {
@@ -498,7 +499,7 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	if len([]byte(finalYAML)) > maxComposeYAMLBytes {
 		return fmt.Errorf("最终 Docker Compose YAML 内容不能超过 8 MB")
 	}
-	forwardedPorts, err := publishedHostPorts(finalYAML)
+	_, err = publishedHostPorts(finalYAML)
 	if err != nil {
 		return fmt.Errorf("解析 Compose 配置失败: %w", err)
 	}
@@ -551,23 +552,6 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	// picks up the correct Mac host directory.
 	m.ensureContainerMountPropagation(ctx, composePath, finalYAML, out)
 
-	portsChanged := false
-	if len(forwardedPorts) > 0 {
-		var err error
-		portsChanged, err = m.vmMgr.AddForwardedPortsChanged(forwardedPorts...)
-		if err != nil {
-			fmt.Fprintf(out, "❌ 应用已启动，但记录局域网端口失败: %v\n", err)
-			return fmt.Errorf("记录应用端口转发失败: %w", err)
-		}
-		if portsChanged {
-			fmt.Fprintf(out, "🔌 检测到并登记局域网端口: %v\n", forwardedPorts)
-		}
-		// A previous deployment may have persisted a forwarding entry without
-		// restarting the running VM. Treat that pending configuration as a
-		// reason to apply it now as well.
-		portsChanged = portsChanged || m.vmMgr.IsConfigDirty()
-	}
-
 	// Special post-install setups
 	if id == "alist" {
 		alistPassword, secretErr := generateAppSecret()
@@ -596,14 +580,6 @@ func (m *Manager) InstallStreamCustom(ctx context.Context, id string, cfg Instal
 	}
 	if baiduVNCPassword != "" {
 		fmt.Fprintf(out, "🔑 百度网盘 VNC 密码（仅显示一次）：%s\n", baiduVNCPassword)
-	}
-	if portsChanged {
-		fmt.Fprintln(out, "🔄 正在重启虚拟机以启用局域网访问...")
-		if err := m.vmMgr.RestartForPortForwarding(ctx, m.projectRoot); err != nil {
-			fmt.Fprintf(out, "❌ 应用已启动，但局域网端口尚未生效: %v\n", err)
-			return fmt.Errorf("启用应用局域网端口失败: %w", err)
-		}
-		fmt.Fprintln(out, "✅ 新端口已绑定到局域网地址")
 	}
 
 	fmt.Fprintf(out, "\n🎉 应用 [%s] 部署完成并已成功上线运行！\n", id)

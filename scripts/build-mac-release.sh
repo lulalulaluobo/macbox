@@ -3,6 +3,12 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 VERSION="${MACBOX_VERSION:-$(awk -F'"' '/"version"[[:space:]]*:/ { print $4; exit }' "$ROOT_DIR/web/package.json")}"
+BUILD_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
+if ! git -C "$ROOT_DIR" diff --quiet HEAD --; then
+  BUILD_COMMIT="$BUILD_COMMIT-local"
+fi
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+BUILD_FLAGS="-s -w -X github.com/lulalulaluobo/macbox/pkg/buildinfo.Version=$VERSION -X github.com/lulalulaluobo/macbox/pkg/buildinfo.Commit=$BUILD_COMMIT -X github.com/lulalulaluobo/macbox/pkg/buildinfo.BuiltAt=$BUILD_TIME"
 TARGET_ARCH="${MACBOX_GOARCH:-$(uname -m)}"
 
 case "$TARGET_ARCH" in
@@ -44,8 +50,10 @@ printf '[MacBox] 构建前端并嵌入 Go 二进制...\n'
 
 mkdir -p "$PACKAGE_DIR/bin"
 CGO_ENABLED=0 GOOS=darwin GOARCH="$GOARCH_VALUE" go build \
-  -trimpath -ldflags='-s -w' \
+  -trimpath -ldflags="$BUILD_FLAGS" \
   -o "$PACKAGE_DIR/bin/macbox" "$ROOT_DIR/cmd/macbox"
+printf '%s\n' "$VERSION" > "$PACKAGE_DIR/VERSION"
+printf '%s\n' "$BUILD_COMMIT-$BUILD_TIME" > "$PACKAGE_DIR/BUILD_ID"
 cp -R "$ROOT_DIR/templates" "$PACKAGE_DIR/templates"
 cp -R "$ROOT_DIR/assets" "$PACKAGE_DIR/assets"
 cp "$ROOT_DIR/MACBOX_DEPLOYMENT_PROMPT.md" "$PACKAGE_DIR/MACBOX_DEPLOYMENT_PROMPT.md"

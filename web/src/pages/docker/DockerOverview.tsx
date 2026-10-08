@@ -43,23 +43,23 @@ export const DockerOverview: React.FC<DockerOverviewProps> = ({ onNavigateTab })
 
   const ready = Boolean(data?.dockerReady);
   const launches = [
-    { id: 'containers' as const, label: '容器', value: `${data?.containersRunning || 0}/${data?.containersTotal || 0}`, icon: Box, tone: 'bg-sky-50 text-sky-500 dark:bg-sky-500/10' },
-    { id: 'compose' as const, label: '编排', value: `${data?.projectsRunning || 0}/${data?.projectsTotal || 0}`, icon: Layers, tone: 'bg-violet-50 text-violet-500 dark:bg-violet-500/10' },
-    { id: 'images' as const, label: '镜像', value: `${data?.imagesTotal || 0}`, icon: Disc3, tone: 'bg-amber-50 text-amber-500 dark:bg-amber-500/10' },
-    { id: 'networks' as const, label: '网络', value: '设置', icon: Network, tone: 'bg-emerald-50 text-emerald-500 dark:bg-emerald-500/10' },
+    { id: 'containers' as const, label: "已装应用", value: `${data?.containersRunning || 0}/${data?.containersTotal || 0}`, icon: Box, tone: 'bg-sky-50 text-sky-500 dark:bg-sky-500/10' },
+    { id: 'compose' as const, label: "应用组合", value: `${data?.projectsRunning || 0}/${data?.projectsTotal || 0}`, icon: Layers, tone: 'bg-violet-50 text-violet-500 dark:bg-violet-500/10' },
+    { id: 'images' as const, label: "应用包", value: `${data?.imagesTotal || 0}`, icon: Disc3, tone: 'bg-amber-50 text-amber-500 dark:bg-amber-500/10' },
+    { id: 'networks' as const, label: "网络速度", value: '设置', icon: Network, tone: 'bg-emerald-50 text-emerald-500 dark:bg-emerald-500/10' },
   ];
   const metrics = [
-    { label: 'CPU', value: `${(data?.cpuPerc || 0).toFixed(1)}%`, progress: data?.cpuPerc || 0, icon: Cpu, color: 'text-sky-500', bar: 'bg-sky-500' },
-    { label: '内存', value: `${(data?.memPerc || 0).toFixed(1)}%`, progress: data?.memPerc || 0, icon: MemoryStick, color: 'text-violet-500', bar: 'bg-violet-500' },
-    { label: '网络', value: formatNetworkRate(networkRateKb), progress: Math.min(networkRateKb / 1024, 100), icon: Activity, color: 'text-emerald-500', bar: 'bg-emerald-500' },
+    { label: "处理器", value: `${(data?.cpuPerc || 0).toFixed(1)}%`, progress: data?.cpuPerc || 0, icon: Cpu, color: 'text-sky-500', bar: 'bg-sky-500' },
+    { label: "内存占用", value: `${(data?.memPerc || 0).toFixed(1)}%`, progress: data?.memPerc || 0, icon: MemoryStick, color: 'text-violet-500', bar: 'bg-violet-500' },
+    { label: "网络速度", value: formatNetworkRate(networkRateKb), progress: Math.min(networkRateKb / 1024, 100), icon: Activity, color: 'text-emerald-500', bar: 'bg-emerald-500' },
   ];
 
   return (
     <div className="flex min-h-full flex-col gap-2.5">
       <section className="flex min-h-[72px] items-center gap-3 rounded-[22px] border border-slate-200/80 bg-white px-4 py-3 shadow-xs dark:border-slate-800 dark:bg-slate-900/80">
         <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${ready ? 'bg-emerald-50 text-emerald-500 dark:bg-emerald-500/10' : 'bg-amber-50 text-amber-500 dark:bg-amber-500/10'}`}><Box className="h-5 w-5" /></span>
-        <div className="min-w-0 flex-1"><h2 className="text-base font-black text-slate-900 dark:text-white">Docker Engine</h2><div className="mt-1 flex items-center gap-1.5 text-xs text-slate-500"><span className={`h-2 w-2 rounded-full ${ready ? 'bg-emerald-500' : 'bg-amber-500'}`} /><span>{ready ? '运行中' : '未就绪'}</span>{data?.dockerVersion && <span className="truncate">· v{data.dockerVersion}</span>}</div></div>
-        <button type="button" onClick={fetchOverview} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-300" aria-label="刷新 Docker 状态"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
+        <div className="min-w-0 flex-1"><h2 className="text-base font-black text-slate-900 dark:text-white">应用服务</h2><div className="mt-1 flex items-center gap-1.5 text-xs text-slate-500"><span className={`h-2 w-2 rounded-full ${ready ? 'bg-emerald-500' : 'bg-amber-500'}`} /><span>{ready ? '运行中' : '未就绪'}</span>{data?.dockerVersion && <span className="truncate">· v{data.dockerVersion}</span>}</div></div>
+        <button type="button" onClick={fetchOverview} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-300" aria-label="刷新状态"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
       </section>
 
       <section className="rounded-[22px] border border-slate-200/80 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900/75 sm:p-4">

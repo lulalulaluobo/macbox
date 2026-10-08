@@ -62,11 +62,14 @@ export const DockerCompose: React.FC = () => {
       setAlertMsg({
         type: 'success',
         text: action === 'down'
-          ? `项目 [${name}] 的容器已删除，Compose 编排配置已保留，可修改后重新部署`
-          : `项目 [${name}] 已成功执行 ${action}`,
+          ? `“${name}”的应用已移除。
+安装配置已保留，可修改后重新安装。`
+          : action === 'pull'
+          ? `“${name}”的新版应用包已下载。\n重启组合后才会使用。`
+          : `应用组合“${name}”${{ start: '已启动', stop: '已停止', restart: '已重启' }[action]}`,
       });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `操作失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `操作失败，原因：${err.message}` });
     } finally {
       setActionLoading(null);
     }
@@ -79,7 +82,7 @@ export const DockerCompose: React.FC = () => {
       setEditProject({ name: res.name, yaml: res.yaml });
       setIsDeployOpen(true);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `获取配置失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `获取配置失败，原因：${err.message}` });
     } finally {
       setActionLoading(null);
     }
@@ -95,12 +98,15 @@ export const DockerCompose: React.FC = () => {
       setAlertMsg({
         type: 'success',
         text: deleteVolumes
-          ? `项目 [${name}] 的容器、编排配置和非 external 数据卷已删除，宿主机挂载数据不受影响`
-          : `项目 [${name}] 的容器和编排配置已删除，数据卷已保留`,
+          ? `“${name}”的应用和配置已删除。
+该组合管理的数据卷也已删除。
+外部保存目录和外部数据卷保留。`
+          : `“${name}”的应用和配置已删除。
+应用数据卷已保留。`,
       });
       await loadProjects();
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `删除失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `删除失败，原因：${err.message}` });
     } finally {
       setActionLoading(null);
     }
@@ -129,7 +135,7 @@ export const DockerCompose: React.FC = () => {
         >
           <div className="flex items-center space-x-2">
             <AlertCircle className="w-4 h-4" />
-            <span>{alertMsg.text}</span>
+            <span className="whitespace-pre-line">{alertMsg.text}</span>
           </div>
           <button onClick={() => setAlertMsg(null)} className="opacity-70 hover:opacity-100 font-bold">
             ✕
@@ -142,7 +148,7 @@ export const DockerCompose: React.FC = () => {
         <div>
           <h2 className="hidden items-center space-x-2 text-sm font-extrabold text-slate-900 dark:text-white sm:flex">
             <Layers className="w-5 h-5 text-indigo-400" />
-            <span>Docker Compose 服务编排</span>
+            <span>应用组合</span>
           </h2>
         </div>
 
@@ -151,7 +157,7 @@ export const DockerCompose: React.FC = () => {
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="搜索 Compose 项目名称..."
+              placeholder="搜索组合名称"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               className="min-h-10 w-full rounded-xl border border-slate-200 bg-white py-1.5 pl-9 pr-3 text-xs text-slate-900 shadow-xs transition placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900 dark:text-white"
@@ -174,7 +180,7 @@ export const DockerCompose: React.FC = () => {
             className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition"
           >
             <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">部署</span>
+            <span className="hidden sm:inline">安装应用</span>
           </button>
         </div>
       </div>
@@ -184,7 +190,7 @@ export const DockerCompose: React.FC = () => {
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-[22px] border border-dashed border-slate-200 bg-white p-8 text-center shadow-xs dark:border-slate-800 dark:bg-slate-900/60">
           <Layers className="w-12 h-12 text-slate-400 dark:text-slate-600 mx-auto" />
           <div>
-            <h3 className="text-base font-bold text-slate-700 dark:text-slate-300">暂无 Compose 项目</h3>
+            <h3 className="text-base font-bold text-slate-700 dark:text-slate-300">还没有应用组合</h3>
           </div>
           <button
             onClick={() => {
@@ -194,7 +200,7 @@ export const DockerCompose: React.FC = () => {
             className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition"
           >
             <Plus className="w-4 h-4" />
-            <span>立即部署第一个项目</span>
+            <span>安装组合</span>
           </button>
         </div>
       ) : (
@@ -226,23 +232,23 @@ export const DockerCompose: React.FC = () => {
                       </span>
                       {proj.isSystemApp ? (
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-500/20 font-medium">
-                          内置预设
+                          内置模板
                         </span>
                       ) : (
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-500/20 font-medium">
-                          自定义 Compose
+                          自建组合
                         </span>
                       )}
                     </div>
 
                     <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate">
-                      配置文件: <span className="text-slate-700 dark:text-slate-300">{proj.configFiles}</span>
+                      配置文件 <span className="text-slate-700 dark:text-slate-300">{proj.configFiles}</span>
                     </p>
 
                     {/* Associated Containers */}
                     {proj.containers.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400 mr-1">包含容器 ({proj.containers.length}):</span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 mr-1">应用（{proj.containers.length}）：</span>
                         {proj.containers.map(cName => (
                           <span
                             key={cName}
@@ -292,20 +298,20 @@ export const DockerCompose: React.FC = () => {
                     onClick={() => handleAction(proj.name, 'pull')}
                     disabled={actionLoading !== null}
                     className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 px-2 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 lg:px-3.5 lg:py-1.5"
-                    title="更新镜像"
+                    title="下载新包，重启组合后才会使用"
                   >
                     <DownloadCloud className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
-                    <span>更新</span>
+                    <span>下载新版</span>
                   </button>
 
                   <button
                     onClick={() => handleAction(proj.name, 'down')}
                     disabled={actionLoading !== null}
                     className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20 lg:px-3.5 lg:py-1.5"
-                    title="删除容器和网络，但保留 compose.yaml，方便修改后重新部署"
+                    title="删除应用及网络。\n保留配置，方便重新安装。"
                   >
                     <Box className="w-3.5 h-3.5" />
-                    <span>删容器</span>
+                    <span>移除应用</span>
                   </button>
 
                   <button
@@ -326,7 +332,7 @@ export const DockerCompose: React.FC = () => {
                         setDeleteModalProject(proj);
                       }}
                       className="flex w-full items-center justify-center rounded-xl border border-slate-200 bg-slate-100 p-2 text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-rose-950/50 dark:hover:text-rose-400 lg:w-auto"
-                      title="删除 Compose 项目及编排配置"
+                      title="删除组合"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -357,12 +363,11 @@ export const DockerCompose: React.FC = () => {
           <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-2xl">
             <div className="flex items-center space-x-3 text-rose-500">
               <AlertCircle className="w-6 h-6" />
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">确认删除 Compose 项目及编排配置？</h3>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">删除组合</h3>
             </div>
 
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              确定要删除项目 <span className="font-mono font-bold text-slate-900 dark:text-white">"{deleteModalProject.name}"</span> 吗？
-              系统将停止并删除所有关联容器，同时删除该项目的 compose.yaml。若只是要修改配置后重新部署，请关闭此窗口，使用“删容器”按钮。
+              删除此应用组合？ <span className="font-mono font-bold text-slate-900 dark:text-white">"{deleteModalProject.name}"</span> 停止并删除组合内的所有应用。<br />同时删除此组合的安装配置。<br />只想重装时，请用“移除应用”。
             </p>
 
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400 flex items-center space-x-2">
@@ -374,7 +379,7 @@ export const DockerCompose: React.FC = () => {
                 className="rounded border-slate-300 dark:border-slate-700 text-rose-500 focus:ring-0"
               />
               <label htmlFor="delVol" className="cursor-pointer">
-                同时清除数据卷 (-v)
+                删除数据
               </label>
             </div>
 
@@ -390,7 +395,7 @@ export const DockerCompose: React.FC = () => {
                 disabled={actionLoading !== null}
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs text-white font-bold transition disabled:opacity-50 shadow-xs"
               >
-                确认删除项目和配置
+                删除组合
               </button>
             </div>
           </div>

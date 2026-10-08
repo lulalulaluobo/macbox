@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/lulalulaluobo/macbox/pkg/config"
@@ -53,13 +54,30 @@ func normalizeServiceShortcutInput(shortcut config.ServiceShortcut, allowGenerat
 	return shortcut, nil
 }
 
-func (s *Server) handleServiceShortcutsList(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleServiceShortcutsList(w http.ResponseWriter, r *http.Request) {
 	cfg, err := config.Snapshot(s.cfg)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("读取服务导航失败: %v", err))
 		return
 	}
 	shortcuts := cfg.ServiceNav
+	if s.vmMgr != nil {
+		ip := s.vmMgr.NetworkStatus(r.Context()).IP
+		if ip != "" {
+			for i := range shortcuts {
+				if shortcuts[i].Source == "docker" {
+					if address, err := url.Parse(shortcuts[i].URL); err == nil {
+						if port := address.Port(); port != "" {
+							address.Host = ip + ":" + port
+						} else {
+							address.Host = ip
+						}
+						shortcuts[i].URL = address.String()
+					}
+				}
+			}
+		}
+	}
 	if shortcuts == nil {
 		shortcuts = []config.ServiceShortcut{}
 	}

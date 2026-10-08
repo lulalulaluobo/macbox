@@ -85,18 +85,18 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
     if (!file || deploying) return;
 
     if (!/\.(ya?ml)$/i.test(file.name)) {
-      setErrorMsg('请选择 .yml 或 .yaml 格式的 Docker Compose 文件');
+      setErrorMsg("请选择.yml或.yaml文件");
       return;
     }
     if (file.size > MAX_COMPOSE_FILE_BYTES) {
-      setErrorMsg('Compose 配置文件不能超过 8 MB');
+      setErrorMsg("配置文件不能超过8MB");
       return;
     }
 
     try {
       const content = await file.text();
       if (!content.trim()) {
-        setErrorMsg('导入的 Compose 配置文件为空');
+        setErrorMsg("配置文件为空，请选择其他文件");
         return;
       }
 
@@ -111,7 +111,7 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
         setProjectName(suggestProjectNameFromFile(file.name));
       }
     } catch {
-      setErrorMsg(`读取 ${file.name} 失败，请重试`);
+      setErrorMsg(`未能读取“${file.name}”，请重试`);
     }
   };
 
@@ -129,17 +129,17 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
 
   const handleDeploy = async () => {
     if (!projectName.trim()) {
-      setErrorMsg('请输入项目名称（仅支持英文字母、数字和横杠）');
+      setErrorMsg("名称可用英文、数字、下划线或横杠");
       return;
     }
     if (!yamlContent.trim()) {
-      setErrorMsg('Docker Compose YAML 配置不能为空');
+      setErrorMsg("请填写安装配置");
       return;
     }
 
     setErrorMsg(null);
     setDeploying(true);
-    setLogs(`🚀 正在向底层引擎提交 Compose 项目 [${projectName}] ...\n`);
+    setLogs(`正在提交应用组合“${projectName}”`);
 
     const controller = new AbortController();
     deployAbortRef.current?.abort();
@@ -152,14 +152,14 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
         line => setLogs(previous => `${previous}${line}\n`),
         controller.signal,
       );
-      setLogs(previous => `${previous}✅ 项目已成功创建并启动！\n`);
+      setLogs(previous => `${previous}✅ 应用组合已创建并启动。\n`);
       setTimeout(() => {
         onSuccess();
         onClose();
       }, 1500);
     } catch (err: any) {
 	  if (controller.signal.aborted) return;
-      setErrorMsg(`部署失败: ${err.message}`);
+      setErrorMsg(`部署失败，原因：${err.message}`);
       setLogs(prev => prev + `\n❌ 部署遇到错误: ${err.message}\n`);
     } finally {
       if (deployAbortRef.current === controller) deployAbortRef.current = null;
@@ -178,10 +178,10 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
             </div>
             <div className="min-w-0">
               <h3 className="truncate text-sm font-bold text-slate-900 dark:text-white sm:text-base">
-                {initialProject ? `编辑：${initialProject.name}` : '部署 Compose 项目'}
+                {initialProject ? `编辑配置：${initialProject.name}` : "安装组合"}
               </h3>
               <p className="hidden text-xs text-slate-400 sm:block">
-                编辑、导入 YAML 配置或选择服务模板
+                粘贴配置、导入文件或选用模板
               </p>
             </div>
           </div>
@@ -190,7 +190,7 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
             onClick={onClose}
             disabled={deploying}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 disabled:opacity-50"
-            aria-label="关闭 Compose 配置"
+            aria-label="关闭配置"
           >
             <X className="w-4 h-4" />
           </button>
@@ -210,7 +210,7 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
             {/* Project Name Input */}
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                项目名称 <span className="text-rose-400">*</span>
+                组合名称 <span className="text-rose-400">*</span>
               </label>
               <input
                 type="text"
@@ -221,7 +221,7 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
                 className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 font-mono text-xs text-slate-900 transition placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none disabled:opacity-60 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
               />
               <p className="mt-1 hidden text-[11px] text-slate-500 sm:block">
-                将作为项目所属目录和容器编排标识，存储于 <code className="text-indigo-400">/data/appdata/compose/{projectName || '{name}'}/</code>
+                用于标识此应用组合，配置保存在： <code className="text-indigo-400">/data/appdata/compose/{projectName || '{name}'}/</code>
               </p>
             </div>
 
@@ -229,7 +229,7 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
             <div className={`flex min-h-[430px] flex-col lg:min-h-[320px] lg:flex-1 ${initialProject ? 'flex-1' : ''}`}>
               <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5">
                 <label className="flex items-center space-x-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  <span>Compose 配置</span>
+                  <span>安装配置</span>
                 </label>
                 <div className="flex items-center gap-2">
                   {importedFileName && (
@@ -273,8 +273,8 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
                 {isDropActive && (
                   <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-slate-950/90 text-indigo-200">
                     <Upload className="h-8 w-8" />
-                    <span className="text-sm font-semibold">松开即可导入 Compose 配置</span>
-                    <span className="text-xs text-slate-400">仅支持 .yml / .yaml 文件</span>
+                    <span className="text-sm font-semibold">松开文件即可导入配置</span>
+                    <span className="text-xs text-slate-400">请选择.yml或.yaml文件</span>
                   </div>
                 )}
                 <textarea
@@ -283,7 +283,7 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
                   disabled={deploying}
                   spellCheck={false}
                   className="flex-1 w-full p-4 bg-transparent text-xs font-mono text-emerald-400/90 leading-relaxed resize-none focus:outline-none selection:bg-indigo-500/30"
-                  placeholder="在此输入、粘贴或导入 docker-compose.yml 配置..."
+                  placeholder="粘贴或导入安装配置"
                 />
               </div>
             </div>
@@ -293,7 +293,7 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
               <div className="rounded-2xl border border-slate-800 bg-black/90 p-4 space-y-2">
                 <div className="flex items-center space-x-2 text-xs font-bold text-slate-300">
                   <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>部署输出日志</span>
+                  <span>安装记录</span>
                 </div>
                 <pre
                   ref={logOutputRef}
@@ -311,7 +311,7 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
             <div className="flex w-full flex-col space-y-3 border-t border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40 sm:p-5 lg:w-80 lg:overflow-y-auto lg:border-t-0">
               <div className="flex items-center space-x-2 text-xs font-bold text-slate-900 dark:text-white">
                 <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>精选快速服务模板</span>
+                <span>常用模板</span>
               </div>
 
               <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
@@ -333,6 +333,7 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
                           {tpl.category}
                         </span>
                       </div>
+                      <p className="mt-1 text-[11px] font-mono text-slate-400">{tpl.brand}</p>
                       <p className="mt-1 hidden text-[11px] leading-normal text-slate-400 sm:line-clamp-2">
                         {tpl.description}
                       </p>
@@ -342,8 +343,8 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
               </div>
 
               <div className="hidden rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-3.5 text-[11px] leading-relaxed text-slate-400 sm:block">
-                💡 <strong className="text-indigo-300">提示：</strong> 可以导入本地{' '}
-                <code className="text-slate-200">docker-compose.yml</code>，也可以继续粘贴或编写配置后一键启动。
+                💡 <strong className="text-indigo-300">操作说明</strong> 可以导入配置文件：{' '}
+                <code className="text-slate-200">docker-compose.yml</code>也可粘贴或填写配置后启动
               </div>
             </div>
           )}
@@ -366,12 +367,12 @@ export const ComposeDeployModal: React.FC<ComposeDeployModalProps> = ({
             {deploying ? (
               <>
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>正在部署并拉取镜像...</span>
+                <span>安装中</span>
               </>
             ) : (
               <>
                 <Play className="w-3.5 h-3.5 fill-white" />
-                <span>{initialProject ? '保存并重新构建' : '一键构建并部署'}</span>
+                <span>{initialProject ? "保存应用" : "开始安装"}</span>
               </>
             )}
           </button>

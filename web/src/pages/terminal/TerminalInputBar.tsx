@@ -21,7 +21,7 @@ interface TerminalInputBarProps {
 export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
   onSendRaw,
   disabled = false,
-  placeholder = '在此输入文本、长命令或与终端 LLM 对话 (Enter 发送，Shift+Enter 换行)...',
+  placeholder = "输入命令或给助手的文字",
   prefill = null,
 }) => {
   const [inputText, setInputText] = useState('');
@@ -120,7 +120,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={() => onSendRaw('\x1b[A')}
             disabled={disabled}
             className="p-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-mono transition flex items-center justify-center disabled:opacity-40"
-            title="历史上一条 (↑)"
+            title="上一条"
           >
             <ArrowUp className="w-3.5 h-3.5" />
           </button>
@@ -129,7 +129,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={() => onSendRaw('\x1b[B')}
             disabled={disabled}
             className="p-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-mono transition flex items-center justify-center disabled:opacity-40"
-            title="历史下一条 (↓)"
+            title="下一条"
           >
             <ArrowDown className="w-3.5 h-3.5" />
           </button>
@@ -138,7 +138,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={() => onSendRaw('\x1b[D')}
             disabled={disabled}
             className="p-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-mono transition flex items-center justify-center disabled:opacity-40"
-            title="光标左移 (←)"
+            title="向左移动"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
           </button>
@@ -147,7 +147,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={() => onSendRaw('\x1b[C')}
             disabled={disabled}
             className="p-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-mono transition flex items-center justify-center disabled:opacity-40"
-            title="光标右移 (→)"
+            title="向右移动"
           >
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
@@ -160,7 +160,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={() => onSendRaw('\t')}
             disabled={disabled}
             className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white text-xs font-mono font-semibold transition disabled:opacity-40"
-            title="自动补全 (Tab)"
+            title="补全命令"
           >
             Tab
           </button>
@@ -169,7 +169,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={() => onSendRaw('\x03')}
             disabled={disabled}
             className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/50 active:scale-95 text-rose-300 hover:text-rose-200 text-xs font-mono font-semibold transition disabled:opacity-40"
-            title="中断命令 (Ctrl+C)"
+            title="中断命令"
           >
             Ctrl+C
           </button>
@@ -178,7 +178,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={handlePasteClipboard}
             disabled={disabled}
             className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white text-xs font-mono font-semibold transition disabled:opacity-40"
-            title="从剪贴板粘贴文本"
+            title="粘贴"
           >
             Ctrl+V
           </button>
@@ -187,7 +187,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={() => onSendRaw('\x1a')}
             disabled={disabled}
             className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white text-xs font-mono font-semibold transition disabled:opacity-40"
-            title="挂起进程 (Ctrl+Z)"
+            title="暂停命令"
           >
             Ctrl+Z
           </button>
@@ -196,9 +196,9 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={() => onSendRaw('clear\r')}
             disabled={disabled}
             className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 hover:text-white text-xs font-mono font-semibold transition disabled:opacity-40"
-            title="清屏 (clear)"
+            title="清空显示"
           >
-            清屏
+            清空显示
           </button>
         </div>
 
@@ -208,7 +208,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             type="button"
             onClick={() => setIsMultiline(!isMultiline)}
             className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-sky-300 border border-slate-800 text-xs transition"
-            title={isMultiline ? '切换为单行极简输入' : '切换为多行编写模式 (适合 LLM 复杂 Prompt)'}
+            title={isMultiline ? "单行输入" : "多行输入"}
           >
             {isMultiline ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
           </button>
@@ -238,7 +238,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
               type="button"
               onClick={() => setInputText('')}
               className="p-1.5 rounded-xl text-slate-500 hover:text-slate-300 hover:bg-slate-900 transition"
-              title="清空输入框"
+              title="清空输入"
             >
               <Eraser className="w-4 h-4" />
             </button>
@@ -249,7 +249,7 @@ export const TerminalInputBar: React.FC<TerminalInputBarProps> = ({
             onClick={handleSend}
             disabled={disabled}
             className="flex min-h-10 items-center space-x-1.5 rounded-xl bg-sky-500 px-3 py-2 text-xs font-bold text-white shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3.5"
-            title="发送命令到终端 (Enter)"
+            title="发送"
           >
             <span>发送</span>
             <CornerDownLeft className="w-3.5 h-3.5" />

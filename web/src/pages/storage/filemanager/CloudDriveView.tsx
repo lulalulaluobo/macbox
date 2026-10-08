@@ -41,7 +41,7 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
       const result = await api.listCloudFiles(mount.id, fid);
       setFiles(result.items || []);
     } catch (err: any) {
-      setError(err.message || '读取云盘目录失败');
+      setError(err.message || "未能读取网盘文件夹，请刷新重试");
     } finally {
       setLoading(false);
     }
@@ -124,12 +124,12 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
 
 
   const createFolder = async () => {
-    const name = window.prompt('新建云端文件夹', '新建文件夹');
+    const name = window.prompt("新文件夹", "新文件夹");
     if (!name?.trim()) return;
     try {
       await api.createCloudFolder(mount.id, parentFid, name.trim());
       await loadFiles();
-    } catch (err: any) { setError(err.message || '创建文件夹失败'); }
+    } catch (err: any) { setError(err.message || "未能创建文件夹，请检查权限"); }
   };
 
   const rename = async (file: CloudFile) => {
@@ -138,23 +138,25 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
     try {
       await api.renameCloudFile(mount.id, file.fid, name.trim());
       await loadFiles();
-    } catch (err: any) { setError(err.message || '重命名失败'); }
+    } catch (err: any) { setError(err.message || "未能修改名称，请检查权限"); }
   };
 
   const remove = async (file: CloudFile) => {
-    if (!window.confirm(`确定删除“${file.name}”吗？此操作会同步删除云端项目。`)) return;
+    if (!window.confirm(`删除“${file.name}”？
+网盘中的原文件也将删除。`)) return;
     try {
       await api.deleteCloudFile(mount.id, file.fid);
       await loadFiles();
-    } catch (err: any) { setError(err.message || '删除云端文件失败'); }
+    } catch (err: any) { setError(err.message || "未能删除网盘文件，请重试"); }
   };
 
   const removeMount = async () => {
-    if (!window.confirm(`解除“${mount.name}”挂载？不会删除夸克云端文件。`)) return;
+    if (!window.confirm(`断开网盘“${mount.name}”？
+网盘中的文件保持不变。`)) return;
     try {
       await api.deleteCloudMount(mount.id);
       onRemoved();
-    } catch (err: any) { setError(err.message || '解除云盘挂载失败'); }
+    } catch (err: any) { setError(err.message || "未能断开网盘，请重试"); }
   };
 
   return (
@@ -167,7 +169,7 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
       {isDraggingUpload && (
         <div className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center border-4 border-dashed border-sky-400 bg-sky-500/20 backdrop-blur-sm">
           <Upload className="mb-3 h-16 w-16 animate-bounce text-sky-500" />
-          <p className="text-xl font-bold text-slate-900 dark:text-white">松开鼠标上传到夸克网盘</p>
+          <p className="text-xl font-bold text-slate-900 dark:text-white">松开文件，上传到夸克网盘</p>
           <p className="mt-1 text-sm text-sky-700 dark:text-sky-200">{breadcrumbs[breadcrumbs.length - 1]?.name || mount.name}</p>
         </div>
       )}
@@ -179,10 +181,10 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
             {breadcrumbs.map((crumb, index) => <React.Fragment key={crumb.fid}><button type="button" onClick={() => jumpTo(index)} className="max-w-[140px] truncate hover:text-sky-600">{crumb.name}</button>{index < breadcrumbs.length - 1 && <ChevronRight className="h-3.5 w-3.5 shrink-0" />}</React.Fragment>)}
           </div>
           <input ref={uploadInputRef} type="file" multiple className="hidden" onChange={handleUploadChange} />
-          <button type="button" onClick={() => uploadInputRef.current?.click()} className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-semibold text-white shadow-sm"><Upload className="h-4 w-4" />上传</button>
+          <button type="button" onClick={() => uploadInputRef.current?.click()} className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-semibold text-white shadow-sm"><Upload className="h-4 w-4" />上传文件</button>
           <button type="button" onClick={createFolder} className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-semibold text-white shadow-sm"><Plus className="h-4 w-4" />新建</button>
-          <button type="button" onClick={() => loadFiles()} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-slate-800" aria-label="刷新云盘"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
-          <button type="button" onClick={toggleSelectionMode} className={`flex h-10 items-center gap-1.5 rounded-xl px-3 text-xs font-semibold ${selectionMode ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800'}`} aria-label="选择云端文件"><CheckSquare className="h-4 w-4" /><span className="hidden sm:inline">选择</span></button>
+          <button type="button" onClick={() => loadFiles()} className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-slate-800" aria-label="刷新文件"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
+          <button type="button" onClick={toggleSelectionMode} className={`flex h-10 items-center gap-1.5 rounded-xl px-3 text-xs font-semibold ${selectionMode ? 'bg-sky-500 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800'}`} aria-label="选择文件"><CheckSquare className="h-4 w-4" /><span className="hidden sm:inline">选择位置</span></button>
           {selectionMode && <>
             <button type="button" onClick={selectAllFiles} disabled={!files.length} className="flex h-10 items-center rounded-xl bg-slate-100 px-3 text-xs font-semibold text-slate-600 disabled:opacity-40 dark:bg-slate-800 dark:text-slate-300">{selectedFids.size === files.length && files.length ? '取消全选' : '全选'}</button>
             <button type="button" onClick={() => setDownloadTargets(selectedFiles)} disabled={!selectedFiles.length} className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-500 px-3 text-xs font-semibold text-white disabled:opacity-40"><Download className="h-4 w-4" />下载{selectedFiles.length ? ` (${selectedFiles.length})` : ''}</button>
@@ -193,7 +195,7 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
             <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-slate-800"><MoreHorizontal className="h-4 w-4" /></summary>
             <div className="absolute right-0 top-12 z-20 w-48 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
               <button type="button" onClick={() => setShowTransferTasks(true)} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs text-slate-700 hover:bg-sky-50 dark:text-slate-200 dark:hover:bg-slate-500/10"><ListChecks className="h-4 w-4 text-sky-500" />传输任务{jobs.some((job) => job.status === 'running') && <span className="ml-auto h-2 w-2 rounded-full bg-sky-500" />}</button>
-              <button type="button" onClick={removeMount} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"><X className="h-4 w-4" />解除云盘挂载</button>
+              <button type="button" onClick={removeMount} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"><X className="h-4 w-4" />断开网盘</button>
             </div>
           </details>
         </div>
@@ -202,12 +204,12 @@ export const CloudDriveView: React.FC<CloudDriveViewProps> = ({ mount, onBack, o
       <section className="min-h-0 flex-1 overflow-y-auto rounded-[22px] border border-slate-200/80 bg-white p-3 dark:border-slate-800/80 dark:bg-slate-900/60 sm:p-4">
         {error && <div className="mb-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600"><span>{error}</span><button type="button" onClick={() => setError('')}><X className="h-4 w-4" /></button></div>}
         <div className="mb-3 flex items-center gap-2"><button type="button" onClick={goUp} disabled={breadcrumbs.length <= 1} className="flex h-9 items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 text-xs text-slate-600 disabled:opacity-40 dark:bg-slate-800 dark:text-slate-300"><ArrowLeft className="h-3.5 w-3.5" />上一级</button><span className="text-[11px] text-slate-400">{files.length} 个项目</span></div>
-        {loading ? <div className="flex justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-sky-400" /></div> : files.length === 0 ? <div className="flex flex-col items-center justify-center py-20 text-slate-400"><Cloud className="mb-3 h-10 w-10" /><p className="text-sm">当前云端目录为空</p></div> : <div className="divide-y divide-slate-100 dark:divide-slate-800">{files.map((file) => <div key={file.fid} className={`flex items-center gap-3 py-3 ${selectionMode && selectedFids.has(file.fid) ? 'rounded-xl bg-sky-50 px-2 dark:bg-sky-500/10' : ''}`}>
-          {selectionMode && <button type="button" onClick={() => toggleSelection(file)} className="flex h-9 w-9 shrink-0 items-center justify-center text-sky-500" aria-label={`选择${file.name}`}>{selectedFids.has(file.fid) ? <CheckSquare className="h-5 w-5" /> : <Square className="h-5 w-5 text-slate-300 dark:text-slate-600" />}</button>}
+        {loading ? <div className="flex justify-center py-20"><RefreshCw className="h-6 w-6 animate-spin text-sky-400" /></div> : files.length === 0 ? <div className="flex flex-col items-center justify-center py-20 text-slate-400"><Cloud className="mb-3 h-10 w-10" /><p className="text-sm">这个网盘文件夹是空的</p></div> : <div className="divide-y divide-slate-100 dark:divide-slate-800">{files.map((file) => <div key={file.fid} className={`flex items-center gap-3 py-3 ${selectionMode && selectedFids.has(file.fid) ? 'rounded-xl bg-sky-50 px-2 dark:bg-sky-500/10' : ''}`}>
+          {selectionMode && <button type="button" onClick={() => toggleSelection(file)} className="flex h-9 w-9 shrink-0 items-center justify-center text-sky-500" aria-label={`选择：${file.name}`}>{selectedFids.has(file.fid) ? <CheckSquare className="h-5 w-5" /> : <Square className="h-5 w-5 text-slate-300 dark:text-slate-600" />}</button>}
           <button type="button" onClick={() => selectionMode ? toggleSelection(file) : file.isDir && openFolder(file)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-sky-500 dark:bg-slate-800"><Folder className="h-5 w-5" /></span><span className="min-w-0"><span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-100">{file.name}</span><span className="block text-[11px] text-slate-400">{file.isDir ? '文件夹' : formatBytes(file.size)}</span></span></button>
           {!selectionMode && <button type="button" onClick={() => setDownloadTargets([file])} className="flex h-9 items-center gap-1.5 rounded-lg bg-sky-50 px-2.5 text-xs font-semibold text-sky-600 dark:bg-sky-500/10 dark:text-sky-300"><Download className="h-3.5 w-3.5" />下载</button>}
-          {!selectionMode && <button type="button" onClick={() => rename(file)} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-sky-500 dark:hover:bg-slate-800" aria-label={`重命名${file.name}`}><Pencil className="h-4 w-4" /></button>}
-          {!selectionMode && <button type="button" onClick={() => remove(file)} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-500/10" aria-label={`删除${file.name}`}><Trash2 className="h-4 w-4" /></button>}
+          {!selectionMode && <button type="button" onClick={() => rename(file)} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-sky-500 dark:hover:bg-slate-800" aria-label={`重命名：${file.name}`}><Pencil className="h-4 w-4" /></button>}
+          {!selectionMode && <button type="button" onClick={() => remove(file)} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-500/10" aria-label={`删除：${file.name}`}><Trash2 className="h-4 w-4" /></button>}
         </div>)}</div>}
       </section>
       <CloudDownloadModal files={downloadTargets} onClose={() => setDownloadTargets([])} onConfirm={(destination) => download(downloadTargets, destination)} />

@@ -18,6 +18,9 @@ export interface SystemStats {
   timestamp: string;
 }
 export interface VMStatus {
+  networkMode?: string;
+  bridgeIP?: string;
+  bridgeInterface?: string;
   name: string;
   status: 'Running' | 'Stopped' | 'NotCreated' | 'Broken';
   dir: string;
@@ -30,37 +33,6 @@ export interface VMStatus {
   dockerReady: boolean;
   errors?: string[];
   updatedAt: string;
-}
-
-export interface VMListeningPort {
-  port: number;
-  addresses: string[];
-  process?: string;
-  pid?: number;
-  forwarded: boolean;
-  source: 'manual' | 'managed' | 'none';
-  publishable: boolean;
-  reason?: string;
-}
-
-export interface VMPortForward {
-  port: number;
-  source: 'manual' | 'managed';
-  listening: boolean;
-  process?: string;
-  removable: boolean;
-}
-
-export interface VMListeningPortsResponse {
-  ports: VMListeningPort[];
-  vmStatus?: string;
-}
-
-export interface VMPortForwardsResponse {
-  ports: VMPortForward[];
-  bindAddress: string;
-  requiresRestart: boolean;
-  vmStatus?: string;
 }
 
 export interface PowerStatus {

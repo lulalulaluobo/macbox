@@ -17,11 +17,11 @@ export const Docker: React.FC<DockerProps> = ({ onOpenTerminalWithLogs, primaryI
   const [activeTab, setActiveTab] = useState<DockerTab>('overview');
 
   const navItems: { id: DockerTab; label: string; icon: React.ReactNode; badge?: string }[] = [
-    { id: 'overview', label: '概览', icon: <LayoutDashboard className="w-4 h-4" /> },
-    { id: 'containers', label: '容器', icon: <Box className="w-4 h-4" /> },
-    { id: 'compose', label: '编排', icon: <Layers className="w-4 h-4" /> },
-    { id: 'images', label: '镜像', icon: <Disc3 className="w-4 h-4" /> },
-    { id: 'networks', label: '网络', icon: <Network className="w-4 h-4" /> },
+    { id: 'overview', label: "运行概况", icon: <LayoutDashboard className="w-4 h-4" /> },
+    { id: 'containers', label: "已装应用", icon: <Box className="w-4 h-4" /> },
+    { id: 'compose', label: "应用组合", icon: <Layers className="w-4 h-4" /> },
+    { id: 'images', label: "应用包", icon: <Disc3 className="w-4 h-4" /> },
+    { id: 'networks', label: "应用网络", icon: <Network className="w-4 h-4" /> },
   ];
 
   return (

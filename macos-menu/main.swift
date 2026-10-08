@@ -742,6 +742,13 @@ final class MenuBarDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let installedBinary = home + "/.local/share/macbox/bin/macbox"
         guard fileManager.isExecutableFile(atPath: installedBinary) else { return true }
 
+        // An older menu bundle must not downgrade a runtime updated online.
+        if let installed = readTrimmedFile(home + "/.local/share/macbox/VERSION"),
+           let bundled = readTrimmedFile(runtime.appendingPathComponent("VERSION").path),
+           installed.compare(bundled, options: .numeric) == .orderedDescending {
+            return false
+        }
+
         let installedBuildID = readTrimmedFile(home + "/.local/share/macbox/BUILD_ID")
         let bundledBuildID = readTrimmedFile(runtime.appendingPathComponent("BUILD_ID").path)
         if let bundledBuildID {

@@ -41,8 +41,8 @@ export const FileActionSheet: React.FC<FileActionSheetProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/35" role="dialog" aria-modal="true" aria-label={`${item.name} 文件操作`}>
-      <button type="button" className="absolute inset-0" onClick={onClose} aria-label="关闭文件操作" />
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/35" role="dialog" aria-modal="true" aria-label={`文件操作：${item.name}`}>
+      <button type="button" className="absolute inset-0" onClick={onClose} aria-label="关闭操作" />
       <section className="relative w-full rounded-t-[28px] border-t border-slate-200 bg-white px-4 pb-[calc(18px+env(safe-area-inset-bottom))] pt-3 dark:border-slate-700 dark:bg-slate-900 sm:mb-4 sm:max-w-lg sm:rounded-[28px] sm:border">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-200 dark:bg-slate-700" />
         <div className="flex min-w-0 items-center gap-3">
@@ -68,7 +68,7 @@ export const FileActionSheet: React.FC<FileActionSheetProps> = ({
         </div>
 
         <button type="button" onClick={onCopyPath} className="mt-3 flex min-h-12 w-full items-center justify-between rounded-2xl bg-slate-50 px-4 text-sm font-medium text-slate-700 dark:bg-slate-800/70 dark:text-slate-200">
-          <span>复制{item.isDir ? '文件夹' : '文件'}路径</span>
+          <span>复制{item.isDir ? '文件夹' : '文件'}文件位置</span>
           <Copy className="h-5 w-5" />
         </button>
 
@@ -78,7 +78,7 @@ export const FileActionSheet: React.FC<FileActionSheetProps> = ({
             <Archive className="h-5 w-5" />
           </button>
           <a href={api.getFileDownloadUrl(item.path)} download onClick={onClose} className="flex min-h-12 items-center justify-between rounded-2xl bg-slate-50 px-4 text-sm font-medium text-slate-700 dark:bg-slate-800/70 dark:text-slate-200">
-            <span>{item.isDir ? '下载文件夹（ZIP）' : '下载文件'}</span>
+            <span>{item.isDir ? "打包下载" : '下载文件'}</span>
             <Download className="h-5 w-5" />
           </a>
         </div>

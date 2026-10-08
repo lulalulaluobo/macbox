@@ -20,23 +20,25 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
   const handlePull = async (targetImage?: string) => {
     const img = (targetImage || imageName).trim();
     if (!img) {
-      setErrorMsg('请输入有效的镜像名称及标签 (如 nginx:alpine)');
+      setErrorMsg("请填写有效的包名和版本");
       return;
     }
 
     setErrorMsg(null);
     setPulling(true);
-    setLogs(`📦 开始拉取 Docker 镜像: ${img} ...\n⌛ 正在连接镜像仓库并下载数据层...\n`);
+    setLogs(`正在下载应用包：
+${img}
+正在连接来源并下载。`);
 
     try {
       const res = await api.pullImage(img);
-      setLogs(prev => prev + (res.logs || '镜像拉取完成！\n'));
+      setLogs(prev => prev + (res.logs || '应用包已下载。\n'));
       setTimeout(() => {
         onSuccess();
         onClose();
       }, 1500);
     } catch (err: any) {
-      setErrorMsg(`拉取镜像失败: ${err.message}`);
+      setErrorMsg(`拉取应用包失败，原因：${err.message}`);
       setLogs(prev => prev + `\n❌ 拉取错误: ${err.message}\n`);
     } finally {
       setPulling(false);
@@ -53,8 +55,8 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
               <Download className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-slate-900 dark:text-white">拉取 Docker 镜像</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">从 Docker Hub 或镜像仓库下载镜像</p>
+              <h3 className="font-bold text-base text-slate-900 dark:text-white">下载包</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">从应用包仓库下载程序包</p>
             </div>
           </div>
 
@@ -79,7 +81,7 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
           {/* Input */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              镜像名称与标签 (如: nginx:alpine)
+              包名版本
             </label>
             <div className="flex space-x-2">
               <input
@@ -96,7 +98,7 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
                 className="flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-xs text-white font-bold transition disabled:opacity-50 shadow-xs"
               >
                 {pulling ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                <span>{pulling ? '拉取中' : '开始拉取'}</span>
+                <span>{pulling ? "下载中" : "开始下载"}</span>
               </button>
             </div>
           </div>
@@ -105,7 +107,7 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
           <div className="space-y-2">
             <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
               <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
-              <span>常用热门基础镜像:</span>
+              <span>常用包</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {POPULAR_IMAGES.map(item => (
@@ -129,7 +131,7 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
             <div className="rounded-2xl border border-slate-800 bg-black/90 p-4 space-y-2">
               <div className="flex items-center space-x-2 text-xs font-bold text-slate-300">
                 <Terminal className="w-3.5 h-3.5 text-sky-400" />
-                <span>终端拉取输出</span>
+                <span>下载记录</span>
               </div>
               <pre className="font-mono text-xs text-emerald-400/90 whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed">
                 {logs}
@@ -145,7 +147,7 @@ export const ImagePullModal: React.FC<ImagePullModalProps> = ({ isOpen, onClose,
             disabled={pulling}
             className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 font-semibold transition disabled:opacity-50"
           >
-            {pulling ? '后台拉取中' : '关闭'}
+            {pulling ? "下载中" : '关闭'}
           </button>
         </div>
       </div>

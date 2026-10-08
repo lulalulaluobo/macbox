@@ -11,7 +11,6 @@ import type { TerminalShortcut } from './terminal/TerminalFileBrowser';
 import { TerminalFileModals } from './terminal/TerminalFileModals';
 import type { TerminalEditingFile } from './terminal/TerminalFileModals';
 import { TerminalToolbar } from './terminal/TerminalToolbar';
-import { ServicePublishModal } from './terminal/ServicePublishModal';
 import { TerminalViewport } from './terminal/TerminalViewport';
 import { useTerminalSession } from './terminal/useTerminalSession';
 import { useTerminalLayout } from './terminal/useTerminalLayout';
@@ -21,7 +20,7 @@ interface TerminalPageProps {
   isAdmin?: boolean;
 }
 
-export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAdmin = false }) => {
+export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const {
     xtermInstance,
@@ -38,7 +37,6 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
   } = useTerminalSession({ terminalRef });
   const [fullscreen, setFullscreen] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
-  const [showServicePublish, setShowServicePublish] = useState(false);
 
   // File System State
   const [currentPath, setCurrentPath] = useState<string>('/data');
@@ -83,7 +81,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
   const rootShortcuts: TerminalShortcut[] = [
     ...(loginUser === 'root' ? [{ label: '根目录', path: '/', icon: HardDrive }] : []),
     { label: 'MacBox', path: '/data', icon: Folder },
-    { label: 'Docker', path: '/data/appdata', icon: Code },
+    { label: "应用管理", path: '/data/appdata', icon: Code },
   ];
 
   // The VM root is a browse-only view. Mutating operations continue to be
@@ -99,7 +97,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
   const aiCommands = [
     {
       label: 'Codex',
-      title: '在当前终端启动 Codex YOLO 模式',
+      title: "启动Codex并跳过安全审批。\n请仅在可信环境使用。",
       command: 'codex --yolo',
     },
   ];
@@ -142,7 +140,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
       setFiles(res.items || []);
       setCurrentPath(res.path || targetPath);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `读取目录失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `读取目录失败，原因：${err.message}` });
     } finally {
       setFilesLoading(false);
     }
@@ -184,33 +182,33 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isVMSystemPath) {
-      setAlertMsg({ type: 'error', text: 'VM 系统目录仅支持浏览，请切换到 MacBox 数据根目录后操作' });
+      setAlertMsg({ type: 'error', text: "系统文件仅能查看。\n请切换到数据文件夹后操作。" });
       return;
     }
     if (!newFolderName.trim()) return;
     const target = currentPath === '/' ? `/${newFolderName.trim()}` : `${currentPath}/${newFolderName.trim()}`;
     try {
       await api.createFolder(target);
-      setAlertMsg({ type: 'success', text: `文件夹 ${newFolderName} 创建成功` });
+      setAlertMsg({ type: 'success', text: `文件夹“${newFolderName}”已创建` });
       setShowMkdirModal(false);
       setNewFolderName('');
       loadFiles(currentPath);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `创建文件夹失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `创建文件夹失败，原因：${err.message}` });
     }
   };
 
   // Delete Path
   const handleDelete = async (item: FileItem) => {
-    const isOk = window.confirm(`确认删除 ${item.isDir ? '文件夹' : '文件'}「${item.name}」吗？操作无法恢复！`);
+    const isOk = window.confirm(`永久删除“${item.name}”？\n此操作无法撤销。`);
     if (!isOk) return;
 
     try {
       await api.deleteFile(item.path);
-      setAlertMsg({ type: 'success', text: `已删除 ${item.name}` });
+      setAlertMsg({ type: 'success', text: `已删除“${item.name}”` });
       loadFiles(currentPath);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `删除失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `删除失败，原因：${err.message}` });
     }
   };
 
@@ -225,7 +223,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
         readOnly: isVMSystemPath,
       });
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `打开文件失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `打开文件失败，原因：${err.message}` });
     }
   };
 
@@ -235,11 +233,11 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
     setSavingFile(true);
     try {
       await api.writeFile(editingFile.path, editingFile.content);
-      setAlertMsg({ type: 'success', text: `文件 ${editingFile.name} 保存成功！` });
+      setAlertMsg({ type: 'success', text: `文件“${editingFile.name}”已保存` });
       setEditingFile(null);
       loadFiles(currentPath);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `保存文件失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `保存文件失败，原因：${err.message}` });
     } finally {
       setSavingFile(false);
     }
@@ -249,7 +247,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
   const handleFileUpload = async (filesToUpload: FileList | null) => {
     if (!filesToUpload || filesToUpload.length === 0) return;
     if (isVMSystemPath) {
-      setAlertMsg({ type: 'error', text: 'VM 系统目录仅支持浏览，请切换到 MacBox 数据根目录后上传' });
+      setAlertMsg({ type: 'error', text: "系统文件夹不支持上传。\n请切换到数据文件夹后上传。" });
       return;
     }
     setUploading(true);
@@ -257,10 +255,10 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
       for (let i = 0; i < filesToUpload.length; i++) {
         await api.uploadFile(filesToUpload[i], currentPath);
       }
-      setAlertMsg({ type: 'success', text: `成功上传 ${filesToUpload.length} 个文件！` });
+      setAlertMsg({ type: 'success', text: `已上传${filesToUpload.length}个文件` });
       loadFiles(currentPath);
     } catch (err: any) {
-      setAlertMsg({ type: 'error', text: `上传失败: ${err.message}` });
+      setAlertMsg({ type: 'error', text: `上传失败，原因：${err.message}` });
     } finally {
       setUploading(false);
     }
@@ -279,7 +277,7 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
       const next = isFavorite ? prev.filter((item) => item !== path) : [...prev, path];
       setAlertMsg({
         type: 'success',
-        text: isFavorite ? `已取消收藏 ${path}` : `已收藏 ${path}，可从上方快捷目录进入`,
+        text: isFavorite ? `已取消收藏“${path}”` : `已收藏“${path}”，可从快捷目录打开`,
       });
       return next;
     });
@@ -368,14 +366,12 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
             loginUser={loginUser}
             fullscreen={fullscreen}
             commands={aiCommands}
-            canPublishService={isAdmin}
             onToggleSidebar={() => {
               const next = !showSidebar;
               setShowSidebar(next);
               if (next && files.length === 0) void loadFiles(currentPath);
             }}
             onReconnect={handleReconnect}
-            onPublishService={() => setShowServicePublish(true)}
             onCloseSession={handleCloseSession}
             onSwitchUser={() => handleSwitchUser(loginUser === 'root' ? 'default' : 'root')}
             onSendCommand={(command) => sendToTerminal(`${command}\n`)}
@@ -410,12 +406,6 @@ export const TerminalPage: React.FC<TerminalPageProps> = ({ prefill = null, isAd
         onSaveFile={handleSaveFile}
       />
 
-      {showServicePublish && (
-        <ServicePublishModal
-          onClose={() => setShowServicePublish(false)}
-          onReconnect={handleReconnect}
-        />
-      )}
     </div>
   );
 };

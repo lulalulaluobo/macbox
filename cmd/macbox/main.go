@@ -16,12 +16,27 @@ import (
 	"time"
 
 	"github.com/lulalulaluobo/macbox/pkg/api"
+	"github.com/lulalulaluobo/macbox/pkg/buildinfo"
 	"github.com/lulalulaluobo/macbox/pkg/config"
 	"github.com/lulalulaluobo/macbox/pkg/system"
+	"github.com/lulalulaluobo/macbox/pkg/update"
+	"github.com/lulalulaluobo/macbox/pkg/vm"
 	"github.com/lulalulaluobo/macbox/web"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(buildinfo.Version)
+		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "--apply-update" {
+		if err := update.Run(os.Args[2]); err != nil {
+			log.Print(err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Resolve the release layout from the executable first. This keeps the
 	// binary usable from any working directory and also handles the symlink
 	// installed in ~/.local/bin by the CLI release installer.
@@ -36,6 +51,19 @@ func main() {
 		log.Fatalf("[MacBox] 无法加载安全配置，服务未启动: %v", err)
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "network" {
+		manager := vm.NewManager(cfg)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+		defer cancel()
+		if len(os.Args) > 2 && os.Args[2] == "setup" {
+			if err := manager.Restart(ctx, projectRoot); err != nil {
+				log.Fatal(err)
+			}
+		}
+		status := manager.NetworkStatus(ctx)
+		fmt.Printf("模式: %s\n网卡: %s\nIP: %s\n%s\n", status.Mode, status.Interface, status.IP, status.Message)
+		return
+	}
 	// Check CLI subcommand: macbox service [install|uninstall|status]
 	if len(os.Args) > 1 && os.Args[1] == "service" {
 		serviceMgr := system.NewServiceManager(cfg, projectRoot)
@@ -120,6 +148,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("[MacBox] 认证服务初始化失败，服务未启动: %v", err)
 	}
+	server.ConfigureUpdates(port, os.Args[1:])
 	server.StartMaintenance()
 	apiHandler := server.Handler()
 
