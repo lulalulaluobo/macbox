@@ -12,6 +12,8 @@
 
 本机已经安装客户端并准备好官方授权。真实账号授权尚待用户完成；当前尚未取得远程 IP，未宣称已完成真实外网连通验证。
 
+2026-10-09 更新：用户已授权推送和发布。只读检查确认设备处于 Running、已分配私有地址、后台中转 active，运行系统通过该地址打开后台返回 HTTP 200。跨外部网络设备的验证仍由实际使用环境确认，未将私有设备地址或账号写入发布说明。
+
 ## 已实现
 
 - 官方设备授权链接；不收集 Tailscale 账号密码或要求填写 Auth Key。
@@ -58,5 +60,5 @@ MacBox 后台位于 Mac，应用位于 Linux。后台采用固定目的地的专
 
 - [Apple 芯片测试安装包](/Users/luluen/ai-project/mac-nas/dist/MacBox_0.1.4_macos_aarch64.dmg)，SHA-256：`2c2e47f165a43f7984342f54bc5e335385dc81c6166383605a15ab9fd00a4ff1`。
 - 安装位置：`/Applications/MacBoxMemu.app`，运行组件：`~/.local/share/macbox`。
-- 源码已纳入本地 Git；本次模块先供本机测试，未推送或发布新 Release。
+- 源码已纳入本地 Git；以上为 2026-10-08 本机测试记录。2026-10-09 用户已授权发布 v0.1.4，正式发布资产以 GitHub Release 为准。
 - 安装包采用 ad-hoc 签名，未 Apple 公证。升级前程序与运行组件备份位于 `tmp/macbox-before-tailscale.app` 和 `tmp/macbox-runtime-before-tailscale`。
