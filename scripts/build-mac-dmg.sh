@@ -224,8 +224,8 @@ build_dmg() {
     -trimpath -ldflags="$BUILD_FLAGS" \
     -o "$helper_path" "$ROOT_DIR/cmd/macbox"
 
-  cp -R "$ROOT_DIR/templates" "$runtime_dir/templates"
-  cp -R "$ROOT_DIR/assets" "$runtime_dir/assets"
+  cp -R -X "$ROOT_DIR/templates" "$runtime_dir/templates"
+  cp -R -X "$ROOT_DIR/assets" "$runtime_dir/assets"
   cp "$ROOT_DIR/scripts/install.sh" "$runtime_dir/install.sh"
   cp "$ROOT_DIR/scripts/uninstall.sh" "$runtime_dir/uninstall.sh"
   cp "$ROOT_DIR/scripts/macbox.command" "$runtime_dir/MacBox.command"
@@ -234,6 +234,9 @@ build_dmg() {
   cp "$ROOT_DIR/LICENSE" "$runtime_dir/LICENSE"
   printf '%s\n' "$VERSION" > "$runtime_dir/VERSION"
   chmod 0755 "$helper_path" "$runtime_dir/install.sh" "$runtime_dir/uninstall.sh" "$runtime_dir/MacBox.command"
+
+  # Finder metadata belongs to the build machine, never to the release.
+  find "$runtime_dir" -type f \( -name '.DS_Store' -o -name '._*' \) -delete
 
   log "签名内部后端并封装 App..."
   sign_macho "$helper_path" "io.github.lulalulaluobo.macbox.backend"

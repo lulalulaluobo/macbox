@@ -54,8 +54,8 @@ CGO_ENABLED=0 GOOS=darwin GOARCH="$GOARCH_VALUE" go build \
   -o "$PACKAGE_DIR/bin/macbox" "$ROOT_DIR/cmd/macbox"
 printf '%s\n' "$VERSION" > "$PACKAGE_DIR/VERSION"
 printf '%s\n' "$BUILD_COMMIT-$BUILD_TIME" > "$PACKAGE_DIR/BUILD_ID"
-cp -R "$ROOT_DIR/templates" "$PACKAGE_DIR/templates"
-cp -R "$ROOT_DIR/assets" "$PACKAGE_DIR/assets"
+cp -R -X "$ROOT_DIR/templates" "$PACKAGE_DIR/templates"
+cp -R -X "$ROOT_DIR/assets" "$PACKAGE_DIR/assets"
 cp "$ROOT_DIR/MACBOX_DEPLOYMENT_PROMPT.md" "$PACKAGE_DIR/MACBOX_DEPLOYMENT_PROMPT.md"
 cp "$ROOT_DIR/scripts/install.sh" "$PACKAGE_DIR/install.sh"
 cp "$ROOT_DIR/scripts/uninstall.sh" "$PACKAGE_DIR/uninstall.sh"
@@ -68,6 +68,9 @@ chmod 0755 "$PACKAGE_DIR/bin/macbox" "$PACKAGE_DIR/install.sh" "$PACKAGE_DIR/uni
 
 "$ROOT_DIR/scripts/build-macos-menu-app.sh" "$PACKAGE_DIR/MacBoxMemu.app"
 
+# Only clean the staging copy; local Finder metadata must not enter a release.
+find "$PACKAGE_DIR" -type f \( -name '.DS_Store' -o -name '._*' \) -delete
+
 (
   cd "$PACKAGE_DIR"
   {
@@ -78,7 +81,7 @@ chmod 0755 "$PACKAGE_DIR/bin/macbox" "$PACKAGE_DIR/install.sh" "$PACKAGE_DIR/uni
 
 mkdir -p "$DIST_DIR"
 rm -f -- "$ARCHIVE_PATH"
-tar -czf "$ARCHIVE_PATH" -C "$STAGE_DIR" "$PACKAGE_NAME"
+COPYFILE_DISABLE=1 tar -czf "$ARCHIVE_PATH" -C "$STAGE_DIR" "$PACKAGE_NAME"
 (
   cd "$DIST_DIR"
   shasum -a 256 "$ARCHIVE_NAME" > "$ARCHIVE_NAME.sha256"
