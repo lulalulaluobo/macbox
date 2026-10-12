@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, CheckSquare, FolderPlus, Grid, List, Plus, RefreshCw, Search, SlidersHorizontal, Upload, X } from 'lucide-react';
+import { ArrowLeft, CheckSquare, FolderPlus, FolderUp, Grid, List, Plus, RefreshCw, Search, SlidersHorizontal, Upload, X } from 'lucide-react';
 
 interface FileToolbarProps {
   currentPath: string;
@@ -14,6 +14,8 @@ interface FileToolbarProps {
   uploading: boolean;
   uploadProgress: string;
   fileInputRef: React.RefObject<HTMLInputElement>;
+  folderInputRef: React.RefObject<HTMLInputElement>;
+  folderUploadSupported: boolean;
   onGoUp: () => void;
   onSearchChange: (query: string) => void;
   onSortChange: (sortBy: 'name' | 'size' | 'mtime', sortOrder: 'asc' | 'desc') => void;
@@ -22,6 +24,8 @@ interface FileToolbarProps {
   onSelectAll: () => void;
   onOpenMkdir: () => void;
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFolderChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFolderPicker: () => void;
   onRefresh: () => void;
 }
 
@@ -34,9 +38,9 @@ const sortOptions = [
 
 export const FileToolbar: React.FC<FileToolbarProps> = ({
   currentPath, searchQuery, sortBy, sortOrder, viewMode, selectionMode, selectedCount, totalCount,
-  loading, uploading, uploadProgress, fileInputRef, onGoUp,
+  loading, uploading, uploadProgress, fileInputRef, folderInputRef, folderUploadSupported, onGoUp,
   onSearchChange, onSortChange, onViewModeChange, onToggleSelectionMode, onSelectAll, onOpenMkdir,
-  onFileChange, onRefresh,
+  onFileChange, onFolderChange, onFolderPicker, onRefresh,
 }) => {
   const [showFilters, setShowFilters] = useState(false);
 
@@ -54,16 +58,17 @@ export const FileToolbar: React.FC<FileToolbarProps> = ({
           </div>
         ) : (
           <>
-            <div className="flex min-h-11 items-center gap-1.5">
-              <button onClick={onGoUp} disabled={currentPath === '/' || currentPath === '/data'} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-600 disabled:pointer-events-none disabled:opacity-30 dark:bg-slate-800 dark:text-slate-300" title="上一级"><ArrowLeft className="h-4 w-4" /></button>
+            <div className="flex min-h-11 flex-wrap items-center gap-1.5">
+              <button onClick={onGoUp} disabled={uploading || currentPath === '/' || currentPath === '/data'} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-600 disabled:pointer-events-none disabled:opacity-30 dark:bg-slate-800 dark:text-slate-300" title="上一级"><ArrowLeft className="h-4 w-4" /></button>
               <button type="button" onClick={() => setShowFilters(true)} className="min-w-0 flex-1 truncate px-2 text-left text-xs font-semibold text-slate-600 dark:text-slate-300">{sortOptions.find((item) => item.by === sortBy && item.order === sortOrder)?.label || '排序'}</button>
               <button type="button" onClick={() => setShowFilters((open) => !open)} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${showFilters || searchQuery ? 'bg-sky-500 text-white' : 'bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-300'}`} aria-label="搜索筛选"><SlidersHorizontal className="h-4 w-4" /></button>
               <button onClick={() => onViewModeChange(viewMode === 'grid' ? 'list' : 'grid')} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-300" title={viewMode === 'grid' ? "列表显示" : "网格显示"}>{viewMode === 'grid' ? <List className="h-4 w-4" /> : <Grid className="h-4 w-4" />}</button>
               <button type="button" onClick={onToggleSelectionMode} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-slate-500 dark:bg-slate-800 dark:text-slate-300" aria-label="选择文件"><CheckSquare className="h-4 w-4" /></button>
-              <div className="hidden items-center gap-1 md:flex">
+              <div className="hidden min-w-0 flex-wrap items-center gap-1 md:flex">
                 <button onClick={onRefresh} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500" title="刷新"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
                 <button onClick={onOpenMkdir} className="hidden h-9 items-center gap-1 rounded-lg px-2 text-xs text-slate-600 md:flex dark:text-slate-300"><FolderPlus className="h-4 w-4" />新建</button>
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="hidden h-9 items-center gap-1 rounded-lg px-2 text-xs text-slate-600 disabled:opacity-50 md:flex dark:text-slate-300"><Upload className="h-4 w-4" />上传文件</button>
+                <button type="button" onClick={onFolderPicker} disabled={uploading} title={folderUploadSupported ? '保留所选文件夹和子目录' : '当前浏览器不支持选择文件夹，点击查看说明'} className="hidden h-9 items-center gap-1 rounded-lg px-2 text-xs text-slate-600 disabled:opacity-50 md:flex dark:text-slate-300"><FolderUp className="h-4 w-4" />上传文件夹</button>
               </div>
             </div>
 
@@ -82,9 +87,10 @@ export const FileToolbar: React.FC<FileToolbarProps> = ({
         )}
       </section>
 
-      <input type="file" ref={fileInputRef} onChange={onFileChange} multiple className="hidden" />
+      <input type="file" ref={fileInputRef} onChange={onFileChange} disabled={uploading} multiple aria-label="选择上传文件" className="hidden" />
+      <input type="file" ref={folderInputRef} onChange={onFolderChange} disabled={uploading} multiple {...{ webkitdirectory: '', directory: '' }} aria-label="选择上传文件夹" className="hidden" />
 
-      {uploading && <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs text-sky-600 dark:text-sky-300"><span>{uploadProgress || "上传中"}</span></div>}
+      {uploading && <div role="status" className="min-w-0 whitespace-pre-line break-words rounded-xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs text-sky-600 dark:text-sky-300 [overflow-wrap:anywhere]"><span>{uploadProgress || "上传中"}</span></div>}
 
       {!selectionMode && (
         <details className="fixed bottom-[calc(92px+env(safe-area-inset-bottom))] right-4 z-30 md:hidden">
@@ -92,6 +98,7 @@ export const FileToolbar: React.FC<FileToolbarProps> = ({
           <div className="absolute bottom-16 right-0 w-40 space-y-1 rounded-2xl border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
             <button type="button" onClick={onOpenMkdir} className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-xs font-bold text-slate-700 dark:text-slate-200"><FolderPlus className="h-4 w-4 text-sky-500" />新文件夹</button>
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-xs font-bold text-slate-700 disabled:opacity-50 dark:text-slate-200"><Upload className="h-4 w-4 text-[#ff7d9a]" />上传文件</button>
+            <button type="button" onClick={onFolderPicker} disabled={uploading} className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-xs font-bold text-slate-700 disabled:opacity-50 dark:text-slate-200"><FolderUp className="h-4 w-4 text-sky-500" />上传文件夹</button>
           </div>
         </details>
       )}

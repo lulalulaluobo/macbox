@@ -169,7 +169,7 @@ MacBox 安装说明
 4. 菜单栏出现 MacBox 图标后，选择“启动后端服务”，再在本机网页完成首次管理员初始化。
 5. 初始化完成后，局域网设备可使用菜单提示的 http://局域网IP:19808 访问。
 
-本测试版使用 ad-hoc 签名，尚未经过 Apple 公证。请从项目官方 GitHub Release 下载并核对 SHA-256。
+本安装包使用 ad-hoc 签名，尚未经过 Apple 公证。请从项目官方 GitHub Release 下载并核对 SHA-256。
 不要全局关闭 Gatekeeper，也不要运行来源不明的解除安全限制命令。
 NOTE
   else

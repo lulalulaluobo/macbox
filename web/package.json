@@ -1,13 +1,14 @@
 {
   "name": "macbox-web",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "build:verify": "npm run build && npm run check:bundle",
     "check:bundle": "node scripts/check-bundle-size.mjs",
+    "test:upload": "node scripts/test-upload-entries.mjs && node scripts/test-upload-request.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -1,9 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -425,5 +428,32 @@ func TestVMHandlerRejectsConcurrentAction(t *testing.T) {
 
 	if response.Code != http.StatusConflict {
 		t.Fatalf("concurrent VM action status = %d, want 409", response.Code)
+	}
+}
+
+func TestTerminalUploadRejectsInvalidRelativePathBeforeVMAccess(t *testing.T) {
+	// An empty PATH prevents this unit test from ever reaching a real VM.
+	t.Setenv("PATH", t.TempDir())
+	server := &Server{vmMgr: vm.NewManager(config.DefaultConfig())}
+	for _, relativePath := range []string{"folder/../a.txt", "/a.txt", "folder/b.txt"} {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreateFormFile("file", "a.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte("contents")); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/terminal/files/upload?relativePath="+url.QueryEscape(relativePath), &body)
+		request.Header.Set("Content-Type", writer.FormDataContentType())
+		response := httptest.NewRecorder()
+		server.handleTerminalFileUpload(response, request)
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "上传相对路径无效") {
+			t.Fatalf("invalid path %q returned %d: %s", relativePath, response.Code, response.Body.String())
+		}
 	}
 }

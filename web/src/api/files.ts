@@ -1,5 +1,6 @@
 import type { FileItem, TrashItem } from '../types';
 import { BASE_URL, fetchJSON, getAuthenticatedFileUrl } from './client';
+import { uploadFileRequest } from './upload';
 
 export const filesApi = {  // Web Terminal & File System
   listFiles: (path?: string, offset = 0, limit = 300) => fetchJSON<{ status: string; path: string; items: FileItem[]; hasMore: boolean; nextOffset: number }>(
@@ -15,11 +16,11 @@ export const filesApi = {  // Web Terminal & File System
       body: JSON.stringify({ path, content }),
     }
   ),
-  createFolder: (path: string) => fetchJSON<{ status: string; message: string }>(
+  createFolder: (path: string, uploadRoot?: string) => fetchJSON<{ status: string; message: string }>(
     `${BASE_URL}/terminal/files/mkdir`,
     {
       method: 'POST',
-      body: JSON.stringify({ path }),
+      body: JSON.stringify({ path, ...(uploadRoot ? { uploadRoot } : {}) }),
     }
   ),
   deleteFile: (path: string) => fetchJSON<{ status: string; message: string }>(
@@ -28,18 +29,10 @@ export const filesApi = {  // Web Terminal & File System
       method: 'DELETE',
     }
   ),
-  uploadFile: async (file: File, targetDir: string) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await fetch(`${BASE_URL}/terminal/files/upload?targetDir=${encodeURIComponent(targetDir)}`, {
-      method: 'POST',
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Upload failed' }));
-      throw new Error(err.error || 'Upload failed');
-    }
-    return res.json();
+  uploadFile: (file: File, targetDir: string, relativePath?: string) => {
+    const params = new URLSearchParams({ targetDir });
+    if (relativePath) params.set('relativePath', relativePath);
+    return uploadFileRequest<{ status: string; message: string }>(`${BASE_URL}/terminal/files/upload?${params}`, file);
   },
   getFileDownloadUrl: (path: string) => getAuthenticatedFileUrl('download', path),
   getArchiveCapabilities: () => fetchJSON<{ zip: boolean }>(`${BASE_URL}/terminal/files/archive-capabilities`),

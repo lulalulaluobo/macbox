@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/lulalulaluobo/macbox/pkg/terminal"
 	"net/http"
@@ -132,7 +133,8 @@ func (s *Server) handleTerminalFileWrite(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleTerminalFileMkdir(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Path string `json:"path"`
+		Path       string `json:"path"`
+		UploadRoot string `json:"uploadRoot"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -145,7 +147,7 @@ func (s *Server) handleTerminalFileMkdir(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := terminal.CreateDirContext(r.Context(), s.vmMgr.InstanceName(), req.Path); err != nil {
+	if err := terminal.CreateDirWithinContext(r.Context(), s.vmMgr.InstanceName(), req.Path, req.UploadRoot); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -179,7 +181,9 @@ func (s *Server) handleTerminalFileUpload(w http.ResponseWriter, r *http.Request
 
 	if err := terminal.UploadFile(w, r, s.vmMgr.InstanceName(), targetDir); err != nil {
 		status := http.StatusInternalServerError
-		if strings.Contains(err.Error(), "request body too large") {
+		if errors.Is(err, terminal.ErrInvalidUploadPath) {
+			status = http.StatusBadRequest
+		} else if strings.Contains(err.Error(), "request body too large") {
 			status = http.StatusRequestEntityTooLarge
 		}
 		writeError(w, status, err.Error())

@@ -1,15 +1,26 @@
 package terminal
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"mime/multipart"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 // 文件路径分为两层：normalizeRequestedPath 在词法层拒绝畸形输入，
 // resolveAllowedPathContext 再通过 VM 内 realpath 解析路径。API 层把非管理员
-// 请求限制在 /data；管理员可以浏览 VM 根目录。本文件只测试纯函数层，依赖
-// limactl 的部分不允许在单测中执行，以免触碰真实虚拟机。
+// 请求限制在 /data；管理员可以浏览 VM 根目录。本文件测试纯函数和隔离上传流程。
+// 真实 limactl 不允许在单测中执行，以免触碰虚拟机。上传流程测试仅使用
+// PATH 内的替身命令，将 VM 脚本的 /data 映射到测试临时目录。
 
 func TestNormalizeRequestedPathAcceptsValidDataPaths(t *testing.T) {
 	cases := []struct {
@@ -45,7 +56,7 @@ func TestDirectoryDownloadScriptsAllowAuthorizedVMPathsButRejectRoot(t *testing.
 	} {
 		t.Run(name, func(t *testing.T) {
 			if strings.Contains(script, "realpath('/data')") {
-		t.Fatal("download script still hard-codes the MacBox data root")
+				t.Fatal("download script still hard-codes the MacBox data root")
 			}
 			if !strings.Contains(script, "os.path.sep") {
 				t.Fatal("download script must continue protecting the VM root")
@@ -302,5 +313,272 @@ func TestUploadStreamErrorMapsSizeLimit(t *testing.T) {
 	plain := fmt.Errorf("some other failure")
 	if got := uploadStreamError(plain); !strings.Contains(got.Error(), "读取上传内容失败") {
 		t.Fatalf("generic read failure not wrapped: %v", got)
+	}
+}
+
+func TestUploadRelativePathAcceptsFolderTree(t *testing.T) {
+	for _, tc := range []struct {
+		raw      string
+		fileName string
+		want     string
+	}{
+		{"", "a.txt", "a.txt"},
+		{"旅行照片/第一天/视频.mp4", "视频.mp4", "旅行照片/第一天/视频.mp4"},
+		{"folder/a.txt", "a.txt", "folder/a.txt"},
+		{"folder/" + strings.Repeat("a", 255), strings.Repeat("a", 255), "folder/" + strings.Repeat("a", 255)},
+		{" folder / a.txt", " a.txt", " folder / a.txt"},
+	} {
+		got, err := uploadRelativePath(tc.raw, tc.fileName)
+		if err != nil || got != tc.want {
+			t.Fatalf("uploadRelativePath(%q, %q) = %q, %v; want %q", tc.raw, tc.fileName, got, err, tc.want)
+		}
+	}
+}
+
+func TestUploadRelativePathRejectsUnsafePaths(t *testing.T) {
+	for _, raw := range []string{
+		"/folder/a.txt", "../a.txt", "folder/../a.txt", "folder/./a.txt",
+		"folder//a.txt", "folder/a.txt/", "folder\\a.txt", "folder\na.txt",
+		"folder/\x00a.txt", "folder/\ta.txt", "folder/b.txt",
+		strings.Repeat("a", 256) + "/a.txt", strings.Repeat("中", 86) + "/a.txt",
+		strings.Repeat("a/", 2050) + "a.txt",
+	} {
+		t.Run(raw[:min(len(raw), 80)], func(t *testing.T) {
+			if _, err := uploadRelativePath(raw, "a.txt"); !errors.Is(err, ErrInvalidUploadPath) {
+				t.Fatalf("uploadRelativePath(%q) = %v, want invalid-path error", raw, err)
+			}
+		})
+	}
+}
+
+func TestUploadTempPathKeepsLongFilenameWithinFilesystemLimits(t *testing.T) {
+	destination := "/data/folder/" + strings.Repeat("a", 255)
+	first, err := uploadTempPath(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := uploadTempPath(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second || path.Dir(first) != path.Dir(destination) || len(path.Base(first)) > 255 || !strings.HasPrefix(path.Base(first), ".macbox-upload-") {
+		t.Fatalf("invalid or duplicate temporary paths: %q, %q", first, second)
+	}
+}
+
+// This shim refuses every VM instance except fake-upload-vm and only executes
+// the supplied Python scripts against t.TempDir. The real limactl is never run.
+func setupUploadVMShim(t *testing.T) string {
+	t.Helper()
+	pythonPath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("Python 3 is required for isolated upload script tests")
+	}
+	root := t.TempDir()
+	bin := t.TempDir()
+	shim := "#!" + pythonPath + `
+import base64, json, os, sys
+
+if sys.argv[1:6] != ['shell', 'fake-upload-vm', 'sudo', 'python3', '-c']:
+    raise SystemExit('refusing a real VM command')
+root = os.environ['MACBOX_TEST_UPLOAD_ROOT']
+def mapped(value):
+    if value == '/data':
+        return root
+    if value.startswith('/data/'):
+        return root + value[len('/data'):]
+    return value
+args = [mapped(value) for value in sys.argv[7:]]
+script = sys.argv[6].replace("os.path.realpath('/data')", "os.path.realpath(" + repr(root) + ")")
+if 'request = json.loads(base64.b64decode' in script:
+    request = json.loads(base64.b64decode(args[0]).decode('utf-8'))
+    args[0] = base64.b64encode(json.dumps({key: mapped(value) for key, value in request.items()}).encode('utf-8')).decode('ascii')
+sys.argv = ['isolated-vm-script'] + args
+exec(compile(script, '<isolated-vm-script>', 'exec'))
+`
+	if err := os.WriteFile(filepath.Join(bin, "limactl"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MACBOX_TEST_UPLOAD_ROOT", root)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return root
+}
+
+func uploadTestRequest(t *testing.T, name, relativePath, content string, extraPart bool) error {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	file, err := writer.CreateFormFile("file", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if extraPart {
+		if err := writer.WriteField("unexpected", "extra data"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("POST", "/upload?relativePath="+url.QueryEscape(relativePath), &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	return UploadFile(httptest.NewRecorder(), request, "fake-upload-vm", "/data/destination")
+}
+
+func TestUploadFilePreservesFoldersAndLongNames(t *testing.T) {
+	root := setupUploadVMShim(t)
+	if err := os.Mkdir(filepath.Join(root, "destination"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		relative string
+		want     string
+	}{
+		{"flat.txt", "", "flat.txt"},
+		{"视频.mp4", "所选文件夹/子目录/视频.mp4", "所选文件夹/子目录/视频.mp4"},
+		{strings.Repeat("a", 255), "folder/" + strings.Repeat("a", 255), "folder/" + strings.Repeat("a", 255)},
+	} {
+		if failure := uploadTestRequest(t, tc.name, tc.relative, "binary\x00upload\xffpayload", false); failure != nil {
+			t.Fatalf("upload %q failed: %s", tc.relative, failure)
+		}
+		data, err := os.ReadFile(filepath.Join(root, "destination", filepath.FromSlash(tc.want)))
+		if err != nil || string(data) != "binary\x00upload\xffpayload" {
+			t.Fatalf("wrong saved content at %q: %q (%v)", tc.want, data, err)
+		}
+	}
+	if err := filepath.WalkDir(root, func(name string, entry os.DirEntry, err error) error {
+		if err == nil && strings.HasPrefix(entry.Name(), ".macbox-") {
+			t.Errorf("upload left temporary file %q", name)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUploadFileRejectsSymlinkEscapingTargetDirectory(t *testing.T) {
+	root := setupUploadVMShim(t)
+	for _, directory := range []string{"destination", "sibling"} {
+		if err := os.Mkdir(filepath.Join(root, directory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "sibling"), filepath.Join(root, "destination", "selected-folder")); err != nil {
+		t.Fatal(err)
+	}
+	if failure := uploadTestRequest(t, "a.txt", "selected-folder/a.txt", "must not escape", false); failure == nil {
+		t.Fatal("upload accepted a folder symlink pointing outside targetDir")
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "sibling")); err != nil || len(entries) != 0 {
+		t.Fatalf("upload modified the sibling directory: %v (%v)", entries, err)
+	}
+	// The mutation script independently enforces the same scope, even if a
+	// path resolver check were bypassed or a directory changed between calls.
+	if err := runUploadMutation(context.Background(), "fake-upload-vm", "/data/destination", map[string]string{
+		"operation": "write", "path": "/data/sibling/a.txt",
+	}, strings.NewReader("must not escape")); err == nil {
+		t.Fatal("mutation script accepted a file outside uploadRoot")
+	}
+}
+
+func TestUploadFileRejectsExtraPartAndRemovesTemporaryFile(t *testing.T) {
+	root := setupUploadVMShim(t)
+	if err := os.Mkdir(filepath.Join(root, "destination"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if failure := uploadTestRequest(t, "a.txt", "", "complete first part", true); failure == nil || !strings.Contains(failure.Error(), "只能包含一个文件") {
+		t.Fatalf("extra multipart part was accepted: %v", failure)
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "destination")); err != nil || len(entries) != 0 {
+		t.Fatalf("failed upload left a file behind: %v (%v)", entries, err)
+	}
+}
+
+func TestCreateUploadDirPreservesEmptyFolders(t *testing.T) {
+	root := setupUploadVMShim(t)
+	if err := os.Mkdir(filepath.Join(root, "destination"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateDirWithinContext(context.Background(), "fake-upload-vm", "/data/destination/selected-folder/empty-subfolder", "/data/destination"); err != nil {
+		t.Fatal(err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "destination", "selected-folder", "empty-subfolder")); err != nil || len(entries) != 0 {
+		t.Fatalf("empty uploaded directory was not preserved: %v (%v)", entries, err)
+	}
+}
+
+func TestCreateUploadDirRejectsSymlinkEscapingTargetDirectory(t *testing.T) {
+	root := setupUploadVMShim(t)
+	for _, directory := range []string{"destination", "sibling"} {
+		if err := os.Mkdir(filepath.Join(root, directory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "sibling"), filepath.Join(root, "destination", "selected-folder")); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"/data/destination/selected-folder", "/data/destination/selected-folder/empty-subfolder"} {
+		if err := CreateDirWithinContext(context.Background(), "fake-upload-vm", target, "/data/destination"); err == nil {
+			t.Fatalf("folder creation followed an escaping symlink: %q", target)
+		}
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "sibling")); err != nil || len(entries) != 0 {
+		t.Fatalf("folder creation modified a sibling directory: %v (%v)", entries, err)
+	}
+}
+
+func TestUploadFileRejectsDestinationSymlinkEscapingTargetDirectory(t *testing.T) {
+	root := setupUploadVMShim(t)
+	for _, directory := range []string{"destination", "destination/selected-folder", "sibling"} {
+		if err := os.Mkdir(filepath.Join(root, directory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	existing := filepath.Join(root, "sibling", "existing.txt")
+	if err := os.WriteFile(existing, []byte("existing content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(existing, filepath.Join(root, "destination", "selected-folder", "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if failure := uploadTestRequest(t, "a.txt", "selected-folder/a.txt", "must not overwrite", false); failure == nil {
+		t.Fatal("upload accepted a destination-file symlink outside targetDir")
+	}
+	if content, err := os.ReadFile(existing); err != nil || string(content) != "existing content" {
+		t.Fatalf("upload modified an existing file outside targetDir: %q (%v)", content, err)
+	}
+}
+
+func TestUploadScopeRejectsCanonicalRootReplacedBySymlink(t *testing.T) {
+	root := setupUploadVMShim(t)
+	for _, directory := range []string{"destination", "sibling"} {
+		if err := os.Mkdir(filepath.Join(root, directory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope, err := resolveVMPathContext(context.Background(), "fake-upload-vm", "/data/destination", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(root, "destination"), filepath.Join(root, "previous-destination")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "sibling"), filepath.Join(root, "destination")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveAllowedPathWithinContext(context.Background(), "fake-upload-vm", path.Join(scope, "a.txt"), scope); err == nil {
+		t.Fatal("resolver followed a canonical upload root that changed into a symlink")
+	}
+	if err := runUploadMutation(context.Background(), "fake-upload-vm", scope, map[string]string{
+		"operation": "mkdir", "path": path.Join(scope, "folder"),
+	}, nil); err == nil {
+		t.Fatal("mutation followed a canonical upload root that changed into a symlink")
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "sibling")); err != nil || len(entries) != 0 {
+		t.Fatalf("changed upload scope modified the sibling directory: %v (%v)", entries, err)
 	}
 }

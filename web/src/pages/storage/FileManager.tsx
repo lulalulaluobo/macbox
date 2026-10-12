@@ -90,8 +90,13 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     uploading,
     uploadProgress,
     fileInputRef,
+    folderInputRef,
+    folderUploadSupported,
+    isUploadInProgress,
     isDragging,
     handleFileChange,
+    handleFolderChange,
+    handleFolderPicker,
     handleDragOver,
     handleDragLeave,
     handleDrop,
@@ -99,8 +104,14 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     targetPath: currentPath,
     onSuccess: (text) => setAlertMsg({ type: 'success', text }),
     onError: (text) => setAlertMsg({ type: 'error', text }),
-    onReload: () => loadFiles(currentPath),
+    onReload: (path) => loadFiles(path),
   });
+
+  const canChangeUploadDestination = () => {
+    if (!isUploadInProgress()) return true;
+    setAlertMsg({ type: 'warning', text: '文件正在上传，请完成后再切换文件夹或硬盘。' });
+    return false;
+  };
 
   const [archiveItem, setArchiveItem] = useState<FileItem | null>(null);
 
@@ -198,6 +209,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
     selectionMode,
     onToggleSelection: toggleSelectItem,
     onOpenDirectory: (path) => {
+      if (!canChangeUploadDestination()) return;
       setViewingFavorites(false);
       setViewingTrash(false);
       setCurrentPath(path);
@@ -312,8 +324,8 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
       {isDragging && !activeCloudMount && (
         <div className="fixed inset-0 z-50 bg-sky-500/20 backdrop-blur-sm border-4 border-dashed border-sky-400 flex flex-col items-center justify-center pointer-events-none">
           <Upload className="w-16 h-16 text-sky-400 animate-bounce mb-3" />
-          <p className="text-xl font-bold text-white">松开文件，上传到当前文件夹</p>
-          <p className="text-sm text-sky-200 mt-1 font-mono">{currentPath}</p>
+          <p className="px-4 text-center text-xl font-bold text-white">松开文件或文件夹，上传到当前目录</p>
+          <p className="mt-1 max-w-full break-words px-4 text-center font-mono text-sm text-sky-200 [overflow-wrap:anywhere]">{currentPath}</p>
         </div>
       )}
 
@@ -333,31 +345,36 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
         viewingFavorites={viewingFavorites}
         hideSystemFiles={hideSystemFiles}
         onSelectDrive={(path) => {
+          if (!canChangeUploadDestination()) return;
           setActiveCloudMountId(null);
           setViewingTrash(false);
           setViewingFavorites(false);
           setCurrentPath(path);
         }}
         onSelectCloudMount={(id) => {
+          if (!canChangeUploadDestination()) return;
           setActiveCloudMountId(id);
           setViewingTrash(false);
           setViewingFavorites(false);
         }}
         onSelectFavorite={(path) => {
+          if (!canChangeUploadDestination()) return;
           setActiveCloudMountId(null);
           setViewingTrash(false);
           setViewingFavorites(false);
           setCurrentPath(path);
         }}
         onOpenDriveDetail={openDriveDetail}
-        onOpenFavorites={() => { setViewingTrash(false); setSelectionMode(false); setSelectedPaths(new Set()); setViewingFavorites(true); }}
+        onOpenFavorites={() => { if (!canChangeUploadDestination()) return; setViewingTrash(false); setSelectionMode(false); setSelectedPaths(new Set()); setViewingFavorites(true); }}
         onOpenTrash={() => {
+          if (!canChangeUploadDestination()) return;
           setViewingFavorites(false);
           setViewingTrash(true);
           loadTrash();
         }}
         onOpenCloudMount={() => setShowCloudMountModal(true)}
         onSelectLocalMount={(path) => {
+          if (!canChangeUploadDestination()) return;
           setActiveCloudMountId(null);
           setViewingTrash(false);
           setViewingFavorites(false);
@@ -402,7 +419,9 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           uploading={uploading}
           uploadProgress={uploadProgress}
           fileInputRef={fileInputRef}
-          onGoUp={handleGoUp}
+          folderInputRef={folderInputRef}
+          folderUploadSupported={folderUploadSupported}
+          onGoUp={() => { if (canChangeUploadDestination()) handleGoUp(); }}
           onSearchChange={setSearchQuery}
           onSortChange={(by, order) => {
             setSortBy(by);
@@ -416,6 +435,8 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           onSelectAll={handleSelectAll}
           onOpenMkdir={() => setShowMkdirModal(true)}
           onFileChange={handleFileChange}
+          onFolderChange={handleFolderChange}
+          onFolderPicker={handleFolderPicker}
           onRefresh={() => loadFiles(currentPath)}
         />}
 
@@ -459,7 +480,7 @@ export const FileManager: React.FC<FileManagerProps> = ({ initialPath = '/data' 
           onDragOver={handleItemDragOver}
           onDrop={handleItemDrop}
           onLoadMore={() => loadFiles(currentPath, true)}
-          onUploadEmpty={() => fileInputRef.current?.click()}
+          onUploadEmpty={() => { if (!isUploadInProgress()) fileInputRef.current?.click(); }}
           onRefreshTrash={loadTrash}
           onOpenEmptyTrash={() => setShowEmptyTrashModal(true)}
           onToggleTrashSelectAll={() => {

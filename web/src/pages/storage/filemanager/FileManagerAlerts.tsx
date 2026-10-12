@@ -10,15 +10,15 @@ interface FileManagerAlertsProps {
 export const FileManagerAlerts: React.FC<FileManagerAlertsProps> = ({ alertMsg, hideSystemFiles, onDismiss }) => (
   <>
     {alertMsg && (
-      <div className={`fixed left-1/2 top-20 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center justify-between gap-3 rounded-full border bg-white/95 px-4 py-2.5 text-xs shadow-xl backdrop-blur dark:bg-slate-900/95 ${
+      <div role="alert" className={`fixed left-1/2 top-20 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center justify-between gap-3 rounded-2xl border bg-white/95 px-4 py-2.5 text-xs shadow-xl backdrop-blur dark:bg-slate-900/95 ${
         alertMsg.type === 'success'
           ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
           : alertMsg.type === 'warning'
           ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
           : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
       }`}>
-        <span>{alertMsg.text}</span>
-        <button type="button" onClick={onDismiss} className="p-1 hover:text-white"><X className="h-4 w-4" /></button>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{alertMsg.text}</span>
+        <button type="button" onClick={onDismiss} aria-label="关闭提示" className="shrink-0 p-1 hover:text-white"><X className="h-4 w-4" /></button>
       </div>
     )}
     {!hideSystemFiles && (

@@ -3,8 +3,11 @@ package terminal
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -36,6 +39,8 @@ type FileInfo struct {
 }
 
 const maxUploadSizeBytes int64 = 10 << 30
+
+var ErrInvalidUploadPath = errors.New("上传相对路径无效")
 
 // The trash manifest is shared by all file operations. Serialize mutations so
 // concurrent requests cannot overwrite each other's index updates.
@@ -289,16 +294,28 @@ func CreateDir(instanceName, dirPath string) error {
 }
 
 func CreateDirContext(ctx context.Context, instanceName, dirPath string) error {
+	return CreateDirWithinContext(ctx, instanceName, dirPath, "")
+}
+
+// CreateDirWithinContext optionally restricts folder creation to an upload's
+// destination directory, including when the selected folder is empty.
+func CreateDirWithinContext(ctx context.Context, instanceName, dirPath, uploadRoot string) error {
 	if instanceName == "" {
 		instanceName = "macbox"
 	}
 	var err error
-	dirPath, err = resolveAllowedPathContext(ctx, instanceName, dirPath)
+	if uploadRoot != "" {
+		uploadRoot, err = resolveVMPathContext(ctx, instanceName, uploadRoot, "", false)
+		if err != nil {
+			return err
+		}
+	}
+	dirPath, err = resolveAllowedPathWithinContext(ctx, instanceName, dirPath, uploadRoot)
 	if err != nil {
 		return err
 	}
 
-	if err := runSafeMutation(ctx, instanceName, map[string]string{"operation": "mkdir", "path": dirPath}, nil); err != nil {
+	if err := runUploadMutation(ctx, instanceName, uploadRoot, map[string]string{"operation": "mkdir", "path": dirPath}, nil); err != nil {
 		return fmt.Errorf("创建文件夹失败: %w", err)
 	}
 	return nil
@@ -354,6 +371,13 @@ if requested == '/data' or requested.startswith('/data/'):
             raise SystemExit(2)
     except ValueError:
         raise SystemExit(2)
+if len(sys.argv) > 2:
+    upload_root = os.path.normpath(sys.argv[2])
+    try:
+        if os.path.realpath(upload_root) != upload_root or os.path.commonpath((data_root, upload_root)) != data_root or os.path.commonpath((upload_root, candidate)) != upload_root:
+            raise SystemExit(2)
+    except ValueError:
+        raise SystemExit(2)
 print(candidate)
 `
 
@@ -362,12 +386,20 @@ const safeMutationScript = `import base64, json, os, shutil, stat, sys, time
 request = json.loads(base64.b64decode(sys.argv[1]).decode('utf-8'))
 root_path = os.path.realpath('/data')
 root_fd = os.open(root_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+upload_root = os.path.normpath(request['uploadRoot']) if request.get('uploadRoot') else None
+if upload_root is not None:
+    if os.path.realpath(upload_root) != upload_root:
+        raise RuntimeError('上传目标目录已变更，请重新选择目标目录')
+    if os.path.commonpath((root_path, upload_root)) != root_path:
+        raise RuntimeError('上传目标目录超出 /data 存储范围')
 
 def parts_for(raw, allow_root=False):
     clean = os.path.normpath(raw)
     candidate = os.path.realpath(clean)
     if os.path.commonpath((root_path, candidate)) != root_path:
         raise RuntimeError('路径超出 /data 存储范围')
+    if upload_root is not None and os.path.commonpath((upload_root, candidate)) != upload_root:
+        raise RuntimeError('上传路径超出目标目录范围')
     relative = os.path.relpath(candidate, root_path)
     if relative == '.':
         if allow_root:
@@ -545,6 +577,14 @@ func normalizeRequestedPath(requested string) (string, error) {
 }
 
 func resolveAllowedPathContext(ctx context.Context, instanceName, requested string) (string, error) {
+	return resolveAllowedPathWithinContext(ctx, instanceName, requested, "")
+}
+
+func resolveAllowedPathWithinContext(ctx context.Context, instanceName, requested, uploadRoot string) (string, error) {
+	return resolveVMPathContext(ctx, instanceName, requested, uploadRoot, true)
+}
+
+func resolveVMPathContext(ctx context.Context, instanceName, requested, uploadRoot string, preserveDataRoot bool) (string, error) {
 	if instanceName == "" {
 		instanceName = "macbox"
 	}
@@ -553,7 +593,15 @@ func resolveAllowedPathContext(ctx context.Context, instanceName, requested stri
 		return "", err
 	}
 
-	cmd := privilegedCommand(ctx, instanceName, "python3", "-c", allowedPathResolverScript, clean)
+	args := []string{"python3", "-c", allowedPathResolverScript, clean}
+	if uploadRoot != "" {
+		scope, err := normalizeRequestedPath(uploadRoot)
+		if err != nil {
+			return "", err
+		}
+		args = append(args, scope)
+	}
+	cmd := privilegedCommand(ctx, instanceName, args...)
 	resolved, err := cmd.Output()
 	if err != nil || strings.TrimSpace(string(resolved)) == "" {
 		detail := strings.TrimSpace(string(resolved))
@@ -570,7 +618,7 @@ func resolveAllowedPathContext(ctx context.Context, instanceName, requested stri
 	// the subsequent file operation. Keep the public data root spelling so
 	// destructive handlers can still recognize and protect it.
 	canonical := strings.TrimSpace(string(resolved))
-	if clean == "/data" {
+	if preserveDataRoot && clean == "/data" {
 		return "/data", nil
 	}
 	return canonical, nil
@@ -1379,7 +1427,45 @@ func archiveToolArgs(tool, operation, format, destination string, sources []stri
 	return append([]string{tool, "a", "-r", destination}, sources...)
 }
 
-// UploadFile saves a multipart uploaded file into target directory inside the VM
+// uploadRelativePath validates the browser's directory-relative path before
+// path.Join can normalize away empty segments or traversal components.
+func uploadRelativePath(raw, fileName string) (string, error) {
+	if raw == "" {
+		return fileName, nil
+	}
+	if len(raw) > 4096 || path.IsAbs(raw) || strings.Contains(raw, "\\") ||
+		strings.IndexFunc(raw, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("%w: 请使用目标目录内的相对路径", ErrInvalidUploadPath)
+	}
+	parts := strings.Split(raw, "/")
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." || len(part) > 255 {
+			return "", fmt.Errorf("%w: 目录或文件名无效", ErrInvalidUploadPath)
+		}
+	}
+	if parts[len(parts)-1] != fileName {
+		return "", fmt.Errorf("%w: 路径中的文件名与上传文件不一致", ErrInvalidUploadPath)
+	}
+	return raw, nil
+}
+
+func uploadTempPath(destination string) (string, error) {
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	return path.Join(path.Dir(destination), ".macbox-upload-"+hex.EncodeToString(nonce)), nil
+}
+
+func runUploadMutation(ctx context.Context, instanceName, uploadRoot string, request map[string]string, input io.Reader) error {
+	if uploadRoot != "" {
+		request["uploadRoot"] = uploadRoot
+	}
+	return runSafeMutation(ctx, instanceName, request, input)
+}
+
+// UploadFile saves one multipart file. An optional relativePath query parameter
+// preserves the selected folder tree underneath targetDir.
 func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir string) error {
 	if r == nil || r.Body == nil {
 		return fmt.Errorf("上传请求无效")
@@ -1391,12 +1477,6 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 	if targetDir == "" {
 		targetDir = "/data"
 	}
-	var err error
-	targetDir, err = resolveAllowedPathContext(r.Context(), instanceName, targetDir)
-	if err != nil {
-		return err
-	}
-
 	reader, err := r.MultipartReader()
 	if err != nil {
 		return fmt.Errorf("上传请求格式无效: %w", err)
@@ -1417,14 +1497,38 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 		len(fileName) > 255 || strings.IndexFunc(fileName, unicode.IsControl) >= 0 {
 		return fmt.Errorf("上传文件名无效")
 	}
-	destPath, err := resolveAllowedPathContext(r.Context(), instanceName, path.Join(targetDir, fileName))
+	rawRelativePath := r.URL.Query().Get("relativePath")
+	relativePath, err := uploadRelativePath(rawRelativePath, fileName)
 	if err != nil {
 		return err
+	}
+	// Capture the canonical upload scope once. Every subsequent VM command
+	// rejects that directory if it has since been replaced by a symlink.
+	targetDir, err = resolveVMPathContext(r.Context(), instanceName, targetDir, "", rawRelativePath == "")
+	if err != nil {
+		return err
+	}
+	uploadRoot := ""
+	if rawRelativePath != "" {
+		uploadRoot = targetDir
+	}
+	destPath, err := resolveAllowedPathWithinContext(r.Context(), instanceName, path.Join(targetDir, relativePath), uploadRoot)
+	if err != nil {
+		return err
+	}
+	if rawRelativePath != "" && path.Dir(relativePath) != "." {
+		if err := runUploadMutation(r.Context(), instanceName, uploadRoot, map[string]string{"operation": "mkdir", "path": path.Dir(destPath)}, nil); err != nil {
+			return fmt.Errorf("创建上传文件夹失败: %w", err)
+		}
 	}
 	// Write beside the destination and rename only after the complete stream has
 	// reached the VM. This prevents a cancelled upload from exposing a partial
 	// file under its final name.
-	tempPath, err := resolveAllowedPathContext(r.Context(), instanceName, fmt.Sprintf("%s.macbox-upload-%d", destPath, time.Now().UnixNano()))
+	tempPath, err := uploadTempPath(destPath)
+	if err != nil {
+		return fmt.Errorf("准备上传临时文件失败: %w", err)
+	}
+	tempPath, err = resolveAllowedPathWithinContext(r.Context(), instanceName, tempPath, uploadRoot)
 	if err != nil {
 		return fmt.Errorf("准备上传临时文件失败: %w", err)
 	}
@@ -1435,14 +1539,14 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if cleanupErr := runSafeMutation(cleanupCtx, instanceName, map[string]string{"operation": "delete", "path": tempPath}, nil); cleanupErr != nil {
+		if cleanupErr := runUploadMutation(cleanupCtx, instanceName, uploadRoot, map[string]string{"operation": "delete", "path": tempPath}, nil); cleanupErr != nil {
 			log.Printf("[MacBox Files] cleanup interrupted upload failed: %v", cleanupErr)
 		}
 	}
 	defer cleanup()
 
 	stream := &uploadPartReader{reader: file}
-	if err := runSafeMutation(r.Context(), instanceName, map[string]string{"operation": "write", "path": tempPath}, stream); err != nil {
+	if err := runUploadMutation(r.Context(), instanceName, uploadRoot, map[string]string{"operation": "write", "path": tempPath}, stream); err != nil {
 		if stream.err != nil {
 			return uploadStreamError(stream.err)
 		}
@@ -1466,7 +1570,7 @@ func UploadFile(w http.ResponseWriter, r *http.Request, instanceName, targetDir 
 	} else if extra != nil {
 		return fmt.Errorf("上传请求只能包含一个文件")
 	}
-	if err := runSafeMutation(r.Context(), instanceName, map[string]string{"operation": "rename", "source": tempPath, "destination": destPath}, nil); err != nil {
+	if err := runUploadMutation(r.Context(), instanceName, uploadRoot, map[string]string{"operation": "rename", "source": tempPath, "destination": destPath}, nil); err != nil {
 		return fmt.Errorf("提交上传文件失败: %w", err)
 	}
 	committed = true
